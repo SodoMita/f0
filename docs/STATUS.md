@@ -48,7 +48,11 @@ move it to **Done** with a commit reference. One agent per area.
 - [ ] **Audio**: embed into GLB (KHR_audio / MSFT_audio_emitter), 8 MiB cap,
       play on gesture.
 - [ ] **Brush editor** (spec 05 Part B): grid/cube, strokes, selection,
-      transforms, erase, undo.
+      transforms, erase, undo. See `docs/RESEARCH-EDITORS.md` — use Babylon
+      `GizmoManager`+`BoundingBoxGizmo` (don't hand-roll gizmos), Amanatides–Woo
+      DDA for brush/eraser hit tests, packed Float32Array + `thinInstanceSetBuffer`
+      + swap-last delete, command+inverse undo stack. Also: fix fit-to-bounds to
+      per-axis box extents (see research §1.1).
 - [ ] **Low-poly text** + **animation editor** (spec 05b): pixel-font geometry,
       timeline, camera fly-through export.
 - [ ] **Tests**: Vitest unit suite (URL normalize, tags, NIP-10, VFS, GLB

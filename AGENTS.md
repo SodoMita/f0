@@ -36,6 +36,7 @@ bun run build:standalone  # ONE self-contained form-zero-standalone.html
 | `docs/ARCHITECTURE.md` | Module map, data flow, scene layout, texture-flip matrix |
 | `docs/STATUS.md` | Task board — what's done, in progress, next. **Claim a task there before working.** |
 | `docs/CONVENTIONS.md` | Code style, engine traps, verification rules |
+| `docs/RESEARCH-EDITORS.md` | How simple 3D viewers/editors are done (gizmos, picking, brushes, instancing, undo) — read before Studio/editor work |
 
 ## Non-negotiable rules (each one previously cost real debugging)
 
