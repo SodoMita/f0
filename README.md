@@ -37,14 +37,14 @@ Settings: **background color** (viewer/thread/studio) + **scroll inertia**.
   removed; (c) environment-texture IBL blackened PBR → removed, lights-only.
 - Poster thumbnails always auto-fit (authored cameras belong in the viewer).
 
-## Run
+## Run (Bun)
 ```bash
-npm install
-npm run dev              # http://localhost:5173
-npm run build            # normal build → release/
-npm run build:standalone # ONE .html → form-zero-standalone.html
-node scripts/smoke.mjs   # headless boot + layout/poster/live/click/scroll
-node scripts/features.mjs# badges + thread view + settings assertions
+bun install
+bun run dev              # http://localhost:5173
+bun run build            # typecheck + normal build → release/
+bun run build:standalone # ONE .html → form-zero-standalone.html
+bun scripts/smoke.mjs    # headless boot + layout/poster/live/click/scroll
+bun scripts/features.mjs # badges + thread view + settings assertions
 ```
 
 ## Structure

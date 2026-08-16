@@ -19,13 +19,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: oven-sh/setup-bun@v2
         with:
-          node-version: 20
-          cache: npm
-      - run: npm ci
+          bun-version: latest
+      - run: bun install --frozen-lockfile
       # Single self-contained HTML (fetches only user content at runtime).
-      - run: npm run build:standalone
+      - run: bun run build:standalone
       - name: Prepare Pages artifact
         run: |
           mkdir -p site
