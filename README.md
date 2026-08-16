@@ -22,6 +22,34 @@ Settings, navigation, toolbars, metadata, toasts are plain HTML overlays.
 Only the models, the board, the reply badges and the thread map are Babylon.
 Settings: **background color** (viewer/thread/studio) + **scroll inertia**.
 
+## Key fixes this round (2026-08-17, see git history)
+
+### "Flipped posts" bugs (root-caused empirically, see `test/orient2.ts`)
+Card textures are sampled by a custom unlit shader whose Y-flip was hardcoded.
+Empirically (per-texture readback + raw-WebGL control):
+- **Posters (RawTexture)** are stored top-down -> need Y flip: `flip(0,1)`.
+- **Live previews (RTT)** and **badges (DynamicTexture)** are stored bottom-up
+  -> must NOT be Y-flipped. The old shader flipped them, so animated card
+  previews and reply badges ("↩ N") rendered **upside down**.
+- No X flip anywhere; the horizontal axis was already correct.
+The card shader now takes a per-path `flip` vec2 (`setCardFlip(mat, x, y)`).
+- Feed order: roots are now sorted newest-first (was relay arrival order).
+
+### Transparent 3D previews
+Poster and live-preview render targets now clear with alpha 0 and the card
+shader passes texture alpha through (alpha-blended). Cards composite over the
+board backdrop instead of sitting in opaque #0B0B0C rectangles that would
+mismatch any page background.
+
+### Visual pass (VLM screenshot critique + programmatic pixel analysis)
+- Board: responsive 1-3 column grid (was a single narrow column with dead
+  side margins), gradient backdrop, soft card shadows, rounded corners +
+  hairline borders, reply badges are true pills (canvas alpha).
+- Viewer: gradient backdrop that follows the camera, ground glow under the
+  model (spatial reference), slightly stronger light rig.
+- Thread: bigger nodes, brighter edges, auto-fit zoom on open.
+- HUD: FORM/0 wordmark, larger glassy buttons, labeled viewer controls.
+
 ## Verified live (2026-08-16, headless Chromium)
 - 13 events / 7 roots → 7 posters + 1 live animated card; posters bright
   (capsule max≈148, numbers max≈115).

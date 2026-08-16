@@ -17,7 +17,7 @@ import type { FormEngine } from '../core/engine'
 import type { ThreadMeta } from '../protocol/thread-index'
 import type { AssetCache } from '../core/assets'
 import { PreviewPool } from './previewPool'
-import { makeCardMaterial, setCardTexture, setCardTint, setCardWhite } from './cardMaterial'
+import { makeCardMaterial, setCardTexture, setCardTint, setCardWhite, setCardFlip, setCardRounded, setCardBorder } from './cardMaterial'
 import type { ShaderMaterial } from '@babylonjs/core/Materials/shaderMaterial'
 import { theme, LIMITS } from '../theme'
 
@@ -32,6 +32,8 @@ interface CardSlot {
   mat: ShaderMaterial
   poster: Texture | null
   live: RenderTargetTexture | null
+  shadow: Mesh
+  shadowMat: ShaderMaterial
   // reply badge (Babylon — same space as the cards): "↩ N" pill that opens the thread
   badge: Mesh
   badgeMat: ShaderMaterial
@@ -43,6 +45,7 @@ interface Row {
   meta: ThreadMeta
   slot: CardSlot
   top: number
+  col: number
 }
 
 // All cards share the poster aspect (512x320 = 16:10) so nothing is stretched.
@@ -52,6 +55,11 @@ const GAP = 2.4
 const MARGIN = 2
 const BADGE_W = 3.2
 const BADGE_H = 1.1
+
+// Board background: subtle vertical gradient (keeps the scene readable
+// without the pitch-black void the first VLM critique flagged).
+const BG_TOP = '#191922'
+const BG_BOTTOM = '#0b0b0c'
 
 export class Board {
   readonly scene: Scene
@@ -63,9 +71,13 @@ export class Board {
   private previewPool: PreviewPool
   private assets: AssetCache | null = null
   private halfH = 20
+  private aspect = 1.6
+  private cols = 1
   private pxPerUnit = 20
   private scrollY = 0
   private maxScroll = 0
+  private backdrop: Mesh
+  private shadowTex: DynamicTexture
   // tap vs drag + inertia
   private dragging = false
   private downPointerY = 0
@@ -79,7 +91,7 @@ export class Board {
     const isMobile = /Mobi|Android/i.test(ua)
 
     this.scene = new Scene(engine.engine)
-    this.scene.clearColor = Color3.FromHexString(theme.background).toColor4(1)
+    this.scene.clearColor = Color3.FromHexString(BG_BOTTOM).toColor4(1)
     this.scene.skipPointerMovePicking = true
 
     // Ortho camera on +Z; card planes lie in the XY plane (front-on).
@@ -89,6 +101,54 @@ export class Board {
     this.camera.detachControl()
     this.scene.activeCamera = this.camera
     new HemisphericLight('l', new Vector3(0, 1, 0), this.scene)
+
+    // Gradient backdrop behind the cards.
+    this.backdrop = MeshBuilder.CreatePlane('board-bg', { width: 4, height: 4 }, this.scene)
+    this.backdrop.isPickable = false
+    this.backdrop.position.z = -1
+    const bgMat = makeCardMaterial(this.scene)
+    bgMat.backFaceCulling = false
+    this.backdrop.material = bgMat
+    const bgTex = new DynamicTexture('board-bg-tex', { width: 1, height: 64 }, this.scene, false)
+    {
+      const ctx = bgTex.getContext() as CanvasRenderingContext2D
+      const g = ctx.createLinearGradient(0, 0, 0, 64)
+      g.addColorStop(0, BG_TOP)
+      g.addColorStop(1, BG_BOTTOM)
+      ctx.fillStyle = g
+      ctx.fillRect(0, 0, 1, 64)
+      bgTex.update()
+    }
+    setCardTexture(bgMat, bgTex)
+    setCardWhite(bgMat)
+    setCardFlip(bgMat, false, false)
+
+    // Shared soft shadow blob (alpha gradient) for cards.
+    this.shadowTex = new DynamicTexture('card-shadow', { width: 256, height: 160 }, this.scene, false)
+    {
+      const ctx = this.shadowTex.getContext() as CanvasRenderingContext2D
+      ctx.clearRect(0, 0, 256, 160)
+      ctx.fillStyle = 'rgba(0,0,0,0.55)'
+      ctx.beginPath()
+      const r = 22
+      ctx.moveTo(18 + r, 18)
+      ctx.lineTo(238 - r, 18)
+      ctx.arcTo(238, 18, 238, 18 + r, r)
+      ctx.lineTo(238, 142 - r)
+      ctx.arcTo(238, 142, 238 - r, 142, r)
+      ctx.lineTo(18 + r, 142)
+      ctx.arcTo(18, 142, 18, 142 - r, r)
+      ctx.lineTo(18, 18 + r)
+      ctx.arcTo(18, 18, 18 + r, 18, r)
+      ctx.closePath()
+      ctx.shadowColor = 'rgba(0,0,0,0.85)'
+      ctx.shadowBlur = 34
+      ctx.shadowOffsetY = 6
+      ctx.fill()
+      ctx.shadowBlur = 0
+      ctx.fill()
+      this.shadowTex.update()
+    }
 
     this.cb = cb
     this.previewPool = new PreviewPool(
@@ -102,6 +162,7 @@ export class Board {
       slot.live = rtt
       setCardTexture(slot.mat, rtt)
       setCardWhite(slot.mat)
+      setCardFlip(slot.mat, false, false) // RTT storage is bottom-up: no Y flip
     }
     this.scene.onBeforeRenderObservable.add(() => this.tick())
 
@@ -120,6 +181,7 @@ export class Board {
       meta,
       slot: this.cards[i],
       top: 0,
+      col: 0,
     }))
     this.layout()
   }
@@ -152,11 +214,15 @@ export class Board {
     const cssW = eng.getRenderWidth() * eng.getHardwareScalingLevel()
     const cssH = eng.getRenderHeight() * eng.getHardwareScalingLevel()
     const wy = this.worldY(row)
-    return { x: cssW / 2, y: ((this.halfH - wy) / (2 * this.halfH)) * cssH }
+    return { x: cssW / 2 + this.colX(row.col) * this.pxPerUnit, y: ((this.halfH - wy) / (2 * this.halfH)) * cssH }
   }
 
   private worldY(row: Row): number {
     return this.halfH - MARGIN - (row.top + CARD_H / 2) + this.scrollY
+  }
+
+  private colX(col: number): number {
+    return (col - (this.cols - 1) / 2) * (CARD_W + GAP)
   }
 
   private buildPool(): void {
@@ -166,6 +232,18 @@ export class Board {
       mesh.isPickable = false
       const mat = makeCardMaterial(this.scene)
       mesh.material = mat
+      setCardRounded(mat, 0.022)
+      setCardBorder(mat, 0.014)
+
+      const shadow = MeshBuilder.CreatePlane(`shadow-${i}`, { width: 4, height: 4 }, this.scene)
+      shadow.setEnabled(false)
+      shadow.isPickable = false
+      shadow.position.z = -0.06
+      const shadowMat = makeCardMaterial(this.scene)
+      shadow.material = shadowMat
+      setCardTexture(shadowMat, this.shadowTex)
+      setCardWhite(shadowMat)
+      setCardFlip(shadowMat, false, false)
 
       const badge = MeshBuilder.CreatePlane(`badge-${i}`, { width: 4, height: 4 }, this.scene)
       badge.setEnabled(false)
@@ -174,11 +252,12 @@ export class Board {
       const badgeMat = makeCardMaterial(this.scene)
       badge.material = badgeMat
       const badgeTex = new DynamicTexture(`badge-tex-${i}`, { width: 128, height: 44 }, this.scene, false)
-      badgeTex.hasAlpha = false
+      badgeTex.hasAlpha = true // pill shape comes from canvas alpha
       setCardTexture(badgeMat, badgeTex)
       setCardWhite(badgeMat)
+      setCardFlip(badgeMat, false, false) // DynamicTexture upload flips Y already
 
-      const slot: CardSlot = { mesh, mat, poster: null, live: null, badge, badgeMat, badgeTex, replyCount: 0 }
+      const slot: CardSlot = { mesh, mat, poster: null, live: null, shadow, shadowMat, badge, badgeMat, badgeTex, replyCount: 0 }
       this.cards.push(slot)
       mesh.metadata = { card: slot }
       badge.metadata = { card: slot, badge: true }
@@ -223,11 +302,18 @@ export class Board {
   }
 
   private layout(): void {
+    // Responsive columns: 1 on phones, up to 3 on wide screens. This fills
+    // the horizontal dead space the single-column layout left unused.
+    const viewW = 2 * this.halfH * this.aspect
+    this.cols = Math.max(1, Math.min(3, Math.floor((viewW - MARGIN * 2) / (CARD_W + GAP))))
     let top = 0
-    for (const row of this.rows) {
+    for (let i = 0; i < this.rows.length; i++) {
+      const row = this.rows[i]
       row.top = top
-      top += CARD_H + GAP
+      row.col = i % this.cols
+      if (i % this.cols === this.cols - 1) top += CARD_H + GAP
     }
+    if (this.rows.length % this.cols !== 0) top += CARD_H + GAP
     const contentBottom = top - GAP
     const viewportH = 2 * this.halfH - 2 * MARGIN
     this.maxScroll = Math.max(0, contentBottom - viewportH + GAP)
@@ -240,6 +326,7 @@ export class Board {
         this.release(slot)
         slot.meta = undefined
         slot.mesh.setEnabled(false)
+        slot.shadow.setEnabled(false)
         slot.badge.setEnabled(false)
         slot.mesh.isPickable = false
         continue
@@ -253,30 +340,42 @@ export class Board {
         slot.replyCount = 0
         setCardTexture(slot.mat, null)
         setCardTint(slot.mat, row.meta.tint || theme.panel)
+        setCardFlip(slot.mat, false, true) // posters are RawTextures: Y flip
         this.drawBadge(slot)
       }
       slot.mesh.setEnabled(true)
       slot.mesh.isPickable = true
       slot.mesh.scaling.set(CARD_W / 4, CARD_H / 4, 1)
-      slot.mesh.position.set(0, this.worldY(row), 0)
+      slot.mesh.position.set(this.colX(row.col), this.worldY(row), 0)
       this.positionBadge(slot)
+      this.positionShadow(slot)
       if (changed) this.drive(slot)
     }
   }
 
   private positionBadge(slot: CardSlot): void {
-    if (!slot.badge.isEnabled()) return
     slot.badge.scaling.set(BADGE_W / 4, BADGE_H / 4, 1)
-    slot.badge.position.x = CARD_W / 2 - BADGE_W / 2 - 0.4
+    slot.badge.position.x = slot.mesh.position.x + CARD_W / 2 - BADGE_W / 2 - 0.4
     slot.badge.position.y = slot.mesh.position.y - CARD_H / 2 + BADGE_H / 2 + 0.4
     slot.badge.position.z = 0.05
+    slot.badge.setEnabled(slot.replyCount > 0 && slot.mesh.isEnabled())
+  }
+
+  private positionShadow(slot: CardSlot): void {
+    slot.shadow.setEnabled(slot.mesh.isEnabled())
+    slot.shadow.scaling.set((CARD_W + 1.6) / 4, (CARD_H + 1.6) / 4, 1)
+    slot.shadow.position.x = slot.mesh.position.x
+    slot.shadow.position.y = slot.mesh.position.y - 0.25
+    slot.shadow.position.z = -0.06
   }
 
   private applyScroll(): void {
     for (let i = 0; i < this.rows.length; i++) {
       const slot = this.rows[i].slot
+      slot.mesh.position.x = this.colX(this.rows[i].col)
       slot.mesh.position.y = this.worldY(this.rows[i])
       this.positionBadge(slot)
+      this.positionShadow(slot)
     }
   }
 
@@ -367,6 +466,7 @@ export class Board {
       slot.poster = tex
       setCardTexture(slot.mat, tex)
       setCardWhite(slot.mat)
+      setCardFlip(slot.mat, false, true)
       const animated = assets.isAnimated(meta)
       if (animated ?? (meta.animHint || meta.cameraCount > 0)) this.previewPool.request(meta.eventId)
     })
@@ -376,8 +476,8 @@ export class Board {
     if (slot.meta) this.previewPool.release(slot.meta.eventId)
     if (slot.live) {
       slot.live = null
-      if (slot.poster) { setCardTexture(slot.mat, slot.poster); setCardWhite(slot.mat) }
-      else { setCardTexture(slot.mat, null); setCardTint(slot.mat, slot.meta?.tint || theme.panel) }
+      if (slot.poster) { setCardTexture(slot.mat, slot.poster); setCardWhite(slot.mat); setCardFlip(slot.mat, false, true) }
+      else { setCardTexture(slot.mat, null); setCardTint(slot.mat, slot.meta?.tint || theme.panel); setCardFlip(slot.mat, false, true) }
     }
   }
 
@@ -385,14 +485,16 @@ export class Board {
     const eng = this.scene.getEngine()
     const w = eng.getRenderWidth()
     const h = eng.getRenderHeight()
-    const aspect = w / Math.max(1, h)
+    this.aspect = w / Math.max(1, h)
     this.halfH = 20
     const cssH = h * eng.getHardwareScalingLevel()
     this.pxPerUnit = cssH / (2 * this.halfH)
     this.camera.orthoTop = this.halfH
     this.camera.orthoBottom = -this.halfH
-    this.camera.orthoLeft = -this.halfH * aspect
-    this.camera.orthoRight = this.halfH * aspect
+    this.camera.orthoLeft = -this.halfH * this.aspect
+    this.camera.orthoRight = this.halfH * this.aspect
+    this.backdrop.scaling.set((this.halfH * this.aspect * 2 + 1) / 4, (this.halfH * 2 + 1) / 4, 1)
+    this.backdrop.position.set(0, 0, -1)
     this.layout()
   }
 

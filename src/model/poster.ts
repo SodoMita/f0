@@ -66,7 +66,8 @@ export class PosterRenderer {
     const rtt = new RenderTargetTexture('poster-rtt', { width: POSTER_W, height: POSTER_H }, this.scene)
     rtt.renderTargetOptions.generateDepthBuffer = true
     rtt.renderTargetOptions.generateMipMaps = false
-    rtt.clearColor = Color4.FromHexString('#0B0B0CFF')
+    // Transparent background: posters composite over any page/board backdrop.
+    rtt.clearColor = new Color4(0.043, 0.043, 0.047, 0)
     try {
       // Enforce GLB limits before Babylon parses (07 §4).
       const bytes = new Uint8Array(await blob.arrayBuffer())
@@ -143,7 +144,7 @@ function encodePng(view: ArrayBufferView, w: number, h: number): Promise<Blob> {
       img.data[dst + x * 4] = bytes[src + x * 4]
       img.data[dst + x * 4 + 1] = bytes[src + x * 4 + 1]
       img.data[dst + x * 4 + 2] = bytes[src + x * 4 + 2]
-      img.data[dst + x * 4 + 3] = 255
+      img.data[dst + x * 4 + 3] = bytes[src + x * 4 + 3] // keep transparency
     }
   }
   ctx.putImageData(img, 0, 0)

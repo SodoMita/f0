@@ -5,6 +5,9 @@ import type { Camera } from '@babylonjs/core/Cameras/camera'
 import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight'
 import { DirectionalLight } from '@babylonjs/core/Lights/directionalLight'
 import { LoadAssetContainerAsync } from '@babylonjs/core/Loading/sceneLoader'
+import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder'
+import type { Mesh } from '@babylonjs/core/Meshes/mesh'
+import { DynamicTexture } from '@babylonjs/core/Materials/Textures/dynamicTexture'
 import { Vector3 } from '@babylonjs/core/Maths/math.vector'
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color'
 import type { AssetContainer } from '@babylonjs/core/assetContainer'
@@ -15,6 +18,7 @@ import type { ThreadMeta } from '../protocol/thread-index'
 import { toFile } from '../model/poster'
 import { validateGLB } from '../model/limits'
 import { worldBounds, fitDistance } from '../model/facing'
+import { makeCardMaterial, setCardTexture, setCardWhite, setCardFlip } from '../board/cardMaterial'
 import { theme } from '../theme'
 
 /**
@@ -30,10 +34,12 @@ export class Viewer {
   private imported: Camera[] = []
   private camIdx = -1 // -1 = orbit/auto
   private counts = { meshes: 0, vertices: 0 }
+  private backdrop: Mesh
+  private glow: Mesh
 
   constructor(engine: FormEngine) {
     this.scene = new Scene(engine.engine)
-    this.scene.clearColor = Color4.FromHexString(theme.background + 'FF')
+    this.scene.clearColor = Color4.FromHexString('#0b0b0cFF')
     this.orbit = new ArcRotateCamera('viewer-orbit', -Math.PI / 2, Math.PI / 2.2, 6, Vector3.Zero(), this.scene)
     this.orbit.wheelPrecision = 50
     this.orbit.lowerRadiusLimit = 0.1
@@ -43,12 +49,71 @@ export class Viewer {
     // Neutral light rig (lights only — the environment-texture IBL path
     // blackened PBR models on this GL driver, so it is deliberately absent).
     const hemi = new HemisphericLight('vl', new Vector3(0, 1, 0), this.scene)
-    hemi.intensity = 0.8
-    hemi.groundColor = new Color3(0.2, 0.2, 0.23)
+    hemi.intensity = 0.95
+    hemi.groundColor = new Color3(0.24, 0.24, 0.27)
     const key = new DirectionalLight('vk', new Vector3(-0.4, -0.6, 0.8), this.scene)
-    key.intensity = 1.1
+    key.intensity = 1.25
     const fill = new DirectionalLight('vf', new Vector3(0.5, 0.2, -0.6), this.scene)
-    fill.intensity = 0.4
+    fill.intensity = 0.45
+
+    // Gradient backdrop following the camera (softens the black void and
+    // gives the model a lit environment to read against).
+    this.backdrop = MeshBuilder.CreatePlane('viewer-backdrop', { width: 4, height: 4 }, this.scene)
+    this.backdrop.isPickable = false
+    this.backdrop.parent = this.orbit
+    this.backdrop.position.z = -120
+    const bm = makeCardMaterial(this.scene)
+    bm.backFaceCulling = false
+    this.backdrop.material = bm
+    const bt = new DynamicTexture('viewer-bg-tex', { width: 1, height: 64 }, this.scene, false)
+    {
+      const ctx = bt.getContext() as CanvasRenderingContext2D
+      const g = ctx.createLinearGradient(0, 0, 0, 64)
+      g.addColorStop(0, '#191921')
+      g.addColorStop(0.55, '#0e0e12')
+      g.addColorStop(1, '#08080a')
+      ctx.fillStyle = g
+      ctx.fillRect(0, 0, 1, 64)
+      bt.update()
+    }
+    setCardTexture(bm, bt)
+    setCardWhite(bm)
+    setCardFlip(bm, false, false)
+    this.backdrop.scaling.set(400, 400, 1)
+
+    // Soft ground glow under the model — a spatial reference point.
+    this.glow = MeshBuilder.CreatePlane('viewer-glow', { width: 4, height: 4 }, this.scene)
+    this.glow.isPickable = false
+    this.glow.rotation.x = -Math.PI / 2
+    this.glow.setEnabled(false)
+    const gm = makeCardMaterial(this.scene)
+    gm.backFaceCulling = false
+    gm.needAlphaBlending()
+    this.glow.material = gm
+    const gt = new DynamicTexture('viewer-glow-tex', { width: 128, height: 128 }, this.scene, false)
+    {
+      const ctx = gt.getContext() as CanvasRenderingContext2D
+      ctx.clearRect(0, 0, 128, 128)
+      const rg = ctx.createRadialGradient(64, 64, 2, 64, 64, 62)
+      rg.addColorStop(0, 'rgba(255,255,255,0.38)')
+      rg.addColorStop(0.55, 'rgba(255,255,255,0.14)')
+      rg.addColorStop(1, 'rgba(255,255,255,0)')
+      ctx.fillStyle = rg
+      ctx.fillRect(0, 0, 128, 128)
+      gt.update()
+    }
+    setCardTexture(gm, gt)
+    setCardWhite(gm)
+    setCardFlip(gm, false, false)
+    this.scene.onBeforeRenderObservable.add(() => {
+      // keep the backdrop glued to whichever camera is active
+      const cam = this.scene.activeCamera
+      if (cam && this.backdrop.parent !== cam) {
+        this.backdrop.parent = cam
+        this.backdrop.position.set(0, 0, -120)
+      }
+      if (cam) this.backdrop.lookAt(cam.position)
+    })
   }
 
   setBackground(hex: string): void {
@@ -130,6 +195,10 @@ export class Viewer {
     this.orbit.upperRadiusLimit = radius * 12
     this.orbit.minZ = Math.max(0.001, radius * 0.01)
     this.orbit.maxZ = dist * 8 + radius
+    // ground glow under the model
+    this.glow.setEnabled(true)
+    this.glow.position.set(center.x, center.y - radius * 0.98, center.z)
+    this.glow.scaling.set(radius * 2.3, radius * 2.3, 1)
   }
 
   isPlaying(): boolean { return !!this.active?.isPlaying }
@@ -146,6 +215,7 @@ export class Viewer {
   }
 
   clear(): void {
+    this.glow?.setEnabled(false)
     this.active?.stop()
     this.active = null
     this.anims = []

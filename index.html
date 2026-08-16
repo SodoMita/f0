@@ -13,6 +13,7 @@
          Only the 3D models and the board stay on canvas. -->
     <div id="topbar" class="hud">
       <button id="btn-home" class="hbtn" title="FORM/0 — board">◼</button>
+      <span id="brand" class="brand">FORM<span class="brand-zero">/0</span></span>
       <div class="spacer"></div>
       <span id="net-dot" class="net-dot" title="relays"></span>
       <button id="btn-shuffle" class="hbtn" title="shuffle">⤨</button>
@@ -43,15 +44,15 @@
     </div>
 
     <div id="viewer-bar" class="hud" hidden>
-      <button id="btn-close" class="hbtn" title="close (Esc)">✕</button>
-      <button id="btn-prev" class="hbtn" title="previous (←)">‹</button>
-      <button id="btn-next" class="hbtn" title="next (→)">›</button>
-      <button id="btn-play" class="hbtn" title="play/pause (A)">▶</button>
+      <span class="vbtn"><button id="btn-close" class="hbtn" title="close (Esc)">✕</button><span class="vlabel">close</span></span>
+      <span class="vbtn"><button id="btn-prev" class="hbtn" title="previous (←)">‹</button><span class="vlabel">prev</span></span>
+      <span class="vbtn"><button id="btn-next" class="hbtn" title="next (→)">›</button><span class="vlabel">next</span></span>
+      <span class="vbtn"><button id="btn-play" class="hbtn" title="play/pause (A)">▶</button><span class="vlabel">play</span></span>
       <span id="cam-dots"></span>
       <div class="spacer"></div>
-      <button id="btn-thread" class="hbtn" title="thread (T)">⏃</button>
-      <button id="btn-download" class="hbtn" title="download GLB">⤓</button>
-      <button id="btn-meta" class="hbtn" title="metadata (M)">≡</button>
+      <span class="vbtn"><button id="btn-thread" class="hbtn" title="thread (T)">⏃</button><span class="vlabel">thread</span></span>
+      <span class="vbtn"><button id="btn-download" class="hbtn" title="download GLB">⤓</button><span class="vlabel">save</span></span>
+      <span class="vbtn"><button id="btn-meta" class="hbtn" title="metadata (M)">≡</button><span class="vlabel">info</span></span>
     </div>
 
     <div id="meta-drawer" class="hud" hidden>

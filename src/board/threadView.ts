@@ -10,7 +10,7 @@ import type { Mesh } from '@babylonjs/core/Meshes/mesh'
 import type { FormEngine } from '../core/engine'
 import type { AssetCache } from '../core/assets'
 import type { ThreadIndex, ThreadMeta } from '../protocol/thread-index'
-import { makeCardMaterial, setCardTexture, setCardTint, setCardWhite } from './cardMaterial'
+import { makeCardMaterial, setCardTexture, setCardTint, setCardWhite, setCardFlip } from './cardMaterial'
 import type { ShaderMaterial } from '@babylonjs/core/Materials/shaderMaterial'
 import { theme } from '../theme'
 
@@ -25,9 +25,9 @@ interface TNode {
 
 interface TEdge { parent: string; child: string }
 
-const ROOT_SIZE = 5
-const NODE_W = 3.4
-const NODE_H = 2.125 // 16:10
+const ROOT_SIZE = 6.5
+const NODE_W = 4.4
+const NODE_H = 2.75 // 16:10
 
 /**
  * Thread view: a 2D map of the reply tree. Nodes are card planes (poster or
@@ -85,6 +85,7 @@ export class ThreadView {
       const mesh = MeshBuilder.CreatePlane(`tnode-${meta.eventId.slice(0, 8)}`, { width: 4, height: 4 }, this.scene)
       const mat = makeCardMaterial(this.scene)
       mesh.material = mat
+      setCardFlip(mat, false, true)
       const root = meta.eventId === rootId
       const size = root ? ROOT_SIZE : NODE_W
       mesh.scaling.set(size / 4, (root ? ROOT_SIZE : NODE_H) / 4, 1)
@@ -110,14 +111,27 @@ export class ThreadView {
 
     // Force-relaxed layout, then apply.
     const pos = this.relax(metas, rootId)
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
     for (const meta of metas) {
       const p = pos.get(meta.eventId)!
       const node = this.nodes.get(meta.eventId)!
       node.x = p.x
       node.y = p.y
       node.mesh.position.set(p.x, p.y, 0)
+      minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x)
+      minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y)
     }
     this.buildLines()
+    // Fit the whole map in view (with margin) instead of a fixed zoom.
+    const spanX = Math.max(8, maxX - minX + NODE_W)
+    const spanY = Math.max(8, maxY - minY + NODE_H)
+    const aspect = this.scene.getEngine().getRenderWidth() / Math.max(1, this.scene.getEngine().getRenderHeight())
+    const zx = spanX / (2 * 20 * aspect)
+    const zy = spanY / (2 * 20)
+    this.zoom = Math.max(0.4, Math.min(4, Math.max(zx, zy) * 1.25))
+    this.panX = 0
+    this.panY = 0
+    this.applyZoom()
   }
 
   /** Fruchterman-Reingold force relaxation over the tree. */
@@ -235,7 +249,7 @@ export class ThreadView {
           new Vector3(b.x, b.y, -0.01),
         ],
       }, this.scene)
-      line.color = Color3.FromHexString('#3a3a44')
+      line.color = Color3.FromHexString('#6b6b7c')
       this.lineMeshes.push(line)
     }
   }

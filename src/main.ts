@@ -79,7 +79,9 @@ async function boot(): Promise<void> {
   let currentMeta: ThreadMeta | null = null
 
   const orderedRoots = (): ThreadMeta[] =>
-    [...index.byId.values()].filter((m) => m.role === 'root' && !m.tombstoned)
+    [...index.byId.values()]
+      .filter((m) => m.role === 'root' && !m.tombstoned)
+      .sort((a, b) => b.createdAt - a.createdAt) // newest post on top
 
   $('btn-home').addEventListener('click', () => router.go({ name: 'board' }))
   $('btn-add').addEventListener('click', () => router.go({ name: 'studio' }))

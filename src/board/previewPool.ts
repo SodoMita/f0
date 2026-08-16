@@ -120,7 +120,10 @@ export class PreviewPool {
     rtt.renderTargetOptions.generateMipMaps = false
     rtt.wrapU = Texture.CLAMP_ADDRESSMODE
     rtt.wrapV = Texture.CLAMP_ADDRESSMODE
-    rtt.clearColor = Color4.FromHexString('#0B0B0CFF')
+    // Transparent background: the card shows the board backdrop through the
+    // model, so previews never sit in an opaque rectangle that mismatches the
+    // page background. RGB keeps the poster blank-check comparable.
+    rtt.clearColor = new Color4(0.043, 0.043, 0.047, 0)
     const camera = new FreeCamera(`slot-cam-${index}`, Vector3.Zero(), this.stage)
     const slot: Slot = { index, rtt, camera, container: null, anims: [], postId: null, phase: index }
     this.slots.push(slot)
