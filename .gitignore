@@ -1,0 +1,12 @@
+# dependencies
+node_modules/
+
+# build artifacts (spec: never commit dist/)
+release/
+form-zero-standalone.html
+*.tsbuildinfo
+
+# local captures / scratch
+shots/
+*.log
+.DS_Store

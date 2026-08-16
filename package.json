@@ -1,0 +1,25 @@
+{
+  "name": "form-zero",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "build:standalone": "vite build --config vite.standalone.config.ts && python3 make-standalone.py"
+  },
+  "dependencies": {
+    "@babylonjs/core": "8.10.1",
+    "@babylonjs/gui": "8.10.1",
+    "@babylonjs/loaders": "8.10.1",
+    "@babylonjs/serializers": "8.10.1",
+    "nostr-tools": "2.24.1"
+  },
+  "devDependencies": {
+    "playwright": "^1.62.1",
+    "typescript": "7.0.2",
+    "vite": "8.2.1",
+    "ws": "^8.18.0"
+  }
+}

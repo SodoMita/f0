@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#0B0B0C" />
+    <title>FORM/0</title>
+  </head>
+  <body>
+    <canvas id="engine"></canvas>
+
+    <!-- HUD: settings / navigation / toolbars / metadata are plain HTML.
+         Only the 3D models and the board stay on canvas. -->
+    <div id="topbar" class="hud">
+      <button id="btn-home" class="hbtn" title="FORM/0 — board">◼</button>
+      <div class="spacer"></div>
+      <span id="net-dot" class="net-dot" title="relays"></span>
+      <button id="btn-shuffle" class="hbtn" title="shuffle">⤨</button>
+      <button id="btn-add" class="hbtn primary" title="create">+</button>
+      <button id="btn-settings" class="hbtn" title="settings">⚙</button>
+    </div>
+
+    <div id="settings-panel" class="hud" hidden>
+      <div class="drawer-head">
+        <span>SETTINGS</span>
+        <button id="btn-settings-close" class="hbtn small" title="close">✕</button>
+      </div>
+      <div class="setting-row">
+        <span class="setting-label">background</span>
+        <div class="swatches" id="bg-swatches">
+          <button class="swatch" data-bg="#0B0B0C" title="dark"></button>
+          <button class="swatch" data-bg="#1d1d22" title="graphite"></button>
+          <button class="swatch" data-bg="#3a3a42" title="grey"></button>
+          <button class="swatch" data-bg="#101820" title="navy"></button>
+          <button class="swatch" data-bg="#ffffff" title="light"></button>
+        </div>
+        <input type="color" id="bg-custom" value="#0B0B0C" title="custom" />
+      </div>
+      <div class="setting-row">
+        <span class="setting-label">scroll inertia</span>
+        <input type="range" id="inertia" min="0" max="100" value="70" />
+      </div>
+    </div>
+
+    <div id="viewer-bar" class="hud" hidden>
+      <button id="btn-close" class="hbtn" title="close (Esc)">✕</button>
+      <button id="btn-prev" class="hbtn" title="previous (←)">‹</button>
+      <button id="btn-next" class="hbtn" title="next (→)">›</button>
+      <button id="btn-play" class="hbtn" title="play/pause (A)">▶</button>
+      <span id="cam-dots"></span>
+      <div class="spacer"></div>
+      <button id="btn-thread" class="hbtn" title="thread (T)">⏃</button>
+      <button id="btn-download" class="hbtn" title="download GLB">⤓</button>
+      <button id="btn-meta" class="hbtn" title="metadata (M)">≡</button>
+    </div>
+
+    <div id="meta-drawer" class="hud" hidden>
+      <div class="drawer-head">
+        <span>MODEL</span>
+        <button id="btn-meta-close" class="hbtn" title="close">✕</button>
+      </div>
+      <pre id="meta-text"></pre>
+    </div>
+
+    <div id="toast" class="hud" hidden></div>
+
+    <input id="file-input" type="file" multiple hidden accept=".glb,.gltf,.bin,.obj,.mtl,.png,.jpg,.jpeg,.webp" />
+    <div id="a11y-bridge" hidden></div>
+
+    <div id="fatal" hidden>
+      <div class="fatal-card">
+        <div class="fatal-mark">!</div>
+        <div class="fatal-text" id="fatal-text">WebGL unavailable.</div>
+        <button id="fatal-reload">Reload</button>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

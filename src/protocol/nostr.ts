@@ -1,0 +1,108 @@
+import { Relay, finalizeEvent, generateSecretKey, type Event, type EventTemplate } from 'nostr-tools'
+import { verifyFresh } from './events'
+import { DEFAULTS, DELETE_KIND, FORM_ZERO_TAG, MODEL_KIND } from '../theme'
+
+export type RelayState = 'connecting' | 'online' | 'offline'
+
+export class RelayPool {
+  private relays = new Map<string, Relay>()
+  private subs: Array<{ close: () => void }> = []
+  private urls: string[] = [...DEFAULTS.relays]
+  private closed = false
+  private attempts = new Map<string, number>()
+  state = new Map<string, RelayState>()
+  onEvent: ((event: Event) => void) | null = null
+  onState: ((url: string, state: RelayState) => void) | null = null
+
+  setRelays(urls: string[]): void {
+    const normalized = Array.from(new Set(urls.map(normalizeRelay).filter((x): x is string => !!x)))
+    this.urls = normalized.length ? normalized : [...DEFAULTS.relays]
+  }
+  get relayUrls(): string[] { return [...this.urls] }
+
+  connect(): void {
+    for (const url of this.urls) { this.setState(url, 'connecting'); void this.open(url) }
+  }
+
+  private setState(url: string, state: RelayState): void {
+    if (this.state.get(url) === state) return
+    this.state.set(url, state)
+    this.onState?.(url, state)
+  }
+
+  private async open(url: string): Promise<void> {
+    const relay = new Relay(url)
+    this.relays.set(url, relay)
+    relay.onclose = () => {
+      if (this.closed) return
+      this.setState(url, 'offline')
+      this.scheduleRetry(url)
+    }
+    try {
+      await relay.connect()
+      this.setState(url, 'online')
+      this.subscribe(url, relay)
+    } catch {
+      // Spec 00 §2.5: one slow relay must never gate first paint.
+      this.setState(url, 'offline')
+      this.scheduleRetry(url)
+    }
+  }
+
+  private scheduleRetry(url: string): void {
+    if (this.closed) return
+    const n = (this.attempts.get(url) ?? 0) + 1
+    this.attempts.set(url, n)
+    const base = Math.min(30000, 1000 * 2 ** Math.min(n, 5))
+    const delay = base / 2 + Math.random() * base
+    setTimeout(() => { if (!this.closed) void this.open(url) }, delay)
+  }
+
+  private subscribe(url: string, relay: Relay): void {
+    const since = Math.floor(Date.now() / 1000) - 60 * 60 * 24 * 14
+    const s = relay.subscribe(
+      [
+        { kinds: [MODEL_KIND], '#t': [FORM_ZERO_TAG], limit: 200, since },
+        { kinds: [MODEL_KIND], '#m': ['model/gltf-binary', 'model/gltf+json'], limit: 300, since },
+        { kinds: [DELETE_KIND], limit: 120, since },
+      ],
+      {
+        onevent: (event) => { if (verifyFresh(event)) this.onEvent?.(event) },
+        oneose: () => this.setState(url, 'online'),
+      },
+    )
+    this.subs.push({ close: () => s.close() })
+  }
+
+  async publish(template: EventTemplate, secret: Uint8Array): Promise<{ ok: string[]; failed: string[] }> {
+    const event = finalizeEvent(template, secret)
+    const urls = [...this.relays.keys()]
+    const results = await Promise.allSettled(urls.map((u) => this.relays.get(u)!.publish(event)))
+    const ok: string[] = [], failed: string[] = []
+    results.forEach((r, i) => (r.status === 'fulfilled' ? ok : failed).push(urls[i]))
+    return { ok, failed }
+  }
+
+  close(): void {
+    this.closed = true
+    for (const s of this.subs) s.close()
+    this.subs = []
+    for (const r of this.relays.values()) r.close()
+    this.relays.clear()
+  }
+}
+
+export function normalizeRelay(value: string): string | null {
+  try {
+    const u = new URL(value.trim())
+    if (u.protocol !== 'wss:') return null
+    u.username = ''
+    u.password = ''
+    u.hash = ''
+    u.search = ''
+    if (u.pathname === '/') u.pathname = ''
+    return u.toString().replace(/\/$/, '').toLowerCase()
+  } catch { return null }
+}
+
+export { generateSecretKey }
