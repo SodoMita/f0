@@ -79,7 +79,14 @@ AABB handles, snapping) with ~1 file instead of 5.
 
 ---
 
-## 3. Brush / voxel painting
+## 3. Brush painting in 3D (Paint 3D-style)
+
+> **Terminology:** this is a **paint editor**, not a voxel editor. The metaphor
+> (spec 05 Part B) is a *raster brush whose canvas is 3D space* — free strokes
+> of shapes (cube/sphere/cylinder/tetra/quad) that freely overlap and
+> interpenetrate, with a fine placement grid only for snapping. There is no
+> filled-cell grid, no cell identity, no "voxel" data model. (Think Microsoft
+> Paint 3D / its 3D doodle + shapes, not MagicaVoxel/Minecraft.)
 
 The paint-editor pattern (Minecraft-like placer + spec 05 Part B):
 
@@ -89,10 +96,12 @@ The paint-editor pattern (Minecraft-like placer + spec 05 Part B):
 3. **Brush strokes** = emit a stamp every *N* grid cells of travel, and
    **interpolate** between pointer events so fast drags leave no gaps (spec
    05 §2.1). This is identical to a 2D raster brush's stamp spacing.
-4. **Eraser / grid hit tests** use the **Amanatides–Woo voxel DDA** algorithm
-   (fast-voxel-raycast / Unity "cast ray in voxel space"): step a ray through
-   grid cells by tMaxX/tMaxY/tMaxZ increments — O(cells crossed), no per-cube
-   raycast. Ideal for our spatial-hash hit tests (spec 05 §8).
+4. **Eraser / grid hit tests** use the **Amanatides–Woo grid DDA** algorithm
+   (ray traversal through grid cells, a.k.a. voxel-space raycast — the
+   *technique* is grid traversal; it does not make the product a voxel editor):
+   step a ray through grid cells by tMaxX/tMaxY/tMaxZ increments — O(cells
+   crossed), no per-cube raycast. Ideal for our spatial-hash hit tests
+   (spec 05 §8).
 5. Tools like Avoyd show the standard constraint set: snap-to-grid with
    spacing + offset, which matches our "cell ≠ cube size, snap to fine grid"
    rule.
@@ -196,8 +205,8 @@ matrices, color = old/new values. Cap the stack and clear redo-on-new-edit.
 - Babylon gizmos (docs + history): https://www.html5gamedevs.com/topic/37860-sample-code-for-features-in-babyloneditor/ ; Babylon.js issue #4141 https://github.com/BabylonJS/Babylon.js/issues/4141 ; bounding-box gizmo vs three.js https://github.com/mrdoob/three.js/issues/25619
 - BabylonJS-EditControl (3rd-party gizmo): https://github.com/ssatguru/BabylonJS-EditControl
 - three.js TransformControls internals: https://github.com/mrdoob/three.js/issues/18503 ; drei PivotControls API: http://drei.docs.pmnd.rs/gizmos/pivot-controls
-- Amanatides–Woo voxel raycast: https://github.com/fenomas/fast-voxel-raycast ; Unity voxel-space raycast: https://gist.github.com/dogfuntom/cc881c8fc86ad43d55d8
-- Voxel placement (raycast + normal + snap): https://devforum.roblox.com/t/help-with-voxel-grid-based-building-system/2156325 ; Avoyd editor docs: https://www.avoyd.com/avoyd-voxel-editor-documentation.html
+- Amanatides–Woo grid DDA / voxel-space raycast: https://github.com/fenomas/fast-voxel-raycast ; Unity voxel-space raycast: https://gist.github.com/dogfuntom/cc881c8fc86ad43d55d8
+- Brush stamp placement (raycast + hit normal + snap-to-grid): https://devforum.roblox.com/t/help-with-voxel-grid-based-building-system/2156325 ; Avoyd editor docs (referenced for snap/offset constraint UX, not naming): https://www.avoyd.com/avoyd-voxel-editor-documentation.html
 - GPU picking (ID buffer, nearest filter, Blender solid/x-ray): https://riptutorial.com/three-js/example/17089/object-picking---gpu ; https://www.reddit.com/r/threejs/comments/hbmm6q/understanding_gpu_picking_and_hybrid_picking/ ; https://medium.com/@emttechh/o-1-country-selection-on-a-3d-globe-with-gpu-picking-and-hemisphere-detection-de4eab198fa3
 - Babylon GPU picking + scene.pick/multiPick: https://doc.babylonjs.com/features/featuresDeepDive/mesh/interactions/picking_collisions
 - Babylon thin instances: https://doc.babylonjs.com/features/featuresDeepDive/mesh/copies/thinInstances ; thousands of entities: https://babylonjs.medium.com/creating-thousands-of-animated-entities-in-babylon-js-ce3c439bdacf ; thin-vs-regular + swap-last delete: https://forum.babylonjs.com/t/questions-of-thin-instances-v-s-regular-instances/59420

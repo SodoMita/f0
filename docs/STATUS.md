@@ -47,11 +47,13 @@ move it to **Done** with a commit reference. One agent per area.
       secrets, preservation report, partial-success UI.
 - [ ] **Audio**: embed into GLB (KHR_audio / MSFT_audio_emitter), 8 MiB cap,
       play on gesture.
-- [ ] **Brush editor** (spec 05 Part B): grid/cube, strokes, selection,
-      transforms, erase, undo. See `docs/RESEARCH-EDITORS.md` — use Babylon
-      `GizmoManager`+`BoundingBoxGizmo` (don't hand-roll gizmos), Amanatides–Woo
-      DDA for brush/eraser hit tests, packed Float32Array + `thinInstanceSetBuffer`
-      + swap-last delete, command+inverse undo stack. Also: fix fit-to-bounds to
+- [ ] **Paint editor** (Paint 3D-style brush; NOT a voxel editor — free
+      overlapping shape strokes, fine grid only for snapping; spec 05 Part B):
+      grid/cube-size independence, strokes, selection, transforms, erase, undo.
+      See `docs/RESEARCH-EDITORS.md` — use Babylon `GizmoManager`+
+      `BoundingBoxGizmo` (don't hand-roll gizmos), Amanatides–Woo grid DDA for
+      brush/eraser hit tests, packed Float32Array + `thinInstanceSetBuffer` +
+      swap-last delete, command+inverse undo stack. Also: fix fit-to-bounds to
       per-axis box extents (see research §1.1).
 - [ ] **Low-poly text** + **animation editor** (spec 05b): pixel-font geometry,
       timeline, camera fly-through export.

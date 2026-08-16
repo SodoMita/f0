@@ -1,5 +1,13 @@
 # CONVENTIONS
 
+## Terminology
+
+- The Studio editor is a **paint editor** (Paint 3D-style), never a "voxel
+  editor". Free strokes of shapes (cube/sphere/cylinder/tetra/quad) that
+  overlap and interpenetrate; the fine grid is for *snapping only*, not a
+  filled-cell data model. Never use "voxel" to describe the product or the
+  editor module.
+
 ## Toolchain
 
 - **Bun**, not npm. Lockfile is `bun.lock`. CI uses `oven-sh/setup-bun` +
