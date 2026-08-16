@@ -92,18 +92,19 @@ Network panel / error sheets → studio publish (BUD-01) + audio embed →
 brush editor (05-B) + low-poly text + animation editor (05b) →
 Vitest + Playwright suite with screenshots.
 
+## Docs for agents
+
+Multiple agents work on this repo. Start with **`AGENTS.md`** (root), then:
+- `docs/SPEC.md` — build spec + live measured facts + AMENDMENTS (authoritative)
+- `docs/ARCHITECTURE.md` — module map, data flow, texture-flip matrix
+- `docs/STATUS.md` — task board (claim a task before working)
+- `docs/CONVENTIONS.md` — toolchain, code, verification, git rules
+
 ## Deploy to GitHub Pages
 
-Two supported ways (either gives a working site):
-
-1. **GitHub Actions (auto-rebuild on push)** — recommended.
-   Settings → Pages → Source → **"GitHub Actions"**. The workflow
-   `.github/workflows/deploy-pages.yml` builds `form-zero-standalone.html` and
-   deploys it as the site on every push to `main`.
-
-2. **Deploy from branch `/docs`** — zero-config.
-   Settings → Pages → Source → "Deploy from a branch" → branch `main`,
-   folder `/docs`. `docs/index.html` is the prebuilt single-file build.
+Automatic: `.github/workflows/deploy-pages.yml` builds the standalone with Bun
+and publishes it to GitHub Pages on every push to `main`
+(Settings → Pages → Source → **"GitHub Actions"**). No manual steps.
 
 The site is ONE self-contained HTML file; at runtime it fetches only user
 content (Nostr relays over `wss://`, Blossom blobs over `https://`).
