@@ -63,3 +63,19 @@ src/
 Network panel / error sheets → studio publish (BUD-01) + audio embed →
 brush editor (05-B) + low-poly text + animation editor (05b) →
 Vitest + Playwright suite with screenshots.
+
+## Deploy to GitHub Pages
+
+Two supported ways (either gives a working site):
+
+1. **GitHub Actions (auto-rebuild on push)** — recommended.
+   Settings → Pages → Source → **"GitHub Actions"**. The workflow
+   `.github/workflows/deploy-pages.yml` builds `form-zero-standalone.html` and
+   deploys it as the site on every push to `main`.
+
+2. **Deploy from branch `/docs`** — zero-config.
+   Settings → Pages → Source → "Deploy from a branch" → branch `main`,
+   folder `/docs`. `docs/index.html` is the prebuilt single-file build.
+
+The site is ONE self-contained HTML file; at runtime it fetches only user
+content (Nostr relays over `wss://`, Blossom blobs over `https://`).
