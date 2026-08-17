@@ -80,6 +80,16 @@ bun run build:standalone  # ONE self-contained form-zero-standalone.html
    `main.ts`) a superseded load lands in the scene and you get two models
    stacked in the single-model view. Anything that awaits then mutates a scene
    must re-check its token first.
+9g. **The engine renders on demand.** Do not assume `onBeforeRenderObservable`
+   runs every frame — it runs when something asked for a frame. Any visual
+   change made outside a render must call `engine.invalidate()`, and any view
+   that animates must say so through its activity probe. Never latch a probe
+   flag true; a stuck flag quietly restores full-rate rendering (check
+   `scripts/perf.mjs` -> `idleBoard.rendersPerSec`, which must stay ~2-3).
+9h. **Work follows the viewport.** Posters/live previews are requested only
+   for cards near the viewport and only after scrolling settles; the poster
+   queue is paused while the feed moves. Card slots are recycled — never bind
+   a slot to a row by index.
 9f. **Show the ring.** Any wait longer than a frame gets the spinning-ring
    indicator: `setLoading(reason, on, label)` for the HUD, or the in-canvas
    ring for cards/nodes. It is reference-counted per reason.
@@ -104,6 +114,8 @@ bun scripts/interact.mjs            # thread pan (no drift) + pinch + wheel-abou
 bun scripts/smoke.mjs               # boot + feed + posters + live slots + scroll + click
 bun scripts/features.mjs            # reply badges + thread view + settings
 bun scripts/capture.mjs             # board/viewer/thread/light/phone screenshots to shots/
+bun scripts/perf.mjs                # PERF: boot, per-view frame cost, 48-card stress, idle, heap
+CPU=4 bun scripts/perf.mjs          #   …the same, throttled to emulate a phone
 python3 scripts/visual_critique.py  # orientation + composition on those shots
 ```
 

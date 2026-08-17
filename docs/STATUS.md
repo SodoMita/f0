@@ -64,6 +64,17 @@ move it to **Done** with a commit reference. One agent per area.
       navigations can no longer stack two models in the single-model view.
       Guard: `scripts/interact.mjs`.
 
+- [x] **Performance pass** (`scripts/perf.mjs` is the harness; numbers are
+      headless SwiftShader @1280x800, medians):
+      render-on-demand engine (idle board 13.7 -> 2.3 renders/sec, ~80% of
+      frames skipped), virtualised board slots (also fixes rows past the 24th
+      never drawing), viewport+settle gated poster/preview work (48-card
+      scroll 5.6 fps/p95 858 ms -> 12.4 fps/p95 147 ms), direct GPU->texture
+      posters with one reusable RTT (all posters ~15 s -> ~8-11 s), per-slot
+      preview FPS cap, model-blob LRU, pixel budget for hardware scaling,
+      curated glTF loader (bundle 1617 -> 1411 kB, standalone 3.52 -> 3.17 MB,
+      first card 2.08 s -> 1.22 s on the production build).
+
 ## In progress
 
 - [ ] Studio: import GLB only. Publish (BUD-01) + audio embed + ownership are

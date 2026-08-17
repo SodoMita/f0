@@ -169,3 +169,40 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     (`gfx.makeSpinnerTexture` + stepped `rotation.z`, so it stays crisp at any
     zoom). setLoading(reason, on) is reference-counted by reason — never hide
     the ring while another reason is still loading.
+
+22. RENDER ON DEMAND. The engine does not draw every animation frame. Each
+    view registers an activity probe (`setActiveScene(scene, probe)`) and any
+    one-off change calls `engine.invalidate(n)`; a 400 ms heartbeat covers
+    anything nobody flagged. Rules for probes: return true only while
+    something is genuinely moving (drag/momentum, an animation playing, a
+    camera that actually changed, a loading ring whose next STEP is due, a
+    live preview whose refresh is DUE). Never latch a probe flag true — a
+    stuck flag silently restores 60 fps burn (that bug shipped twice during
+    this round: `pendingSettle` and offscreen loading rings).
+
+23. The board is virtualised. Card slots are recycled to the rows nearest the
+    viewport; never bind `rows[i] -> cards[i]` (with more roots than slots the
+    extra rows were simply never drawn). Slot state that must survive
+    recycling (reply counts) lives in a Map on the Board, not on the slot.
+
+24. Work follows the viewport. Posters and live previews are only requested
+    inside a one-screen prefetch window AND only once scrolling has settled
+    (150 ms); `AssetCache.setPaused(true)` stops the poster queue while the
+    feed moves, because a GLB parse plus an offscreen render blocks the main
+    thread for tens to hundreds of ms. Live previews are capped per slot
+    (targetFps) and skipped entirely for offscreen cards.
+
+25. Pixels are budgeted. Hardware scaling = devicePixelRatio clamped by a
+    2.6 Mpx drawing-buffer budget (a 4K/DPR2 screen would otherwise rasterise
+    33 Mpx per frame); MSAA is off on phones. Posters/live previews render at
+    448x280 into ONE reusable render target with ONE reusable readback
+    buffer, and a freshly rendered poster is uploaded straight from the GPU
+    readback (the PNG for the IndexedDB cache is encoded off the critical
+    path).
+
+26. Loader is curated (`src/model/gltf.ts`). Importing `@babylonjs/loaders/glTF`
+    drags in the glTF 1.0 loader and every 2.0 extension, including
+    KHR_interactivity's FlowGraph engine which a viewer can never run. Import
+    the 2.0 loader plus the extensions that change how a model LOOKS. If a
+    real post needs another extension, add the import (and MSFT_audio_emitter
+    when audio playback lands).

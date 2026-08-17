@@ -23,6 +23,44 @@ Settings, navigation, toolbars, metadata, toasts are plain HTML overlays.
 Only the models, the board, the reply badges and the thread map are Babylon.
 Settings: **background color** (viewer/thread/studio) + **scroll inertia**.
 
+## Key fixes this round (2026-08-17, round 5 — performance)
+
+Measured with the new `scripts/perf.mjs` harness (headless SwiftShader,
+1280x800; boot numbers from the production build, median of 3):
+
+| | before | after |
+|---|---|---|
+| idle board | 13.7 renders/sec | **2.3** (heartbeat only) |
+| board p95 frame | 82 ms | **17 ms** |
+| viewer / thread | 7.6 / 21.9 fps | **60 / 57 fps** |
+| 48-card fling | 5.6 fps, p95 858 ms | **12.4 fps, p95 147 ms** |
+| all posters ready | ~15 s | **~8–11 s** |
+| first card (built) | 2.08 s | **1.22 s** |
+| JS bundle / standalone | 1617 kB / 3.52 MB | **1411 kB / 3.17 MB** |
+
+- **Render on demand.** The engine no longer draws 60 frames a second for a
+  static document. Each view exposes an activity probe (drag/momentum, an
+  animation playing, a camera that actually moved, a loading ring whose next
+  step is due, a live preview that is due for a refresh) and one-off changes
+  call `invalidate()`; a 400 ms heartbeat self-heals anything missed. ~80% of
+  animation frames are now skipped.
+- **Virtualised board.** Card slots are recycled to the rows nearest the
+  viewport — which also fixed a real bug: slots were bound by index, so with
+  more roots than slots every row past the 24th was never drawn.
+- **Work follows the viewport.** Posters and live previews are requested only
+  within a one-screen prefetch window and only after scrolling settles; the
+  poster queue is paused while the feed moves, so a GLB parse can't stall a
+  fling. Live previews are capped at 15 fps per slot and skipped offscreen.
+- **Cheaper posters.** Straight from the GPU readback to a texture (the PNG
+  for the cache is encoded off the critical path), one reusable render target
+  and readback buffer at 448×280, and 3 warm-up frames + one readback instead
+  of up to 60 readbacks with 100 ms sleeps.
+- **Budgets.** Hardware scaling honours devicePixelRatio *and* a 2.6 Mpx
+  drawing-buffer budget; model blobs in RAM are an LRU (6 / 48 MiB) on top of
+  the IndexedDB cache; `dominantFacing` strides a 12k-triangle sample.
+- **Curated glTF loader** (`src/model/gltf.ts`) — drops glTF 1.0 and
+  KHR_interactivity's FlowGraph engine.
+
 ## Key fixes this round (2026-08-17, round 4, see git history)
 
 ### Loading is visible everywhere
@@ -158,6 +196,7 @@ bun install
 bun run dev              # http://localhost:5173
 bun run build            # typecheck + normal build → release/
 bun run build:standalone # ONE .html → form-zero-standalone.html
+bun scripts/perf.mjs     # perf harness: boot, frame cost per view, 48-card stress, idle, heap
 bun scripts/orient.mjs   # orientation guard (raw/dyn/rtt probes) — exits 1 on a mirror
 bun scripts/interact.mjs # thread pan/pinch/zoom + tap targets
 bun scripts/smoke.mjs    # headless boot + layout/poster/live/click/scroll

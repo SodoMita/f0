@@ -13,7 +13,9 @@
     "check:facing": "node scripts/facing.mjs",
     "capture": "node scripts/capture.mjs",
     "smoke": "node scripts/smoke.mjs",
-    "features": "node scripts/features.mjs"
+    "features": "node scripts/features.mjs",
+    "perf": "node scripts/perf.mjs",
+    "boot-ab": "node scripts/boot-ab.mjs"
   },
   "dependencies": {
     "@babylonjs/core": "8.10.1",

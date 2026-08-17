@@ -93,3 +93,22 @@ Rules of thumb learned the hard way:
 * Never trust a symbol glyph to exist in the user's font. Draw icons.
 * Anything that integrates pointer deltas must integrate them **per event**.
 * Look at the light theme and a phone viewport before calling a design done.
+
+
+## Performance budget (round 5)
+
+`node scripts/perf.mjs` writes `shots/perf.json`. Keep these in range on the
+headless SwiftShader baseline (1280x800); they are ratios, not absolutes, so
+they hold on real GPUs too:
+
+| Metric | Budget |
+|---|---|
+| `idleBoard.rendersPerSec` (static board) | <= 3 (heartbeat only) |
+| `board.frameMs.p95` | < 25 ms |
+| `stress.scrolling.p95` (48 cards, continuous fling) | < 200 ms |
+| `boot.firstCardMs` (production build) | < 1.5 s |
+| `counts.modelBytesInMemory` | < 48 MiB |
+| JS bundle | < 1.5 MB raw / 400 kB gzip |
+
+If a number regresses, look for: a latched activity probe, a texture upload in
+a per-frame path, work queued for offscreen cards, or a new barrel import.
