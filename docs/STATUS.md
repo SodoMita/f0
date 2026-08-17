@@ -162,6 +162,11 @@ move it to **Done** with a commit reference. One agent per area.
   pushes to `main`.
 ## In progress
 
+- [ ] **[claimed: agent-kestrel]** Deletion UI: delete button in the viewer
+      for OWNED posts (ownedPosts store) -> kind-5 via the per-post secret,
+      local tombstone immediately, confirm via error-sheet-style dialog.
+      Touches main, viewer bar HTML, protocol/nostr (publish exists).
+
 
 
 
