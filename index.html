@@ -73,6 +73,9 @@
       </main>
 
       <aside class="studio-inspector">
+        <div id="studio-resize-handle" class="studio-resize-handle" title="drag to resize height / tap to fold" aria-label="resize inspector">
+          <span class="resize-grip"></span>
+        </div>
         <div class="inspector-scroll">
           <section class="studio-panel" data-panel="upload">
             <button id="btn-studio-import" class="big-button">choose model…</button>
@@ -108,17 +111,22 @@
           <!-- Camera settings are GLOBAL to the studio (not tab-specific). -->
           <details class="cam-advanced" open>
             <summary>camera</summary>
-            <div class="num-grid">
-              <label>X<input id="cam-tx" type="number" step="0.1" value="0" /></label>
-              <label>Y<input id="cam-ty" type="number" step="0.1" value="0" /></label>
-              <label>Z<input id="cam-tz" type="number" step="0.1" value="0" /></label>
-              <label>fov°<input id="cam-fov" type="number" step="1" value="46" /></label>
+            <div class="num-grid cam-grid">
+              <label>target X<input id="cam-tx" type="number" step="0.1" value="0" /></label>
+              <label>target Y<input id="cam-ty" type="number" step="0.1" value="0" /></label>
+              <label>target Z<input id="cam-tz" type="number" step="0.1" value="0" /></label>
+              <label>yaw°<input id="cam-yaw" type="number" step="1" value="0" /></label>
+              <label>pitch°<input id="cam-pitch" type="number" step="1" value="8" /></label>
               <label>dist<input id="cam-radius" type="number" step="0.1" value="4" /></label>
+              <label>fov°<input id="cam-fov" type="number" step="1" value="46" /></label>
             </div>
-            <div class="studio-row">
-              <button class="hbtn small" data-cam="persp">persp</button>
-              <button class="hbtn small" data-cam="ortho">ortho</button>
-              <button class="hbtn small" data-cam="frame">frame</button>
+            <div class="studio-row cam-btns">
+              <button class="hbtn small" data-cam="persp" title="perspective">persp</button>
+              <button class="hbtn small" data-cam="ortho" title="orthographic">ortho</button>
+              <button class="hbtn small" data-cam="frame" title="frame view">frame</button>
+              <button class="hbtn small" data-cam="front" title="front view">front</button>
+              <button class="hbtn small" data-cam="top" title="top view">top</button>
+              <button class="hbtn small" data-cam="side" title="side view">side</button>
               <button class="hbtn small primary" id="cam-add" title="add current view as a new camera">+ cam</button>
             </div>
             <div id="cam-list" class="cam-list"></div>

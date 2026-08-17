@@ -31,6 +31,13 @@ export interface CameraState {
 const deg2rad = (d: number): number => (d * Math.PI) / 180
 const rad2deg = (r: number): number => (r * 180) / Math.PI
 
+function normalizeYaw(deg: number): number {
+  let y = deg % 360
+  if (y > 180) y -= 360
+  if (y <= -180) y += 360
+  return y
+}
+
 import { buildTextMesh, type TextMeshResult } from './textTool'
 import { importModelFiles } from '../model/importSidecar'
 import { UtilityLayerRenderer } from '@babylonjs/core/Rendering/utilityLayerRenderer'
@@ -82,7 +89,7 @@ export class Studio {
     // cover active drags; the stub scene has no other animation).
     engine.addAnimationSource(() => engine.activeScene === this.scene && this.isAnimating())
     this.scene.clearColor = Color4.FromHexString(theme.background + 'FF')
-    this.camera = new ArcRotateCamera('studio-cam', -Math.PI / 2, Math.PI / 2.2, 8, Vector3.Zero(), this.scene)
+    this.camera = new ArcRotateCamera('studio-cam', Math.PI / 2, Math.PI / 2.2, 8, Vector3.Zero(), this.scene)
     this.camera.attachControl(true)
     this.camera.wheelPrecision = 50
     this.camera.lowerRadiusLimit = 0.001
@@ -286,16 +293,16 @@ export class Studio {
 
   // ---- camera settings ----
   // ArcRotateCamera: position is a function of (alpha,beta,radius,target).
-  // Rotation is exposed as euler degrees so it is directly editable.
+  // Rotation is exposed as euler degrees (yaw, pitch) so it is directly editable.
   getCameraState(): CameraState {
     // ArcRotateCamera orients around the target by alpha (azimuth) and beta
-    // (polar angle, 0 = +Y). Convert to editable yaw/pitch degrees.
-    const yaw = -this.camera.alpha - Math.PI / 2
-    const pitch = Math.PI / 2 - this.camera.beta
+    // (polar angle, 0 = +Y). Convert to editable yaw/pitch degrees with yaw=0 facing +Z.
+    const yaw = normalizeYaw(rad2deg(Math.PI / 2 - this.camera.alpha))
+    const pitch = Math.max(-89.9, Math.min(89.9, rad2deg(Math.PI / 2 - this.camera.beta)))
     return {
       projection: this.freeCam ? 'free' : (this.camera.mode === 1 ? 'ortho' : 'perspective'),
       target: this.camera.target.asArray() as [number, number, number],
-      rotationDeg: [0, rad2deg(yaw), rad2deg(pitch)],
+      rotationDeg: [0, Number.isFinite(yaw) ? parseFloat(yaw.toFixed(1)) : 0, Number.isFinite(pitch) ? parseFloat(pitch.toFixed(1)) : 0],
       radius: this.camera.radius,
       fovDeg: rad2deg(this.camera.fov),
     }
@@ -318,10 +325,13 @@ export class Studio {
     }
     if (patch.rotationDeg) {
       // alpha/beta are derived from the look direction (roll is ignored by
-      // ArcRotateCamera): yaw -> alpha, pitch -> beta.
+      // ArcRotateCamera): yaw -> alpha (front +Z at yaw 0), pitch -> beta.
       const [, yaw, pitch] = patch.rotationDeg
-      this.camera.alpha = -deg2rad(yaw) - Math.PI / 2
-      this.camera.beta = Math.PI / 2 - deg2rad(pitch)
+      if (Number.isFinite(yaw)) this.camera.alpha = -deg2rad(yaw) + Math.PI / 2
+      if (Number.isFinite(pitch)) {
+        const clampedPitch = Math.max(-89.9, Math.min(89.9, pitch))
+        this.camera.beta = Math.PI / 2 - deg2rad(clampedPitch)
+      }
     }
     // Orthographic framing: drive the ortho half-height from radius so zoom
     // (distance) still makes the subject larger/smaller. Width follows aspect.
@@ -360,11 +370,11 @@ export class Studio {
   // ---- user cameras: add / select / edit / remove ----
   private makeCameraNode(state: CameraState, name: string): ArcRotateCamera {
     const target = new Vector3(state.target[0], state.target[1], state.target[2])
-    const cam = new ArcRotateCamera(name, -Math.PI / 2, Math.PI / 2.2, state.radius, target, this.scene)
+    const cam = new ArcRotateCamera(name, Math.PI / 2, Math.PI / 2.2, state.radius, target, this.scene)
     cam.fov = deg2rad(state.fovDeg ?? 46)
     const [, yaw, pitch] = state.rotationDeg ?? [0, 0, 0]
-    cam.alpha = -deg2rad(yaw) - Math.PI / 2
-    cam.beta = Math.PI / 2 - deg2rad(pitch)
+    if (Number.isFinite(yaw)) cam.alpha = -deg2rad(yaw) + Math.PI / 2
+    if (Number.isFinite(pitch)) cam.beta = Math.PI / 2 - deg2rad(Math.max(-89.9, Math.min(89.9, pitch)))
     if (state.projection === 'ortho') {
       cam.mode = 1
       const eng = this.form.engine
@@ -386,9 +396,9 @@ export class Studio {
     node.setTarget(new V3(state.target[0], state.target[1], state.target[2]))
     node.radius = state.radius
     node.fov = deg2rad(state.fovDeg)
-    const [, yaw, pitch] = state.rotationDeg
-    node.alpha = -deg2rad(yaw) - Math.PI / 2
-    node.beta = Math.PI / 2 - deg2rad(pitch)
+    const [, yaw, pitch] = state.rotationDeg ?? [0, 0, 0]
+    if (Number.isFinite(yaw)) node.alpha = -deg2rad(yaw) + Math.PI / 2
+    if (Number.isFinite(pitch)) node.beta = Math.PI / 2 - deg2rad(Math.max(-89.9, Math.min(89.9, pitch)))
     if (state.projection === 'ortho') node.mode = 1
     else node.mode = 0
   }
