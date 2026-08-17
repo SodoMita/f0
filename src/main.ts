@@ -292,6 +292,36 @@ async function boot(): Promise<void> {
     camFov.value = c.fovDeg.toFixed(0)
     camRadius.value = c.radius.toFixed(2)
     document.querySelector<HTMLButtonElement>('#tool-freecam')?.classList.toggle('active', c.projection === 'free')
+    refreshCameraList()
+  }
+  function refreshCameraList(): void {
+    const list = document.getElementById('cam-list') as HTMLElement | null
+    if (!list) return
+    list.innerHTML = ''
+    const cams = studio.getCameras()
+    const active = studio.getActiveCameraIndex()
+    cams.forEach((_, i) => {
+      const row = document.createElement('div')
+      row.className = 'cam-row' + (i === active ? ' active' : '')
+      const sel = document.createElement('button')
+      sel.className = 'hbtn small'
+      sel.textContent = String(i + 1)
+      sel.title = `edit camera ${i + 1}`
+      sel.addEventListener('click', () => { studio.selectCamera(i); refreshCameraControls() })
+      const del = document.createElement('button')
+      del.className = 'hbtn small danger'
+      del.innerHTML = '×'
+      del.title = 'remove'
+      del.addEventListener('click', (e) => { e.stopPropagation(); studio.removeCamera(i); refreshCameraControls() })
+      row.append(sel, del)
+      list.append(row)
+    })
+    if (cams.length === 0) {
+      const empty = document.createElement('span')
+      empty.className = 'hint'
+      empty.textContent = 'no cams'
+      list.append(empty)
+    }
   }
   let textTimer = 0
   studioText.addEventListener('input', () => {
@@ -325,6 +355,27 @@ async function boot(): Promise<void> {
       else studio.setCameraState({ projection: m as 'perspective' | 'ortho' })
       refreshCameraControls()
     }))
+  // add camera button (creates a publishable camera from current view)
+  $('cam-add')?.addEventListener('click', () => {
+    const idx = studio.addCamera()
+    studio.selectCamera(idx)
+    refreshCameraControls()
+    setStudioStatus(`cam ${idx + 1} added`, 'ok')
+  })
+  // fold button – collapses inspector for portrait space saving
+  const foldBtn = $('btn-studio-fold') as HTMLButtonElement | null
+  const inspector = document.querySelector('.studio-inspector') as HTMLElement | null
+  const toggleFold = () => {
+    if (!inspector) return
+    inspector.classList.toggle('collapsed')
+    document.body.classList.toggle('studio-collapsed', inspector.classList.contains('collapsed'))
+    foldBtn?.classList.toggle('active', inspector.classList.contains('collapsed'))
+    if (foldBtn) foldBtn.textContent = inspector.classList.contains('collapsed') ? '▴' : '▾'
+    studio.kick(200)
+  }
+  foldBtn?.addEventListener('click', toggleFold)
+  $('studio-fold-handle')?.addEventListener('click', toggleFold)
+
   $('btn-close').addEventListener('click', () => router.go({ name: 'board' }))
   $('btn-prev').addEventListener('click', () => void stepViewer(-1))
   $('btn-next').addEventListener('click', () => void stepViewer(1))

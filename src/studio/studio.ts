@@ -52,7 +52,7 @@ export interface ImportedModel {
  *
  * For the BUD-01 publish flow the studio holds the *original* self-contained
  * GLB bytes (pass-through, no re-export) and renders a live preview container.
- * Editor tools (paint/animation/audio) build on this; they are not here yet.
+ * When the user adds cameras, we re-export so those cameras are included.
  */
 export class Studio {
   readonly scene: Scene
@@ -69,6 +69,11 @@ export class Studio {
   private gizmos: GizmoManager
   private selection: AbstractMesh | null = null
   private freeCam: FreeCamera | null = null
+
+  // ---- user added cameras (publishable) ----
+  private storedCameras: CameraState[] = []
+  private storedCameraNodes: ArcRotateCamera[] = []
+  private activeCamIndex = -1 // -1 = orbit (current view), >=0 = editing that stored camera
 
   constructor(engine: FormEngine) {
     this.form = engine
@@ -212,6 +217,7 @@ export class Studio {
       this.textMesh.mesh.dispose()
       this.textMesh = null
     }
+    this.clearCameras()
     this.imported = null
   }
 
@@ -302,7 +308,14 @@ export class Studio {
       this.camera.orthoRight = h * aspect
     }
     this.form?.kick(300)
+    // keep stored camera in sync when editing the active one
+    if (this.activeCamIndex >= 0 && this.activeCamIndex < this.storedCameras.length) {
+      const cur = this.getCameraState()
+      this.storedCameras[this.activeCamIndex] = { ...cur }
+      this.syncCameraNode(this.activeCamIndex)
+    }
   }
+
   frameCamera(): void {
     if (this.container) {
       const center = worldCenter(this.container)
@@ -315,6 +328,102 @@ export class Studio {
       this.camera.setTarget(Vector3.Zero())
     }
     this.form?.kick(500)
+  }
+
+  // ---- user cameras: add / select / edit / remove ----
+  private makeCameraNode(state: CameraState, name: string): ArcRotateCamera {
+    const target = new Vector3(state.target[0], state.target[1], state.target[2])
+    const cam = new ArcRotateCamera(name, -Math.PI / 2, Math.PI / 2.2, state.radius, target, this.scene)
+    cam.fov = deg2rad(state.fovDeg ?? 46)
+    const [, yaw, pitch] = state.rotationDeg ?? [0, 0, 0]
+    cam.alpha = -deg2rad(yaw) - Math.PI / 2
+    cam.beta = Math.PI / 2 - deg2rad(pitch)
+    if (state.projection === 'ortho') {
+      cam.mode = 1
+      const eng = this.form.engine
+      const aspect = eng.getRenderWidth() / Math.max(1, eng.getRenderHeight())
+      const h = Math.max(0.1, cam.radius * 0.55)
+      cam.orthoTop = h; cam.orthoBottom = -h; cam.orthoLeft = -h * aspect; cam.orthoRight = h * aspect
+    } else {
+      cam.mode = 0
+    }
+    cam.minZ = 0.01
+    cam.maxZ = 4000
+    return cam
+  }
+
+  private syncCameraNode(index: number): void {
+    const node = this.storedCameraNodes[index]
+    const state = this.storedCameras[index]
+    if (!node || !state) return
+    node.setTarget(new V3(state.target[0], state.target[1], state.target[2]))
+    node.radius = state.radius
+    node.fov = deg2rad(state.fovDeg)
+    const [, yaw, pitch] = state.rotationDeg
+    node.alpha = -deg2rad(yaw) - Math.PI / 2
+    node.beta = Math.PI / 2 - deg2rad(pitch)
+    if (state.projection === 'ortho') node.mode = 1
+    else node.mode = 0
+  }
+
+  getCameras(): CameraState[] { return this.storedCameras.slice() }
+  getActiveCameraIndex(): number { return this.activeCamIndex }
+
+  addCamera(): number {
+    const state = this.getCameraState()
+    // force perspective for stored cameras (free cam stored as perspective at current pos)
+    const toStore: CameraState = { ...state, projection: state.projection === 'free' ? 'perspective' : state.projection }
+    const idx = this.storedCameras.length
+    this.storedCameras.push(toStore)
+    const node = this.makeCameraNode(toStore, `studio-user-cam-${idx}`)
+    this.storedCameraNodes.push(node)
+    this.activeCamIndex = idx
+    this.kick(200)
+    return idx
+  }
+
+  selectCamera(index: number): void {
+    if (index < 0 || index >= this.storedCameras.length) {
+      this.activeCamIndex = -1
+      this.kick(200)
+      return
+    }
+    this.activeCamIndex = index
+    const state = this.storedCameras[index]
+    this.setCameraState(state)
+    // avoid recursive sync overwriting while we are selecting
+    this.activeCamIndex = index
+    this.kick(200)
+  }
+
+  updateStoredCamera(index: number, patch: Partial<CameraState>): void {
+    if (index < 0 || index >= this.storedCameras.length) return
+    this.storedCameras[index] = { ...this.storedCameras[index], ...patch }
+    this.syncCameraNode(index)
+    if (this.activeCamIndex === index) {
+      this.setCameraState(this.storedCameras[index])
+    }
+    this.kick(200)
+  }
+
+  removeCamera(index: number): void {
+    if (index < 0 || index >= this.storedCameras.length) return
+    const node = this.storedCameraNodes[index]
+    try { node?.dispose() } catch {}
+    this.storedCameras.splice(index, 1)
+    this.storedCameraNodes.splice(index, 1)
+    // re-name remaining nodes to keep indices stable for export
+    this.storedCameraNodes.forEach((n, i) => { n.name = `studio-user-cam-${i}` })
+    if (this.activeCamIndex === index) this.activeCamIndex = -1
+    else if (this.activeCamIndex > index) this.activeCamIndex--
+    this.kick(200)
+  }
+
+  clearCameras(): void {
+    for (const n of this.storedCameraNodes) { try { n.dispose() } catch {} }
+    this.storedCameraNodes = []
+    this.storedCameras = []
+    this.activeCamIndex = -1
   }
 
   /**
@@ -353,24 +462,60 @@ export class Studio {
   }
 
   /**
-   * The bytes + filename to publish. If a self-contained GLB was imported,
-   * returns those original bytes pass-through (no re-export). Otherwise
-   * (typed text) exports the studio scene to GLB.
+   * The bytes + filename to publish. If a self-contained GLB was imported
+   * WITHOUT added cameras, returns those original bytes pass-through
+   * (no re-export). Otherwise exports the studio scene to GLB including
+   * added cameras.
    */
   async getContentForPublish(): Promise<{ blob: Blob; filename: string; sourceFormat: 'glb' | 'gltf' | 'obj' | 'generated' }> {
-    if (this.imported) return {
-      blob: this.imported.file,
-      filename: this.imported.file.name,
-      sourceFormat: this.imported.sourceFormat,
+    const hasUserCams = this.storedCameras.length > 0
+    if (this.imported && !hasUserCams) {
+      return {
+        blob: this.imported.file,
+        filename: this.imported.file.name,
+        sourceFormat: this.imported.sourceFormat,
+      }
     }
-    // Text mode: make sure asynchronous font geometry exists before export.
-    if (!this.textMesh) await this.rebuildText()
-    const res = await GLTF2Export.GLBAsync(this.scene, 'text', {
-      shouldExportNode: (n) => n === this.textMesh?.mesh,
+    // Text mode OR imported + user cameras: make sure font geometry exists.
+    if (!this.textMesh && this.textValue.trim()) await this.rebuildText()
+
+    // Ensure camera nodes exist for all stored cameras (they should, but recreate if missing)
+    while (this.storedCameraNodes.length < this.storedCameras.length) {
+      const i = this.storedCameraNodes.length
+      this.storedCameraNodes.push(this.makeCameraNode(this.storedCameras[i], `studio-user-cam-${i}`))
+    }
+
+    // Build export filter: text mesh + all imported meshes + user cameras
+    const exportableMeshes = new Set<any>()
+    if (this.textMesh?.mesh) exportableMeshes.add(this.textMesh.mesh)
+    if (this.container) {
+      for (const m of this.container.meshes) {
+        if (m.name === '__root__') continue
+        exportableMeshes.add(m)
+      }
+    }
+    const exportableCams = new Set<any>(this.storedCameraNodes)
+    // include original imported cameras if we have a container (they are already in scene)
+    const originalCams: any[] = this.container ? (this.container as any).cameras ?? [] : []
+    for (const c of originalCams) exportableCams.add(c)
+
+    const shouldExportNode = (n: any): boolean => {
+      if (exportableMeshes.has(n)) return true
+      if (exportableCams.has(n)) return true
+      // also keep transform nodes that are parents of exportable meshes/cameras
+      if (this.container && (this.container as any).transformNodes?.includes(n)) return true
+      if (this.textMesh && n === this.textMesh.mesh.parent) return true
+      return false
+    }
+
+    // If we have only user cameras but no mesh (edge), still export cameras + text if present.
+    // When there is no text and no container (should not happen due to hasContent check) fallback to original path.
+    const res = await GLTF2Export.GLBAsync(this.scene, this.textMesh ? 'text' : (this.imported?.file.name.replace(/\.[^.]+$/, '') || 'model'), {
+      shouldExportNode: exportableMeshes.size === 0 && exportableCams.size === 0 ? (n: any) => n === this.textMesh?.mesh : shouldExportNode,
     })
-    const file = Object.values(res.files)[0]
-    const blob = file instanceof Blob ? file : new Blob([file], { type: 'model/gltf-binary' })
-    return { blob, filename: 'text.glb', sourceFormat: 'generated' }
+    const file = Object.values((res as any).glTFFiles ?? (res as any).files ?? res)[0] as any
+    const blob = file instanceof Blob ? file : new Blob([file as any], { type: 'model/gltf-binary' })
+    return { blob, filename: this.textMesh ? 'text.glb' : (this.imported?.file.name ?? 'model.glb'), sourceFormat: this.imported ? this.imported.sourceFormat : 'generated' }
   }
 
   dispose(): void {

@@ -86,12 +86,32 @@ export async function buildTextMesh(
     }
   }
 
+  // Precompute per-line x offsets for alignment, so we can mirror within the line
+  // and keep left/center/right placement stable (otherwise a global cols/2 - x
+  // flips right-aligned to left). The bug was a left-right mirror from seeing
+  // the plane from -Z; mirroring each run inside its line fixes readability
+  // while preserving alignment.
+  const lineOffsets: number[] = []
+  for (let i = 0; i < lines.length; i++) {
+    const w = colCounts[i] ?? 0
+    let off = 0
+    if (align === 'center') off = Math.round((cols - w) / 2)
+    else if (align === 'right') off = cols - w
+    lineOffsets.push(off)
+  }
+
   const positions: number[] = []
   const indices: number[] = []
   let v = 0
   for (const r of runs) {
-    const x0 = (r.x0 - cols / 2) * SCALE
-    const x1 = (r.x1 - cols / 2) * SCALE
+    const lineIdx = Math.min(lines.length - 1, Math.max(0, Math.floor(r.y / PIXEL)))
+    const w = colCounts[lineIdx] ?? cols
+    const off = lineOffsets[lineIdx] ?? 0
+    // mirror within the line's own box [off, off+w)
+    const mx0 = 2 * off + w - r.x1
+    const mx1 = 2 * off + w - r.x0
+    const x0 = (mx0 - cols / 2) * SCALE
+    const x1 = (mx1 - cols / 2) * SCALE
     const topY = (rows / 2 - r.y) * SCALE
     const botY = topY - SCALE
     positions.push(x0, topY, 0, x1, topY, 0, x1, botY, 0, x0, botY, 0)

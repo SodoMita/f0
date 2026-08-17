@@ -54,9 +54,12 @@
       </aside>
 
       <main class="studio-stage">
-        <span id="studio-filename" class="studio-filename"></span>
-        <div class="spacer"></div>
-        <span id="studio-status" class="studio-status"></span>
+        <div class="stage-top">
+          <span id="studio-filename" class="studio-filename"></span>
+          <div class="spacer"></div>
+          <span id="studio-status" class="studio-status"></span>
+          <button id="btn-studio-fold" class="hbtn small" title="fold inspector" aria-label="fold">▾</button>
+        </div>
         <!-- Persistent tools: move/rotate/scale/delete/free-cam. Available
              for BOTH imported models and text, regardless of the active tab. -->
         <div class="studio-tools" role="toolbar" aria-label="transform">
@@ -66,49 +69,57 @@
           <button class="tool-btn" id="tool-delete" title="delete (Del)">⌫</button>
           <button class="tool-btn" id="tool-freecam" title="free camera">fly</button>
         </div>
+        <button id="studio-fold-handle" class="fold-handle" title="toggle inspector" aria-label="toggle"></button>
       </main>
 
       <aside class="studio-inspector">
-        <section class="studio-panel" data-panel="upload">
-          <button id="btn-studio-import" class="big-button">choose model…</button>
-          <p class="hint">GLB passes through byte-for-byte. .gltf + .bin/images and .obj are repacked to GLB.</p>
-        </section>
+        <div class="inspector-scroll">
+          <section class="studio-panel" data-panel="upload">
+            <button id="btn-studio-import" class="big-button">choose model…</button>
+            <p class="hint">GLB passes through byte-for-byte. .gltf + .bin/images and .obj are repacked to GLB.</p>
+          </section>
 
-        <section class="studio-panel" data-panel="type" hidden>
-          <label class="field"><span>T</span><input id="studio-text" type="text" maxlength="48" value="/0" spellcheck="false" autocomplete="off" /></label>
-          <div class="studio-row">
-            <button id="studio-align" class="hbtn small" title="align">C</button>
-            <input id="studio-color" type="color" value="#FF5C35" title="color" />
-          </div>
-          <p class="hint" id="text-budget">/0 · 0 tris</p>
-        </section>
+          <section class="studio-panel" data-panel="type" hidden>
+            <label class="field"><span>T</span><input id="studio-text" type="text" maxlength="48" value="/0" spellcheck="false" autocomplete="off" /></label>
+            <div class="studio-row">
+              <button id="studio-align" class="hbtn small" title="align">C</button>
+              <input id="studio-color" type="color" value="#FF5C35" title="color" />
+            </div>
+            <p class="hint" id="text-budget">/0 · 0 tris</p>
+          </section>
 
-        <section class="studio-panel" data-panel="paint" hidden>
-          <p class="hint">Hand-writing / cube-trail painting is a later milestone (AMENDMENT 10).</p>
-        </section>
+          <section class="studio-panel" data-panel="paint" hidden>
+            <p class="hint">Hand-writing / cube-trail painting is a later milestone (AMENDMENT 10).</p>
+          </section>
 
-        <section class="studio-panel" data-panel="symbols" hidden>
-          <div class="symbol-grid" id="symbol-grid"></div>
-        </section>
+          <section class="studio-panel" data-panel="symbols" hidden>
+            <div class="symbol-grid" id="symbol-grid"></div>
+          </section>
 
-        <!-- Camera settings are GLOBAL to the studio (not tab-specific). -->
-        <details class="cam-advanced" open>
-          <summary>camera</summary>
-          <div class="num-grid">
-            <label>X<input id="cam-tx" type="number" step="0.1" value="0" /></label>
-            <label>Y<input id="cam-ty" type="number" step="0.1" value="0" /></label>
-            <label>Z<input id="cam-tz" type="number" step="0.1" value="0" /></label>
-            <label>fov°<input id="cam-fov" type="number" step="1" min="1" max="170" value="46" /></label>
-            <label>dist<input id="cam-radius" type="number" step="0.1" min="0.1" value="4" /></label>
-          </div>
-          <div class="studio-row">
-            <button class="hbtn small" data-cam="persp">persp</button>
-            <button class="hbtn small" data-cam="ortho">ortho</button>
-            <button class="hbtn small" data-cam="frame">frame</button>
-          </div>
-        </details>
+          <!-- Camera settings are GLOBAL to the studio (not tab-specific). -->
+          <details class="cam-advanced" open>
+            <summary>camera</summary>
+            <div class="num-grid">
+              <label>X<input id="cam-tx" type="number" step="0.1" value="0" /></label>
+              <label>Y<input id="cam-ty" type="number" step="0.1" value="0" /></label>
+              <label>Z<input id="cam-tz" type="number" step="0.1" value="0" /></label>
+              <label>fov°<input id="cam-fov" type="number" step="1" min="1" max="170" value="46" /></label>
+              <label>dist<input id="cam-radius" type="number" step="0.1" min="0.1" value="4" /></label>
+            </div>
+            <div class="studio-row">
+              <button class="hbtn small" data-cam="persp">persp</button>
+              <button class="hbtn small" data-cam="ortho">ortho</button>
+              <button class="hbtn small" data-cam="frame">frame</button>
+              <button class="hbtn small primary" id="cam-add" title="add current view as a new camera">+ cam</button>
+            </div>
+            <div id="cam-list" class="cam-list"></div>
+            <p class="hint">Add camera stores current view. Cameras are exported with the model and appear as dots in viewer (C to cycle).</p>
+          </details>
+        </div>
 
-        <button id="btn-studio-publish" class="big-button primary" disabled>publish</button>
+        <div class="inspector-foot">
+          <button id="btn-studio-publish" class="big-button primary" disabled>publish</button>
+        </div>
       </aside>
     </div>
 
