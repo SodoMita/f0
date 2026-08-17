@@ -30,6 +30,8 @@ interface Slot {
 
 export interface PreviewPoolOptions { maxSlots: number; rttWidth: number; rttHeight: number; slotsPerFrame: number }
 
+const PREVIEW_FPS = 20 // live-card refresh cap (imperceptible vs 60, ~3x cheaper)
+
 /**
  * Bounded RenderTargetTexture pool (step 6 / 03 §5). One hidden stage scene;
  * each slot gets its own camera + RTT with an isolated renderList. Refresh is
@@ -43,6 +45,7 @@ export class PreviewPool {
   private rejected = new Map<string, 'STATIC' | 'FAILED'>()
   private loading = new Set<string>()
   private frame = 0
+  private lastTickAt = 0
   readonly opts: PreviewPoolOptions
   onLive: ((postId: string, rtt: RenderTargetTexture) => void) | null = null
 
@@ -103,6 +106,12 @@ export class PreviewPool {
    * frustum (maxZ) excludes the others.
    */
   tick(): void {
+    // PERF: live previews refresh at PREVIEW_FPS, not at the host frame
+    // rate — an RTT re-render per board frame per slot was the single
+    // biggest GPU cost on the board (each one re-renders the whole stage).
+    const now = performance.now()
+    if (now - this.lastTickAt < 1000 / PREVIEW_FPS) return
+    this.lastTickAt = now
     this.frame++
     const n = Math.max(1, this.byPost.size)
     const rate = Math.max(1, Math.ceil(n / this.opts.slotsPerFrame))

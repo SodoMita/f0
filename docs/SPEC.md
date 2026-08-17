@@ -169,3 +169,14 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     (`gfx.makeSpinnerTexture` + stepped `rotation.z`, so it stays crisp at any
     zoom). setLoading(reason, on) is reference-counted by reason — never hide
     the ring while another reason is still loading.
+
+17. Demand-driven render loop (kestrel/perf). FormEngine renders a frame only
+    when kicked (input/content change; 300ms uncapped window) or when an
+    animation source (`addAnimationSource`) reports motion (capped 30fps).
+    ANY code that changes the picture outside the render loop MUST call
+    `engine.kick()` (poster/live arrival, background change, route change do
+    this already). New continuous animations MUST register an animation
+    source, or they will freeze when input stops. Live preview RTTs refresh
+    at 20fps (previewPool PREVIEW_FPS). Adaptive resolution lives in
+    FormEngine.adaptResolution — do not fight it by pinning
+    setHardwareScalingLevel elsewhere.

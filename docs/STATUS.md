@@ -5,6 +5,21 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 
+- [x] **Performance: demand-driven rendering** (agent-kestrel, branch
+      kestrel/perf). The RAF loop renders only when (a) input/content
+      invalidated the picture (`FormEngine.kick()`, 300ms window, uncapped)
+      or (b) a registered animation source reports motion (capped 30fps):
+      board = live slots/spinners/scroll-inertia, viewer = playing animation
+      or orbit-inertia glide, thread = spinners, studio = camera glide.
+      Static scenes render ZERO frames (measured: 0 frames/3s static board
+      AND paused viewer, was 100% GPU forever). Live preview RTTs refresh at
+      20fps instead of per-frame. Adaptive resolution: sustained >45ms EMA
+      frames step hardwareScaling down to 0.7x, sustained <18ms restores to
+      devicePixelRatio (spec PERF adaptive degrade). `engine.perfStats()`
+      exposes renders/EMA/ratio for tests. Measured on SwiftShader: idle
+      renders 42→~40 anim-capped / 0 static, scroll p50 render 1.1ms,
+      viewer paused 0 frames; smoke/features/standalone all green.
+
 - [x] **First-run legend + Network panel + Error sheets** (agent-kestrel,
       2026-08-17, branch kestrel/legend-network-errors). Legend: modal on
       first run (seen-flag in IDB 'settings'), `?` reopens, Esc/OK close.
@@ -94,6 +109,8 @@ move it to **Done** with a commit reference. One agent per area.
   pushes to `main`.
 
 ## In progress
+
+
 
 - [ ] Studio: import GLB only. Publish (BUD-01) + audio embed + ownership are
       **not** implemented (`studio/studio.ts` is a stub).
