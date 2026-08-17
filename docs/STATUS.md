@@ -5,6 +5,34 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 
+- [x] **Performance: demand-driven rendering** (agent-kestrel, branch
+      kestrel/perf). The RAF loop renders only when (a) input/content
+      invalidated the picture (`FormEngine.kick()`, 300ms window, uncapped)
+      or (b) a registered animation source reports motion (capped 30fps):
+      board = live slots/spinners/scroll-inertia, viewer = playing animation
+      or orbit-inertia glide, thread = spinners, studio = camera glide.
+      Static scenes render ZERO frames (measured: 0 frames/3s static board
+      AND paused viewer, was 100% GPU forever). Live preview RTTs refresh at
+      20fps instead of per-frame. Adaptive resolution: sustained >45ms EMA
+      frames step hardwareScaling down to 0.7x, sustained <18ms restores to
+      devicePixelRatio (spec PERF adaptive degrade). `engine.perfStats()`
+      exposes renders/EMA/ratio for tests. Measured on SwiftShader: idle
+      renders 42→~40 anim-capped / 0 static, scroll p50 render 1.1ms,
+      viewer paused 0 frames; smoke/features/standalone all green.
+
+- [x] **First-run legend + Network panel + Error sheets** (agent-kestrel,
+      2026-08-17, branch kestrel/legend-network-errors). Legend: modal on
+      first run (seen-flag in IDB 'settings'), `?` reopens, Esc/OK close.
+      Network panel: `#/network` route + net-dot button; add/remove/probe/
+      reset relays & Blossom; live relay state dots; `RelayPool.applyRelays()`
+      hot-swaps connections (onclose detached during teardown so the swap
+      can't false-fire E201); `RelayPool.probe`/`BlossomClient.probe` one-shot
+      checks; persisted via saveNetworkConfig. Error sheets (`src/hud/
+      errorSheet.ts`): stable codes E101 download / E102 parse / E201 relays
+      / E301 import, each code+cause+action, replaces bare toasts for model
+      failures. Verified headless: /tmp-style HUD test + smoke + features +
+      standalone. Test scripts dismiss the legend after boot.
+
 - [x] Vite + TS skeleton, one canvas / one Engine, fatal path, router.
 - [x] Relay pool + live feed (both filters: `#t form-zero` + `#m model/*`),
       per-relay state, reconnect backoff. (`protocol/nostr.ts`)
@@ -74,11 +102,39 @@ move it to **Done** with a commit reference. One agent per area.
       preview FPS cap, model-blob LRU, pixel budget for hardware scaling,
       curated glTF loader (bundle 1617 -> 1411 kB, standalone 3.52 -> 3.17 MB,
       first card 2.08 s -> 1.22 s on the production build).
+- [x] **Perf round merged with kestrel/perf** (2026-08-17): two agents worked
+      the performance task in parallel (my fault — the task was claimed in
+      STATUS and I did not check first). The merge keeps kestrel's engine
+      (`kick()` + `addAnimationSource()` + adaptive resolution, which is the
+      documented API now) and layers this branch's work on top: precise
+      animation probes (motion only while a ring step / preview refresh is
+      DUE), board virtualisation, viewport+settle gated loading with a
+      pausable poster queue, the direct GPU->texture poster path, blob LRU,
+      pixel budget on the target ratio, and the curated glTF loader.
+      `engine.invalidate()` is kept only as an alias of `kick()`.
 
+## Incident log
+
+- 2026-08-17: `main` was force-pushed away (replaced by an unrelated 3-commit
+  rewrite: "Babylon shell", IME textarea fix, Blossom auth fix). Restored by
+  agent-kestrel from the last deployed CI SHA `dcb4d06` (the dangling merge
+  commit was still fetchable). The rewrite is kept on `salvage/dev-rewrite` —
+  it contains genuinely useful, unlanded work that maps to open tasks below:
+    * `src/protocol/publish.ts` — a real BUD-01 upload + kind-1063 publish
+      flow (task "Studio publish flow")
+    * `src/studio/textMesh.ts` + `public/fonts/UnifontSubset.*` — text
+      geometry (task "Low-poly text geometry")
+    * `src/gui/topbar.ts`, `src/gui/icons.ts` — canvas GUI experiments
+  Whoever picks those tasks up: CHERRY-PICK/port from `salvage/dev-rewrite`
+  onto main instead of rewriting again. Branch protection now blocks force
+  pushes to `main`.
 ## In progress
+
+
 
 - [ ] Studio: import GLB only. Publish (BUD-01) + audio embed + ownership are
       **not** implemented (`studio/studio.ts` is a stub).
+
 
 ## Next (priority order — pick one and claim it)
 
@@ -113,9 +169,6 @@ move it to **Done** with a commit reference. One agent per area.
       offer the typed fallback).
 - [ ] **Studio publish flow**: BUD-01 upload, kind-1063 event, ownership
       secrets, preservation report (blocks publish on loss), partial-success UI.
-- [ ] **First-run legend** (spec 02 §1.1 — mandatory).
-- [ ] **Network panel** (add/remove/probe/reset relays + Blossom).
-- [ ] **Error sheets** (card/action error → code + cause + action).
 - [ ] **Reply authoring** (compose → publish flow).
 - [ ] **Deletion UI** (tombstones already applied in the index).
 - [ ] **Tests**: Vitest unit suite (URL normalize, tags, NIP-10, VFS, GLB
@@ -125,7 +178,6 @@ move it to **Done** with a commit reference. One agent per area.
 ## Known gaps / debt
 
 - Studio scene is an import stub; no editor tooling.
-- `#/network` route falls back to the board (no panel).
 - Poster/preview pool renders share one scene (serialized by a mutex) — fine
   for now, but per-slot isolation is on the roadmap (spec 03 §5).
 - No service worker / offline caching beyond IndexedDB poster cache.

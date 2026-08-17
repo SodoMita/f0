@@ -110,6 +110,10 @@ export class ThreadView {
     this.rootFrameTex = this.makeFrameTexture('thread-frame-root', true)
 
     this.applyCamera()
+
+    // PERF: pan/zoom redraws arrive as input kicks; this source only covers
+    // continuous motion (node loading rings).
+    engine.addAnimationSource(() => engine.activeScene === this.scene && this.isAnimating())
   }
 
   /** Render-on-demand probe: pointers down, or a node still waiting on its poster. */
@@ -120,7 +124,7 @@ export class ThreadView {
   }
 
   setBackground(hex: string): void {
-    this.form.invalidate(3)
+    this.form.kick()
     this.background = hex
     this.isDark = luminance(hex) < 0.5
     this.scene.clearColor = Color4.FromHexString(hex + 'FF')
@@ -225,7 +229,7 @@ export class ThreadView {
         setCardWhite(mat)
         setCardOpacity(mat, 1)
         spinner.setEnabled(false)
-        this.form.invalidate(2)
+        this.form.kick()
       })
 
       this.nodes.set(meta.eventId, { meta, mesh, mat, frame, frameMat, spinner, spinnerMat, x: p.x, y: p.y, w, h, depth: p.depth })
@@ -323,7 +327,7 @@ export class ThreadView {
   }
 
   private applyCamera(): void {
-    this.form.invalidate()
+    this.form.kick()
     const z = this.zoom
     this.camera.orthoTop = 20 * z
     this.camera.orthoBottom = -20 * z

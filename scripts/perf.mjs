@@ -27,6 +27,9 @@ const t0 = Date.now()
 await page.goto(URL, { waitUntil: 'domcontentloaded', timeout: 45000 })
 await page.waitForFunction(() => window.__form0?.board, null, { timeout: 30000 }).catch(() => {})
 const tBoot = Date.now() - t0
+// first-run legend is modal by design (and its full-screen backdrop-filter
+// dominates every measurement); dismiss it like a user would
+await page.evaluate(() => window.__form0?.legend?.close()).catch(() => {})
 await page.waitForFunction(() => window.__form0?.board?.rows?.length > 0, null, { timeout: 30000 }).catch(() => {})
 const tFirstCard = Date.now() - t0
 await page.waitForFunction(() => {
@@ -149,6 +152,32 @@ const stressScroll = await page.evaluate(async (dur) => {
     postersReady: window.__form0.assets.posterTex.size,
   }
 }, 4000)
+// same fling with ALL content work disabled: isolates raster cost from
+// download/parse/render work so the number is comparable run to run
+const stressScrollPure = await page.evaluate(async (dur) => {
+  const f = window.__form0
+  const b = f.board
+  f.assets.setPaused(true)
+  b.previewPool.releaseAll()
+  const start = performance.now()
+  const deltas = []
+  let last = performance.now()
+  await new Promise((done) => {
+    const tick = () => {
+      const now = performance.now()
+      deltas.push(now - last)
+      last = now
+      b.setScroll((b.scrollY + b.maxScroll / 90) % Math.max(0.1, b.maxScroll || 1))
+      if (now - start < dur) requestAnimationFrame(tick)
+      else done()
+    }
+    requestAnimationFrame(tick)
+  })
+  f.assets.setPaused(false)
+  const mean = deltas.reduce((a, x) => a + x, 0) / deltas.length
+  deltas.sort((a, x) => a - x)
+  return { fps: +(1000 / mean).toFixed(1), p95: +deltas[Math.floor(deltas.length * 0.95)].toFixed(2) }
+}, 3000)
 const stressHeap = await heap()
 const stressSpinners = await page.evaluate(() => window.__form0.board.cards.filter((c) => c.spinner.isEnabled()).length)
 
@@ -223,7 +252,7 @@ const result = {
   url: URL,
   cpuThrottle: CPU,
   boot: { engineReadyMs: tBoot, firstCardMs: tFirstCard, allPostersMs: tAllPosters, viewerOpenMs },
-  board, scrolling, stress: { static: stressStatic, scrolling: stressScroll, heapMB: stressHeap, spinnersLeft: stressSpinners }, viewer, thread, idleBoardWithLivePreview: idleWithLive, idleBoard: idle,
+  board, scrolling, stress: { static: stressStatic, scrolling: stressScroll, scrollingPureRender: stressScrollPure, heapMB: stressHeap, spinnersLeft: stressSpinners }, viewer, thread, idleBoardWithLivePreview: idleWithLive, idleBoard: idle,
   heapMB: { board: boardHeap, end: await heap() },
   counts: await page.evaluate(() => ({
     events: window.__form0.index.byId.size,
@@ -231,8 +260,7 @@ const result = {
     modelBlobsInMemory: window.__form0.assets.modelBlobs.size,
     modelBytesInMemory: [...window.__form0.assets.modelBlobs.values()].reduce((a, b) => a + b.size, 0),
     liveSlots: window.__form0.board.previewPool.activeCount,
-    framesRendered: window.__form0.engine.renderStats.rendered,
-    framesSkipped: window.__form0.engine.renderStats.skipped,
+    ...window.__form0.engine.perfStats(),   // renders / lastMs / emaMs / ratio
   })),
 }
 console.log(JSON.stringify(result, null, 1))

@@ -103,12 +103,17 @@ they hold on real GPUs too:
 
 | Metric | Budget |
 |---|---|
-| `idleBoard.rendersPerSec` (static board) | <= 3 (heartbeat only) |
+| `idleBoard.rendersPerSec` (static board) | 0 (the loop is demand-driven) |
 | `board.frameMs.p95` | < 25 ms |
-| `stress.scrolling.p95` (48 cards, continuous fling) | < 200 ms |
+| `stress.scrolling.p95` (48 cards, continuous fling) | < 120 ms |
 | `boot.firstCardMs` (production build) | < 1.5 s |
 | `counts.modelBytesInMemory` | < 48 MiB |
 | JS bundle | < 1.5 MB raw / 400 kB gzip |
 
 If a number regresses, look for: a latched activity probe, a texture upload in
 a per-frame path, work queued for offscreen cards, or a new barrel import.
+
+**Dismiss the first-run legend in any harness** (`window.__form0?.legend?.close()`).
+It is a full-screen `backdrop-filter: blur()` overlay; leaving it up makes every
+frame measurement meaningless (it turned a 65 ms p95 into 4600 ms here) and
+swallows clicks.

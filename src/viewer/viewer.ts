@@ -106,6 +106,10 @@ export class Viewer {
     setCardFlip(gm, 'dyn')
 
     this.scene.onBeforeRenderObservable.add(() => this.frameBackdrop())
+
+    // PERF: playing animation, an in-flight load, or a camera that actually
+    // moved (orbit inertia glide included).
+    engine.addAnimationSource(() => engine.activeScene === this.scene && this.isAnimating())
   }
 
   /** Keep the backdrop glued to the active camera and filling its frustum. */
@@ -127,7 +131,7 @@ export class Viewer {
   }
 
   setBackground(hex: string): void {
-    this.form.invalidate(3)
+    this.form.kick()
     this.background = hex
     this.scene.clearColor = Color4.FromHexString(hex + 'FF')
     paintSpotlight(this.backdropTex, hex)
@@ -180,7 +184,7 @@ export class Viewer {
       else if (this.imported.length > 0) idx = 0
       this.applyCamera(idx)
 
-      this.form.invalidate(4)
+      this.form.kick()
       if (this.anims.length) {
         const a = meta.previewAnimation ?? 0
         this.active = this.anims[Math.min(a, this.anims.length - 1)]

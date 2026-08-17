@@ -5,6 +5,9 @@ page.on('pageerror', e => console.log('[pageerror]', e.message.slice(0,160)))
 const URL = process.env.TARGET_URL || 'http://localhost:4173/'
 await page.goto(URL, { waitUntil: 'domcontentloaded', timeout: 30000 })
 await page.waitForFunction(() => window.__form0 && window.__form0.board, null, { timeout: 15000 }).catch(()=>{})
+
+// first-run legend is modal by design; dismiss it like a user would
+await page.evaluate(() => window.__form0?.legend?.close()).catch(() => {})
 await page.waitForTimeout(22000)
 
 // 1) reply badges

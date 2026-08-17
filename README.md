@@ -30,20 +30,27 @@ Measured with the new `scripts/perf.mjs` harness (headless SwiftShader,
 
 | | before | after |
 |---|---|---|
-| idle board | 13.7 renders/sec | **2.3** (heartbeat only) |
+| idle board | 13.7 renders/sec | **0** (demand-driven loop) |
 | board p95 frame | 82 ms | **17 ms** |
 | viewer / thread | 7.6 / 21.9 fps | **60 / 57 fps** |
-| 48-card fling | 5.6 fps, p95 858 ms | **12.4 fps, p95 147 ms** |
+| 48-card fling | 5.6 fps, p95 858 ms | **25.8 fps, p95 65 ms** |
 | all posters ready | ~15 s | **~8–11 s** |
 | first card (built) | 2.08 s | **1.22 s** |
 | JS bundle / standalone | 1617 kB / 3.52 MB | **1411 kB / 3.17 MB** |
 
-- **Render on demand.** The engine no longer draws 60 frames a second for a
-  static document. Each view exposes an activity probe (drag/momentum, an
-  animation playing, a camera that actually moved, a loading ring whose next
-  step is due, a live preview that is due for a refresh) and one-off changes
-  call `invalidate()`; a 400 ms heartbeat self-heals anything missed. ~80% of
-  animation frames are now skipped.
+- **Render on demand** (merged with agent-kestrel's parallel work on the same
+  task). The engine draws only when `kick()`ed (input, content arrival, route
+  change — a 300 ms uncapped window) or while a registered animation source
+  reports motion (capped at 30 fps). The sources are deliberately precise:
+  motion only while a ring STEP or a live-preview refresh is actually due, a
+  camera really moved, or drag/momentum is running. A static board renders
+  **zero** frames.
+- **Adaptive resolution now actually engages.** It was measuring the duration
+  of the `render()` call (~0.9 ms — that only submits work) instead of the
+  time between frames, so it could never trigger; it now feeds real frame
+  gaps into the EMA and steps the scale down on slow devices (measured: EMA
+  80 ms → 0.7× scale during a 48-card fling). The target ratio is
+  devicePixelRatio clamped by a 2.6 Mpx buffer budget.
 - **Virtualised board.** Card slots are recycled to the rows nearest the
   viewport — which also fixed a real bug: slots were bound by index, so with
   more roots than slots every row past the 24th was never drawn.

@@ -31,6 +31,21 @@ export class BlossomClient {
     this.servers = Array.from(new Set(servers.map(normalizeBlossom).filter((x): x is string => !!x)))
   }
 
+  /**
+   * One-shot reachability probe (network panel). HEAD a well-known path;
+   * ANY HTTP response (even 404) proves the server answers — network-level
+   * failure/timeout is the only "offline". no-cors keeps CORS-restricted
+   * servers probeable (opaque responses still resolve).
+   */
+  static async probe(url: string, timeoutMs = 5000): Promise<boolean> {
+    const normalized = normalizeBlossom(url)
+    if (!normalized) return false
+    try {
+      await fetch(normalized + '/', { method: 'HEAD', mode: 'no-cors', credentials: 'omit', signal: AbortSignal.timeout(timeoutMs) })
+      return true
+    } catch { return false }
+  }
+
   /** Download + verify: replicas in order, stream cap, SHA-256, GLB magic (06 §3.2). */
   async download(urls: string[], hash: string, expectedSize: number, maxBytes = LIMITS.modelBytesHard): Promise<Blob> {
     for (const url of urls) {

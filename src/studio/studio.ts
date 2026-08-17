@@ -15,10 +15,12 @@ import { theme } from '../theme'
 export class Studio {
   readonly scene: Scene
   private camera: ArcRotateCamera
-  private camHash = ''
 
   constructor(engine: FormEngine) {
     this.scene = new Scene(engine.engine)
+    // PERF: studio renders only during camera inertia glides (input kicks
+    // cover active drags; the stub scene has no other animation).
+    engine.addAnimationSource(() => engine.activeScene === this.scene && this.isAnimating())
     this.scene.clearColor = Color4.FromHexString(theme.background + 'FF')
     this.camera = new ArcRotateCamera('studio-cam', -Math.PI / 2, Math.PI / 2.2, 8, Vector3.Zero(), this.scene)
     this.camera.attachControl(true)
@@ -30,12 +32,11 @@ export class Studio {
     this.scene.clearColor = Color4.FromHexString(hex + 'FF')
   }
 
-  /** Render-on-demand probe: only while the camera is being moved. */
+  /** Render-on-demand probe: camera inertia glide (drags arrive as kicks). */
   isAnimating(): boolean {
-    const p = this.camera.position
-    const hash = `${p.x.toFixed(4)},${p.y.toFixed(4)},${p.z.toFixed(4)}`
-    if (hash !== this.camHash) { this.camHash = hash; return true }
-    return false
+    return Math.abs(this.camera.inertialAlphaOffset) > 1e-5
+      || Math.abs(this.camera.inertialBetaOffset) > 1e-5
+      || Math.abs(this.camera.inertialRadiusOffset) > 1e-4
   }
 
   attach(): void { this.camera.attachControl(true) }

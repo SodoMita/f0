@@ -186,6 +186,13 @@ export class Board {
     this.buildPool()
     this.resize()
     this.bindInput()
+
+    // PERF (merged with kestrel/perf): the engine renders on demand, so the
+    // board must declare when it is genuinely animating. This probe is
+    // deliberately narrower than "has a live slot or a spinner": it reports
+    // motion only while a ring step or a preview refresh is actually DUE,
+    // which keeps a board with one 20 fps live card off the 30 fps path.
+    engine.addAnimationSource(() => engine.activeScene === this.scene && this.isAnimating())
   }
 
   /**
@@ -211,7 +218,7 @@ export class Board {
     return this.previewPool.hasWork(this.visiblePosts)
   }
 
-  private invalidate(frames = 2): void { this.form.invalidate(frames) }
+  private invalidate(_frames = 2): void { this.form.kick() }
 
   /** Background colour follows the settings panel (viewer/thread/board). */
   setBackground(hex: string): void {

@@ -29,6 +29,10 @@ interface Slot {
   lastRenderAt: number
 }
 
+// kestrel/perf named this PREVIEW_FPS; it is now the default of the per-slot
+// budget below (each slot re-renders the whole stage scene).
+export const PREVIEW_FPS = 20
+
 export interface PreviewPoolOptions {
   maxSlots: number
   rttWidth: number
@@ -55,7 +59,7 @@ export class PreviewPool {
   onLive: ((postId: string, rtt: RenderTargetTexture) => void) | null = null
 
   constructor(engine: AbstractEngine, private getModel: (postId: string) => Promise<Blob | undefined>, opts?: Partial<PreviewPoolOptions>) {
-    this.opts = { maxSlots: 6, rttWidth: 512, rttHeight: 320, slotsPerFrame: 2, targetFps: 20, ...opts }
+    this.opts = { maxSlots: 6, rttWidth: 448, rttHeight: 280, slotsPerFrame: 2, targetFps: PREVIEW_FPS, ...opts }
     configureDraco()
     this.stage = new Scene(engine)
     // Transparent clear per render (see model/poster.ts): the scene owns the

@@ -19,6 +19,9 @@ page.on('pageerror', (e) => logs.push(`[pageerror] ${e.message.slice(0, 200)}`))
 
 await page.goto(URL, { waitUntil: 'domcontentloaded', timeout: 30000 })
 await page.waitForFunction(() => window.__form0 && window.__form0.board, null, { timeout: 15000 }).catch(() => {})
+
+// first-run legend is modal by design; dismiss it like a user would
+await page.evaluate(() => window.__form0?.legend?.close()).catch(() => {})
 await page.waitForTimeout(WAIT)
 
 // --- board top ---

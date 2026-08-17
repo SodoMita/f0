@@ -170,15 +170,26 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     zoom). setLoading(reason, on) is reference-counted by reason — never hide
     the ring while another reason is still loading.
 
-22. RENDER ON DEMAND. The engine does not draw every animation frame. Each
-    view registers an activity probe (`setActiveScene(scene, probe)`) and any
-    one-off change calls `engine.invalidate(n)`; a 400 ms heartbeat covers
-    anything nobody flagged. Rules for probes: return true only while
-    something is genuinely moving (drag/momentum, an animation playing, a
-    camera that actually changed, a loading ring whose next STEP is due, a
-    live preview whose refresh is DUE). Never latch a probe flag true — a
-    stuck flag silently restores 60 fps burn (that bug shipped twice during
-    this round: `pendingSettle` and offscreen loading rings).
+22. DEMAND-DRIVEN RENDER LOOP (kestrel/perf + hedgehog/perf, merged).
+    FormEngine renders a frame only when (a) `kick()`ed — any input, content
+    arrival, scene swap, resize, background change: a 300 ms uncapped window —
+    or (b) a registered animation source (`addAnimationSource`) reports
+    motion, capped at ANIM_FPS. A static board/viewer/thread renders ZERO
+    frames. Rules:
+      * ANY code that changes the picture outside a render MUST `kick()`.
+      * New continuous animation MUST register a source or it will freeze
+        when input stops.
+      * A source must report motion only while something is genuinely due:
+        a ring STEP due, a live preview refresh DUE, real camera movement,
+        drag/momentum. Never latch a source flag true — a stuck flag silently
+        restores full-rate rendering (two such bugs were found and fixed while
+        merging: a latched scroll-settle flag, and loading rings left spinning
+        on offscreen cards).
+    Adaptive resolution lives in FormEngine.adaptResolution (frame-time EMA
+    steps hardware scaling between 0.7x and the target ratio) — do not fight
+    it by pinning setHardwareScalingLevel elsewhere. The target ratio itself
+    is devicePixelRatio clamped by a 2.6 Mpx drawing-buffer budget, so a
+    4K/DPR2 screen never rasterises 33 Mpx before the controller reacts.
 
 23. The board is virtualised. Card slots are recycled to the rows nearest the
     viewport; never bind `rows[i] -> cards[i]` (with more roots than slots the
@@ -190,15 +201,14 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     (150 ms); `AssetCache.setPaused(true)` stops the poster queue while the
     feed moves, because a GLB parse plus an offscreen render blocks the main
     thread for tens to hundreds of ms. Live previews are capped per slot
-    (targetFps) and skipped entirely for offscreen cards.
+    (PREVIEW_FPS) and skipped entirely for offscreen cards.
 
-25. Pixels are budgeted. Hardware scaling = devicePixelRatio clamped by a
-    2.6 Mpx drawing-buffer budget (a 4K/DPR2 screen would otherwise rasterise
-    33 Mpx per frame); MSAA is off on phones. Posters/live previews render at
-    448x280 into ONE reusable render target with ONE reusable readback
-    buffer, and a freshly rendered poster is uploaded straight from the GPU
-    readback (the PNG for the IndexedDB cache is encoded off the critical
-    path).
+25. Posters are cheap. 448x280 into ONE reusable render target with ONE
+    reusable readback buffer; 3 warm-up frames then a single readback (not up
+    to 60 readbacks with 100 ms sleeps); the freshly rendered poster is
+    uploaded straight from the GPU readback to a RawTexture and the PNG for
+    the IndexedDB cache is encoded off the critical path. Model blobs in RAM
+    are an LRU (6 items / 48 MiB) on top of the IndexedDB cache.
 
 26. Loader is curated (`src/model/gltf.ts`). Importing `@babylonjs/loaders/glTF`
     drags in the glTF 1.0 loader and every 2.0 extension, including
