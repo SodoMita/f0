@@ -17,7 +17,7 @@ import type { FormEngine } from '../core/engine'
 import type { ThreadMeta } from '../protocol/thread-index'
 import { toFile } from '../model/poster'
 import { validateGLB } from '../model/limits'
-import { worldBox, frameDistance } from '../model/facing'
+import { worldBox, frameDistance, dominantFacing } from '../model/facing'
 import type { ShaderMaterial } from '@babylonjs/core/Materials/shaderMaterial'
 import {
   makeCardMaterial, setCardTexture, setCardTint, setCardWhite, setCardFlip, setCardOpacity,
@@ -196,17 +196,24 @@ export class Viewer {
     const { min, max, center, radius } = worldBox(this.container)
     const eng = this.scene.getEngine()
     const aspect = eng.getRenderWidth() / Math.max(1, eng.getRenderHeight())
-    const fwd = this.orbit.target.subtract(this.orbit.position)
-    const dist = frameDistance(min, max, center, fwd.lengthSquared() > 1e-6 ? fwd : new Vector3(0, 0, 1), this.orbit.fov || 0.8, aspect, 0.8)
+    // Open on the SAME side the poster was rendered from. The orbit camera used
+    // to start at alpha=-PI/2 (the -Z side), i.e. behind flat content, so the
+    // viewer showed mirrored wordmarks even though the card was correct.
+    const facing = dominantFacing(this.container)
+    const TILT = 0.12 // a few degrees of elevation for a little depth
+    const dir = facing.scale(Math.cos(TILT)).add(new Vector3(0, Math.sin(TILT), 0)).normalize()
+    const dist = frameDistance(min, max, center, dir.scale(-1), this.orbit.fov || 0.8, aspect, 0.8)
     this.orbit.setTarget(center)
-    this.orbit.radius = Math.max(0.6, dist)
-    this.orbit.lowerRadiusLimit = radius * 0.1
-    this.orbit.upperRadiusLimit = radius * 12
-    this.orbit.minZ = Math.max(0.001, radius * 0.01)
-    this.orbit.maxZ = dist * 8 + radius
+    this.orbit.setPosition(center.add(dir.scale(Math.max(0.6, dist))))
+    this.orbit.lowerRadiusLimit = Math.max(0.05, radius * 0.1)
+    this.orbit.upperRadiusLimit = Math.max(1, radius * 12)
+    this.orbit.minZ = Math.max(0.001, (dist - radius) * 0.2)
+    this.orbit.maxZ = dist + radius * 8
+    this.orbit.wheelPrecision = Math.max(1, 60 / Math.max(0.05, radius))
+    this.orbit.panningSensibility = Math.max(10, 900 / Math.max(0.05, radius))
     // contact shadow on the ground plane under the model
     this.glow.setEnabled(true)
-    this.glow.position.set(center.x, center.y - radius * 1.02, center.z)
+    this.glow.position.set(center.x, min.y - radius * 0.02, center.z)
     this.glow.scaling.set(radius * 1.9, radius * 1.9, 1)
     this.backdropDistance = Math.max(20, Math.min(dist * 6, radius * 26))
   }
