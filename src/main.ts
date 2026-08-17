@@ -15,7 +15,9 @@ import { configureDraco } from './model/draco'
 import { enforceOffline } from './model/offline'
 import { DEFAULTS, theme } from './theme'
 import { luminance } from './core/gfx'
-import { loadNetworkConfig, loadSettings, saveSettings } from './protocol/storage'
+import { loadNetworkConfig, loadSettings, saveSettings, listOwnedPosts, type OwnedPostRecord } from './protocol/storage'
+import { hexToBytes } from './util/hex'
+import { DELETE_KIND } from './theme'
 import { Legend } from './hud/legend'
 import { NetworkPanel } from './hud/networkPanel'
 import { ErrorSheet, ERRORS } from './hud/errorSheet'
@@ -198,6 +200,10 @@ async function boot(): Promise<void> {
         },
         { relays: pool.relayUrls, blossoms: blossoms.servers, pool, onProgress: onProgress },
       )
+      // registered as owned immediately (publishModel saved the record)
+      void listOwnedPosts().then((list) => {
+        for (const rec of list) owned.set(rec.eventId, rec)
+      })
       // Open the freshly published model.
       if (studioReply) router.go({ name: 'thread', rootId: studioReply.rootId, focusId: result.eventId })
       else router.go({ name: 'viewer', id: result.eventId })
@@ -226,6 +232,55 @@ async function boot(): Promise<void> {
     }
   })
   $('btn-download').addEventListener('click', () => void downloadCurrent())
+
+  // ---------- deletion (owned posts only) ----------
+  // ownedPosts holds the per-post signing secret; only those posts can emit
+  // a valid kind-5 (relays check the pubkey). The button stays hidden for
+  // everything else — wordless UI shows no dead controls.
+  const owned = new Map<string, OwnedPostRecord>()
+  void listOwnedPosts().then((list) => {
+    for (const rec of list) owned.set(rec.eventId, rec)
+    syncDeleteButton()
+  })
+  const vbtnDelete = $('vbtn-delete')
+  function syncDeleteButton(): void {
+    vbtnDelete.hidden = !(currentMeta && owned.has(currentMeta.eventId))
+  }
+  let deleting = false
+  $('btn-delete').addEventListener('click', () => {
+    if (!currentMeta || deleting) return
+    const rec = owned.get(currentMeta.eventId)
+    if (!rec) return
+    errorSheet.show({
+      code: 'D001',
+      cause: 'Delete this post? A kind-5 tombstone is published to your relays. Servers may keep the bytes; deletion hides, it does not destroy (spec SECURITY).',
+      action: 'delete post',
+      onAction: () => { void doDelete(rec) },
+    })
+  })
+  async function doDelete(rec: OwnedPostRecord): Promise<void> {
+    deleting = true
+    try {
+      const { ok, failed } = await pool.publish(
+        {
+          kind: DELETE_KIND,
+          created_at: Math.floor(Date.now() / 1000),
+          tags: [['e', rec.eventId]],
+          content: '',
+        },
+        hexToBytes(rec.secretKey),
+      )
+      // local tombstone immediately — the feed must not wait for the relays
+      index.tombstone(rec.eventId)
+      board.setMetas(orderedRoots())
+      showToast(ok.length ? `deleted · ${ok.length}/${ok.length + failed.length} relays` : 'delete failed on all relays')
+      if (ok.length) router.go({ name: 'board' })
+    } catch {
+      showToast('delete failed')
+    } finally {
+      deleting = false
+    }
+  }
   $('btn-meta').addEventListener('click', toggleDrawer)
   $('btn-meta-close').addEventListener('click', () => {
     drawer.hidden = true
@@ -390,6 +445,7 @@ async function boot(): Promise<void> {
     if (!meta) { setMode('board'); return }
     const nav = ++viewerNav
     currentMeta = meta
+    syncDeleteButton()
     setMode('viewer')
     camDots.innerHTML = ''
     setLoading('model', true, 'loading model')
