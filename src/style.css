@@ -838,9 +838,43 @@ body[data-theme="light"] .sheet-card { background: rgba(253, 246, 245, 0.97); bo
 .cam-advanced { border-top: 1px solid var(--line); padding-top: 8px; }
 .cam-advanced > summary { cursor: pointer; font: 11px ui-monospace,monospace; color: var(--muted); margin-bottom: 8px; }
 .num-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 6px; margin-bottom: 8px; }
+.cam-grid { grid-template-columns: repeat(3, 1fr); }
 .num-grid label { display: flex; flex-direction: column; gap: 2px; font: 9px ui-monospace,monospace; color: var(--muted); }
-.num-grid input { width: 100%; background: #0b0b0c; border: 1px solid var(--line); border-radius: 6px; color: var(--ink); padding: 5px; font: 11px ui-monospace,monospace; }
+.num-grid input { width: 100%; background: #0b0b0c; border: 1px solid var(--line); border-radius: 6px; color: var(--ink); padding: 5px; font: 11px ui-monospace,monospace; box-sizing: border-box; }
 .num-grid input:focus { outline: none; border-color: var(--accent); }
+.cam-btns { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.cam-btns .hbtn.small { flex: 1 1 auto; min-width: 38px; height: 28px; font-size: 10.5px; border-radius: 8px; padding: 0 4px; }
+.cam-btns .hbtn.small.primary { flex: 1.2 1 auto; font-weight: 700; }
+
+.studio-resize-handle {
+  display: none;
+  width: 100%;
+  height: 20px;
+  cursor: ns-resize;
+  touch-action: none;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  -webkit-user-select: none;
+  padding: 4px 0 2px;
+  box-sizing: border-box;
+}
+.resize-grip {
+  width: 44px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.22);
+  transition: background 0.15s ease, width 0.15s ease;
+}
+.studio-resize-handle:hover .resize-grip {
+  background: rgba(255, 255, 255, 0.48);
+  width: 54px;
+}
+.studio-inspector.resizing .resize-grip {
+  background: var(--accent);
+  width: 62px;
+}
 
 /* Responsive studio: side rail on landscape, bottom rail on portrait. */
 @media (orientation: portrait) {
@@ -861,13 +895,23 @@ body[data-theme="light"] .sheet-card { background: rgba(253, 246, 245, 0.97); bo
     align-self: stretch;
   }
   .rail-btn { width: 42px; height: 42px; border-radius: 12px; }
+  .studio-resize-handle {
+    display: flex;
+  }
   .studio-inspector {
     grid-row: 2;
-    max-height: 38vh;
-    transition: max-height 0.22s ease, opacity 0.18s ease, border-width 0.18s ease;
+    height: var(--inspector-h, 28vh);
+    max-height: var(--inspector-h, 28vh);
+    min-height: 48px;
+    transition: opacity 0.18s ease, border-width 0.18s ease;
+  }
+  .studio-inspector.resizing {
+    transition: none !important;
   }
   .studio-inspector.collapsed {
+    height: 0 !important;
     max-height: 0 !important;
+    min-height: 0 !important;
     opacity: 0;
     padding: 0;
     border-width: 0;
@@ -877,12 +921,13 @@ body[data-theme="light"] .sheet-card { background: rgba(253, 246, 245, 0.97); bo
   }
   .studio-stage { 
     grid-row: 1; 
-    min-height: 0;
+    min-height: 120px;
   }
   .fold-handle { display: block; }
-  .inspector-scroll { padding: 10px; gap: 10px; }
+  .inspector-scroll { padding: 6px 10px 10px; gap: 10px; }
   .num-grid { grid-template-columns: repeat(2,1fr); }
-  .num-grid label:last-child { grid-column: 1 / -1; }
+  .cam-grid { grid-template-columns: repeat(2, 1fr); }
+  .cam-grid label:last-child { grid-column: 1 / -1; }
   .studio-tools {
     bottom: 10px;
     padding: 4px;

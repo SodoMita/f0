@@ -103,6 +103,8 @@ async function boot(): Promise<void> {
   const textBudget = $('text-budget')
   const symbolGrid = $('symbol-grid')
   const camTarget = (['cam-tx','cam-ty','cam-tz'] as const).map((id) => $(id) as HTMLInputElement)
+  const camYaw = $('cam-yaw') as HTMLInputElement
+  const camPitch = $('cam-pitch') as HTMLInputElement
   const camFov = $('cam-fov') as HTMLInputElement
   const camRadius = $('cam-radius') as HTMLInputElement
   const fileInput = $('file-input') as HTMLInputElement
@@ -282,9 +284,11 @@ async function boot(): Promise<void> {
 
   function refreshCameraControls(): void {
     const c = studio.getCameraState()
-    c.target.forEach((v, i) => { camTarget[i].value = v.toFixed(2) })
-    camFov.value = c.fovDeg.toFixed(0)
-    camRadius.value = c.radius.toFixed(2)
+    c.target.forEach((v, i) => { if (camTarget[i]) camTarget[i].value = v.toFixed(2) })
+    if (camYaw) camYaw.value = c.rotationDeg[1].toFixed(1)
+    if (camPitch) camPitch.value = c.rotationDeg[2].toFixed(1)
+    if (camFov) camFov.value = c.fovDeg.toFixed(0)
+    if (camRadius) camRadius.value = c.radius.toFixed(2)
     document.querySelector<HTMLButtonElement>('#tool-freecam')?.classList.toggle('active', c.projection === 'free')
     refreshCameraList()
   }
@@ -368,6 +372,17 @@ async function boot(): Promise<void> {
     el.addEventListener('input', handler)
     el.addEventListener('change', handler)
   })
+  const handleCamRot = () => {
+    const y = num(camYaw)
+    const p = num(camPitch)
+    studio.setCameraState({ rotationDeg: [0, y, p] })
+    refreshCameraControls()
+  }
+  camYaw?.addEventListener('input', handleCamRot)
+  camYaw?.addEventListener('change', handleCamRot)
+  camPitch?.addEventListener('input', handleCamRot)
+  camPitch?.addEventListener('change', handleCamRot)
+
   camFov.addEventListener('input', () => studio.setCameraState({ fovDeg: num(camFov) }))
   camFov.addEventListener('change', () => { studio.setCameraState({ fovDeg: num(camFov) }); refreshCameraControls() })
   camRadius.addEventListener('input', () => studio.setCameraState({ radius: num(camRadius) }))
@@ -377,7 +392,10 @@ async function boot(): Promise<void> {
     b.addEventListener('click', () => {
       const m = b.dataset.cam
       if (m === 'frame') studio.frameCamera()
-      else studio.setCameraState({ projection: m as 'perspective' | 'ortho' })
+      else if (m === 'persp' || m === 'ortho') studio.setCameraState({ projection: m as 'perspective' | 'ortho' })
+      else if (m === 'front') studio.setCameraState({ rotationDeg: [0, 0, 0] })
+      else if (m === 'top') studio.setCameraState({ rotationDeg: [0, 0, 89.9] })
+      else if (m === 'side') studio.setCameraState({ rotationDeg: [0, 90, 0] })
       refreshCameraControls()
     }))
 
@@ -390,16 +408,85 @@ async function boot(): Promise<void> {
 
   const foldBtn = $('btn-studio-fold') as HTMLButtonElement | null
   const inspector = document.querySelector('.studio-inspector') as HTMLElement | null
+  const resizeHandle = $('studio-resize-handle') as HTMLElement | null
+
+  let savedInspectorHeight = 240
+
   const toggleFold = () => {
     if (!inspector) return
-    inspector.classList.toggle('collapsed')
-    document.body.classList.toggle('studio-collapsed', inspector.classList.contains('collapsed'))
-    foldBtn?.classList.toggle('active', inspector.classList.contains('collapsed'))
-    if (foldBtn) foldBtn.textContent = inspector.classList.contains('collapsed') ? '▴' : '▾'
+    const willCollapse = !inspector.classList.contains('collapsed')
+    inspector.classList.toggle('collapsed', willCollapse)
+    document.body.classList.toggle('studio-collapsed', willCollapse)
+    foldBtn?.classList.toggle('active', willCollapse)
+    if (foldBtn) foldBtn.textContent = willCollapse ? '▴' : '▾'
+    if (!willCollapse) {
+      const h = savedInspectorHeight || 240
+      inspector.style.setProperty('--inspector-h', `${h}px`)
+      inspector.style.height = `${h}px`
+      inspector.style.maxHeight = `${h}px`
+    }
     studio.kick(200)
   }
   foldBtn?.addEventListener('click', toggleFold)
   $('studio-fold-handle')?.addEventListener('click', toggleFold)
+
+  // Interactive vertical resizing of studio inspector in portrait/mobile
+  let isResizing = false
+  let resizeStartY = 0
+  let resizeStartH = 0
+  let resizeMoved = false
+
+  const startResize = (e: PointerEvent) => {
+    if (e.button !== 0 || !inspector) return
+    isResizing = true
+    resizeMoved = false
+    resizeStartY = e.clientY
+    const rect = inspector.getBoundingClientRect()
+    resizeStartH = rect.height
+    inspector.classList.add('resizing')
+    try { resizeHandle?.setPointerCapture(e.pointerId) } catch {}
+    e.preventDefault()
+  }
+
+  const doResize = (e: PointerEvent) => {
+    if (!isResizing || !inspector) return
+    const dy = resizeStartY - e.clientY // dragging up increases inspector height
+    if (Math.abs(dy) > 3) resizeMoved = true
+    const maxH = Math.max(140, window.innerHeight - 150)
+    const minH = 48
+    const newH = Math.max(minH, Math.min(maxH, resizeStartH + dy))
+    savedInspectorHeight = newH
+    inspector.style.setProperty('--inspector-h', `${newH}px`)
+    inspector.style.height = `${newH}px`
+    inspector.style.maxHeight = `${newH}px`
+    if (inspector.classList.contains('collapsed')) {
+      inspector.classList.remove('collapsed')
+      document.body.classList.remove('studio-collapsed')
+      if (foldBtn) foldBtn.textContent = '▾'
+      foldBtn?.classList.remove('active')
+    }
+    studio.kick(80)
+  }
+
+  const endResize = (e: PointerEvent) => {
+    if (!isResizing) return
+    isResizing = false
+    inspector?.classList.remove('resizing')
+    try { resizeHandle?.releasePointerCapture(e.pointerId) } catch {}
+    if (!resizeMoved) {
+      toggleFold()
+    } else if (inspector) {
+      const h = inspector.getBoundingClientRect().height
+      if (h < 60) {
+        toggleFold()
+      }
+    }
+  }
+
+  resizeHandle?.addEventListener('pointerdown', startResize)
+  resizeHandle?.addEventListener('pointermove', doResize)
+  resizeHandle?.addEventListener('pointerup', endResize)
+  resizeHandle?.addEventListener('pointercancel', endResize)
 
   // make all number inputs draggable (Blender-like)
   attachAllDragNumbers(document.body)
@@ -803,6 +890,28 @@ async function boot(): Promise<void> {
     if (mode === 'thread') {
       if (e.key === 'Escape') router.go({ name: 'board' })
       if (e.key === '0') threadView.fit()
+      return
+    }
+    if (mode === 'studio') {
+      const tag = (document.activeElement?.tagName || '').toUpperCase()
+      const isInput = tag === 'INPUT' || tag === 'TEXTAREA'
+      if (!isInput) {
+        if (e.key === 'w' || e.key === 'W') {
+          studio.setTransformMode('position')
+          document.querySelectorAll<HTMLButtonElement>('[data-xform]').forEach((x) => x.classList.toggle('active', x.dataset.xform === 'position'))
+        } else if (e.key === 'e' || e.key === 'E') {
+          studio.setTransformMode('rotation')
+          document.querySelectorAll<HTMLButtonElement>('[data-xform]').forEach((x) => x.classList.toggle('active', x.dataset.xform === 'rotation'))
+        } else if (e.key === 'r' || e.key === 'R') {
+          studio.setTransformMode('scale')
+          document.querySelectorAll<HTMLButtonElement>('[data-xform]').forEach((x) => x.classList.toggle('active', x.dataset.xform === 'scale'))
+        } else if (e.key === 'Delete' || e.key === 'Backspace') {
+          studio.deleteSelection()
+        } else if (e.key === 'Escape') {
+          if (studio.selected) studio.select(null)
+          else router.go({ name: 'board' })
+        }
+      }
       return
     }
     if (mode !== 'viewer') return
