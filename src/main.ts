@@ -92,16 +92,19 @@ async function boot(): Promise<void> {
   const topbar = $('topbar')
   const viewerBar = $('viewer-bar')
   const drawer = $('meta-drawer')
-  const studioBar = $('studio-bar')
+  const studioEl = $('studio')
   const studioFilename = $('studio-filename')
   const studioStatus = $('studio-status')
   const btnStudioImport = $('btn-studio-import') as HTMLButtonElement
   const btnStudioPublish = $('btn-studio-publish') as HTMLButtonElement
-  const studioEditor = $('studio-editor')
   const studioText = $('studio-text') as HTMLInputElement
   const studioAlign = $('studio-align') as HTMLButtonElement
-  const camAlpha = $('cam-alpha') as HTMLInputElement
-  const camBeta = $('cam-beta') as HTMLInputElement
+  const studioColor = $('studio-color') as HTMLInputElement
+  const textBudget = $('text-budget')
+  const symbolGrid = $('symbol-grid')
+  const camTarget = (['cam-tx','cam-ty','cam-tz'] as const).map((id) => $(id) as HTMLInputElement)
+  const camRot = (['cam-rx','cam-ry','cam-rz'] as const).map((id) => $(id) as HTMLInputElement)
+  const camFov = $('cam-fov') as HTMLInputElement
   const camRadius = $('cam-radius') as HTMLInputElement
   const fileInput = $('file-input') as HTMLInputElement
   let publishing = false
@@ -231,21 +234,61 @@ async function boot(): Promise<void> {
   btnStudioImport.addEventListener('click', () => void pickStudioFile())
   btnStudioPublish.addEventListener('click', () => void publishStudio())
 
+  // ---- Studio tabs ----
+  type StudioTab = 'upload' | 'type' | 'paint' | 'symbols'
+  let studioTab: StudioTab = 'upload'
+  function setStudioTab(tab: StudioTab): void {
+    studioTab = tab
+    document.querySelectorAll<HTMLButtonElement>('.rail-btn').forEach((b) => {
+      b.classList.toggle('active', b.dataset.tab === tab)
+    })
+    document.querySelectorAll<HTMLElement>('.studio-panel').forEach((p) => {
+      p.hidden = p.dataset.panel !== tab
+    })
+    if (tab === 'type' && !studio.text) {
+      studio.setText('/0'); studio.rebuildText()
+    }
+    studio.kick(120)
+  }
+  document.querySelectorAll<HTMLButtonElement>('.rail-btn').forEach((b) =>
+    b.addEventListener('click', () => setStudioTab(b.dataset.tab as StudioTab)),
+  )
+  // Built-in symbols (single built-in primitives; paint tab is the placeholder).
+  const SYMBOLS = ['■','●','▲','◆','★','♥','♦','♣']
+  if (symbolGrid) SYMBOLS.forEach((g, i) => {
+    const b = document.createElement('button')
+    b.textContent = g
+    b.title = `symbol ${i}`
+    b.addEventListener('click', () => { studioText.value = g; studio.setText(g); studio.rebuildText() })
+    symbolGrid.appendChild(b)
+  })
+
   // ---- Studio text + camera settings ----
   const ALIGN_CYCLE: Array<'left' | 'center' | 'right'> = ['left', 'center', 'right']
   let alignIdx = 1
-  function refreshCameraSliders(): void {
+  function updateTextBudget(): void {
+    if (!textBudget) return
+    const m = studio.scene.meshes.find((x) => x.name === 'studio-text')
+    const tris = m ? m.getTotalIndices() / 2 : 0
+    textBudget.textContent = `${studioText.value} · ${tris} tris`
+  }
+  function refreshCameraControls(): void {
     const c = studio.getCameraState()
-    camAlpha.value = String(c.alpha)
-    camBeta.value = String(c.beta)
-    camRadius.value = String(c.radius)
+    c.target.forEach((v, i) => { camTarget[i].value = v.toFixed(2) })
+    c.rotationDeg.forEach((v, i) => { camRot[i].value = v.toFixed(0) })
+    camFov.value = c.fovDeg.toFixed(0)
+    camRadius.value = c.radius.toFixed(2)
   }
   let textTimer = 0
   studioText.addEventListener('input', () => {
     studio.setText(studioText.value)
     btnStudioPublish.disabled = !studio.hasContent()
     clearTimeout(textTimer)
-    textTimer = window.setTimeout(() => { studio.rebuildText(); refreshCameraSliders() }, 120)
+    textTimer = window.setTimeout(() => { studio.rebuildText(); refreshCameraControls(); updateTextBudget() }, 120)
+  })
+  studioColor.addEventListener('input', () => {
+    studio.setTintColor(studioColor.value)
+    if (studio.currentModel === null) studio.rebuildText()
   })
   studioAlign.addEventListener('click', () => {
     alignIdx = (alignIdx + 1) % ALIGN_CYCLE.length
@@ -253,12 +296,25 @@ async function boot(): Promise<void> {
     studioAlign.textContent = ALIGN_CYCLE[alignIdx][0].toUpperCase()
     studio.rebuildText()
   })
-  for (const [el, key] of [[camAlpha, 'alpha'], [camBeta, 'beta'], [camRadius, 'radius']] as const) {
-    el.addEventListener('input', () => studio.setCameraState({ [key]: Number(el.value) }))
-  }
-  document.querySelector<HTMLButtonElement>('[data-cam=frame]')?.addEventListener('click', () => {
-    studio.frameCamera(); refreshCameraSliders()
-  })
+  // Numeric camera inputs — arbitrary editable values, no sliders.
+  const num = (el: HTMLInputElement) => Number.isFinite(Number(el.value)) ? Number(el.value) : 0
+  camTarget.forEach((el, i) => el.addEventListener('change', () => {
+    const t = studio.getCameraState().target.slice() as [number, number, number]
+    t[i] = num(el); studio.setCameraState({ target: t }); refreshCameraControls()
+  }))
+  camRot.forEach((el) => el.addEventListener('change', () => {
+    studio.setCameraState({ rotationDeg: [num(camRot[0]), num(camRot[1]), num(camRot[2])] })
+    refreshCameraControls()
+  }))
+  camFov.addEventListener('change', () => studio.setCameraState({ fovDeg: num(camFov) }))
+  camRadius.addEventListener('change', () => studio.setCameraState({ radius: num(camRadius) }))
+  document.querySelectorAll<HTMLButtonElement>('[data-cam]').forEach((b) =>
+    b.addEventListener('click', () => {
+      const m = b.dataset.cam
+      if (m === 'frame') studio.frameCamera()
+      else studio.setCameraState({ projection: m as 'perspective' | 'ortho' })
+      refreshCameraControls()
+    }))
   $('btn-close').addEventListener('click', () => router.go({ name: 'board' }))
   $('btn-prev').addEventListener('click', () => void stepViewer(-1))
   $('btn-next').addEventListener('click', () => void stepViewer(1))
@@ -534,8 +590,7 @@ async function boot(): Promise<void> {
       setLoading('model', false)
       viewer.clear()
     }
-    studioBar.hidden = next !== 'studio'
-    studioEditor.hidden = next !== 'studio'
+    studioEl.hidden = next !== 'studio'
     if (next === 'board') {
       engine.setActiveScene(board.scene)
       topbar.hidden = false
@@ -605,17 +660,11 @@ async function boot(): Promise<void> {
     else if (route.name === 'studio') {
       studioReply = route.rootId && route.parentId ? { rootId: route.rootId, parentId: route.parentId } : null
       setMode('studio')
-      // Fresh composer each time (drop the previous import/text).
       studio.clearModel()
       studioFilename.textContent = ''
-      studioText.value = '/0'
-      studio.setText('/0')
-      studio.setTextAlign('center')
-      studioAlign.textContent = 'C'
-      studio.rebuildText()
-      btnStudioPublish.disabled = false
+      setStudioTab('upload')
       setStudioStatus(studioReply ? 'replying…' : '')
-      refreshCameraSliders()
+      refreshCameraControls()
     }
     else if (route.name === 'network') {
       setMode('board')
