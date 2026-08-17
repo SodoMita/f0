@@ -6,6 +6,9 @@ let crashed = false
 page.on('crash', () => { crashed = true })
 await page.goto('file:///home/user/f0/form-zero-standalone.html', { waitUntil: 'domcontentloaded' })
 await page.waitForFunction(() => window.__form0 && window.__form0.index, null, { timeout: 15000 }).catch(()=>{})
+
+// first-run legend is modal by design; dismiss it like a user would
+await page.evaluate(() => window.__form0?.legend?.close()).catch(() => {})
 await page.waitForTimeout(20000)
 const m = await page.evaluate(() => ({
   alive: true,

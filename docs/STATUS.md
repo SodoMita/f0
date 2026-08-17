@@ -5,6 +5,19 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 
+- [x] **First-run legend + Network panel + Error sheets** (agent-kestrel,
+      2026-08-17, branch kestrel/legend-network-errors). Legend: modal on
+      first run (seen-flag in IDB 'settings'), `?` reopens, Esc/OK close.
+      Network panel: `#/network` route + net-dot button; add/remove/probe/
+      reset relays & Blossom; live relay state dots; `RelayPool.applyRelays()`
+      hot-swaps connections (onclose detached during teardown so the swap
+      can't false-fire E201); `RelayPool.probe`/`BlossomClient.probe` one-shot
+      checks; persisted via saveNetworkConfig. Error sheets (`src/hud/
+      errorSheet.ts`): stable codes E101 download / E102 parse / E201 relays
+      / E301 import, each code+cause+action, replaces bare toasts for model
+      failures. Verified headless: /tmp-style HUD test + smoke + features +
+      standalone. Test scripts dismiss the legend after boot.
+
 - [x] Vite + TS skeleton, one canvas / one Engine, fatal path, router.
 - [x] Relay pool + live feed (both filters: `#t form-zero` + `#m model/*`),
       per-relay state, reconnect backoff. (`protocol/nostr.ts`)
@@ -69,6 +82,7 @@ move it to **Done** with a commit reference. One agent per area.
 - [ ] Studio: import GLB only. Publish (BUD-01) + audio embed + ownership are
       **not** implemented (`studio/studio.ts` is a stub).
 
+
 ## Next (priority order — pick one and claim it)
 
 **Editor core (the product's primary use cases — do these first):**
@@ -102,9 +116,6 @@ move it to **Done** with a commit reference. One agent per area.
       offer the typed fallback).
 - [ ] **Studio publish flow**: BUD-01 upload, kind-1063 event, ownership
       secrets, preservation report (blocks publish on loss), partial-success UI.
-- [ ] **First-run legend** (spec 02 §1.1 — mandatory).
-- [ ] **Network panel** (add/remove/probe/reset relays + Blossom).
-- [ ] **Error sheets** (card/action error → code + cause + action).
 - [ ] **Reply authoring** (compose → publish flow).
 - [ ] **Deletion UI** (tombstones already applied in the index).
 - [ ] **Tests**: Vitest unit suite (URL normalize, tags, NIP-10, VFS, GLB
@@ -114,7 +125,6 @@ move it to **Done** with a commit reference. One agent per area.
 ## Known gaps / debt
 
 - Studio scene is an import stub; no editor tooling.
-- `#/network` route falls back to the board (no panel).
 - Poster/preview pool renders share one scene (serialized by a mutex) — fine
   for now, but per-slot isolation is on the roadmap (spec 03 §5).
 - No service worker / offline caching beyond IndexedDB poster cache.

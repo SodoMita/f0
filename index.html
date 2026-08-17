@@ -24,7 +24,7 @@
       </button>
       <span id="brand" class="brand">FORM<span class="brand-zero">/0</span></span>
       <div class="spacer"></div>
-      <span id="net-dot" class="net-dot" title="relays"></span>
+      <button id="net-dot" class="net-dot" title="network" aria-label="network"></button>
       <button id="btn-shuffle" class="hbtn" title="shuffle" aria-label="shuffle">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5h3.6c1.4 0 2.2.7 3 1.8l4.8 7c.8 1.1 1.6 1.8 3 1.8H21"/><path d="M3 17.5h3.6c1.4 0 2.2-.7 3-1.8l1.3-1.9"/><path d="M13.6 8.4l.8-1.1c.8-1.1 1.6-1.8 3-1.8H21"/><path d="M18.4 3.4L21 5.5l-2.6 2.1"/><path d="M18.4 15L21 17.1l-2.6 2.1"/></svg>
       </button>
@@ -108,6 +108,69 @@
     </div>
 
     <div id="toast" class="hud" hidden></div>
+
+    <!-- First-run legend (spec 02 §1.1 — mandatory, reopenable, seen-flag in IDB).
+         The app is wordless; this is the one place glyphs are explained. -->
+    <div id="legend" class="hud" hidden>
+      <div class="legend-card" role="dialog" aria-label="legend">
+        <div class="drawer-head">
+          <span>FORM<span class="brand-zero">/0</span> — LEGEND</span>
+          <button id="btn-legend-close" class="hbtn small" title="close" aria-label="close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12"/><path d="M18 6L6 18"/></svg></button>
+        </div>
+        <div class="legend-rows">
+          <div class="legend-row"><span class="legend-glyph"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg></span><span>board — the feed of 3D posts. Tap a card to open it.</span></div>
+          <div class="legend-row"><span class="legend-glyph legend-pill">&#8617;&nbsp;3</span><span>replies — tap the pill on a card to open its thread map.</span></div>
+          <div class="legend-row"><span class="legend-glyph"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5.5" r="2.2"/><circle cx="5.5" cy="18.5" r="2.2"/><circle cx="18.5" cy="18.5" r="2.2"/><path d="M12 7.7v4.3m0 0-5 4.7m5-4.7 5 4.7"/></svg></span><span>thread — drag pans, wheel / pinch zooms, tap a node opens it, 0 re-fits.</span></div>
+          <div class="legend-row"><span class="legend-glyph"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 5.5v13l10-6.5z"/></svg></span><span>viewer — orbit with the pointer; A plays, C cycles the model's own cameras.</span></div>
+          <div class="legend-row"><span class="legend-glyph"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg></span><span>create — import a GLB model and post it.</span></div>
+          <div class="legend-row"><span class="legend-glyph"><span class="net-dot legend-dot"></span></span><span>relays — grey none, amber partial, green all connected. Tap for the network panel.</span></div>
+          <div class="legend-row"><span class="legend-glyph"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v10m0 0 4.5-4.5M12 14l-4.5-4.5"/><path d="M5 19h14"/></svg></span><span>save — download the original GLB bytes of the open model.</span></div>
+        </div>
+        <button id="btn-legend-ok" class="legend-ok">OK</button>
+      </div>
+    </div>
+
+    <!-- Network panel (#/network): relays + Blossom servers. Text allowed here (spec: "Network panel: only URLs"). -->
+    <div id="network-panel" class="hud" hidden>
+      <div class="drawer-head">
+        <span>NETWORK</span>
+        <button id="btn-network-close" class="hbtn small" title="close" aria-label="close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12"/><path d="M18 6L6 18"/></svg></button>
+      </div>
+      <div class="net-section">
+        <div class="net-title">RELAYS <span class="net-hint">wss://</span></div>
+        <ul id="relay-list" class="net-list"></ul>
+        <form id="relay-add" class="net-add">
+          <input type="text" inputmode="url" placeholder="wss://relay.example.com" spellcheck="false" autocomplete="off" />
+          <button type="submit" class="hbtn small" title="add relay" aria-label="add relay"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg></button>
+        </form>
+      </div>
+      <div class="net-section">
+        <div class="net-title">BLOSSOM <span class="net-hint">https://</span></div>
+        <ul id="blossom-list" class="net-list"></ul>
+        <form id="blossom-add" class="net-add">
+          <input type="text" inputmode="url" placeholder="https://blossom.example.com" spellcheck="false" autocomplete="off" />
+          <button type="submit" class="hbtn small" title="add server" aria-label="add server"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg></button>
+        </form>
+      </div>
+      <div class="net-actions">
+        <button id="btn-net-probe" class="net-btn">probe all</button>
+        <button id="btn-net-reset" class="net-btn danger">reset to defaults</button>
+      </div>
+    </div>
+
+    <!-- Error sheet (spec: errors are a sheet with code + cause + action, never a bare '!') -->
+    <div id="error-sheet" class="hud" hidden role="alertdialog" aria-live="assertive">
+      <div class="sheet-card">
+        <div class="sheet-head">
+          <span id="error-code" class="sheet-code">E000</span>
+          <button id="btn-error-close" class="hbtn small" title="dismiss" aria-label="dismiss"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12"/><path d="M18 6L6 18"/></svg></button>
+        </div>
+        <div id="error-cause" class="sheet-cause"></div>
+        <div class="sheet-actions">
+          <button id="btn-error-action" class="net-btn"></button>
+        </div>
+      </div>
+    </div>
 
     <input id="file-input" type="file" multiple hidden accept=".glb,.gltf,.bin,.obj,.mtl,.png,.jpg,.jpeg,.webp" />
     <div id="a11y-bridge" hidden></div>
