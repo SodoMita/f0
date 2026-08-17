@@ -87,8 +87,10 @@ export class ThreadView {
   private spinObserver = false
   private canvas: HTMLCanvasElement | null = null
   private attached = false
+  private form: FormEngine
 
   constructor(engine: FormEngine) {
+    this.form = engine
     this.scene = new Scene(engine.engine)
     this.scene.clearColor = Color4.FromHexString(this.background + 'FF')
     this.scene.skipPointerMovePicking = true
@@ -110,7 +112,15 @@ export class ThreadView {
     this.applyCamera()
   }
 
+  /** Render-on-demand probe: pointers down, or a node still waiting on its poster. */
+  isAnimating(): boolean {
+    if (this.pointers.size > 0) return true
+    for (const n of this.nodes.values()) if (n.spinner.isEnabled()) return true
+    return false
+  }
+
   setBackground(hex: string): void {
+    this.form.invalidate(3)
     this.background = hex
     this.isDark = luminance(hex) < 0.5
     this.scene.clearColor = Color4.FromHexString(hex + 'FF')
@@ -215,6 +225,7 @@ export class ThreadView {
         setCardWhite(mat)
         setCardOpacity(mat, 1)
         spinner.setEnabled(false)
+        this.form.invalidate(2)
       })
 
       this.nodes.set(meta.eventId, { meta, mesh, mat, frame, frameMat, spinner, spinnerMat, x: p.x, y: p.y, w, h, depth: p.depth })
@@ -312,6 +323,7 @@ export class ThreadView {
   }
 
   private applyCamera(): void {
+    this.form.invalidate()
     const z = this.zoom
     this.camera.orthoTop = 20 * z
     this.camera.orthoBottom = -20 * z

@@ -2,7 +2,11 @@ import { Matrix, Vector3 } from '@babylonjs/core/Maths/math.vector'
 import { VertexBuffer } from '@babylonjs/core/Buffers/buffer'
 import type { AssetContainer } from '@babylonjs/core/assetContainer'
 
-const MAX_TRIANGLES = 100_000
+// Sampling budget. We STRIDE over the whole model instead of taking the first
+// N triangles: same answer, a fraction of the work, and no bias toward
+// whichever mesh happens to be first (this runs for every poster, every live
+// preview and every viewer open).
+const MAX_TRIANGLES = 12_000
 
 /** Diagnostics for test/facing.ts (never used in production paths). */
 export let lastFacingDebug: { sum: Vector3; mag: Vector3; triangles: number } | null = null
@@ -37,7 +41,9 @@ export function dominantFacing(container: AssetContainer, out?: Vector3): Vector
     if (!data || !indices) continue
     const normals = mesh.getVerticesData(VertexBuffer.NormalKind)
     const world = mesh.getWorldMatrix()
-    for (let i = 0; i + 2 < indices.length; i += 3) {
+    const triCount = Math.floor(indices.length / 3)
+    const stride = Math.max(1, Math.ceil(triCount / Math.max(1, MAX_TRIANGLES - triangles))) * 3
+    for (let i = 0; i + 2 < indices.length; i += stride) {
       if (triangles >= MAX_TRIANGLES) break
       const i0 = indices[i] * 3, i1 = indices[i + 1] * 3, i2 = indices[i + 2] * 3
       a.set(data[i0], data[i0 + 1], data[i0 + 2])

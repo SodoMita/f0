@@ -12,18 +12,24 @@ const POSTER_CACHE_V = 'p3:'
 
 const MAX_POSTER_CONCURRENT = 3 // concurrent downloads; the shared render scene serializes renders internally
 const AUTO_POSTER_MAX_BYTES = 8 * 1024 * 1024
+// Decoded GLBs stay in IndexedDB; RAM only keeps the few most recent, or a
+// board full of 20 MiB models parks hundreds of megabytes for nothing.
+const MODEL_RAM_BUDGET = 48 * 1024 * 1024
+const MODEL_RAM_MAX_ITEMS = 6
 
 interface Job { meta: ThreadMeta; resolve: (tex: Texture | undefined) => void }
 
 export class AssetCache {
   private posterTex = new Map<string, Texture>()
-  private modelBlobs = new Map<string, Blob>()
+  private modelBlobs = new Map<string, Blob>() // insertion order == LRU order
+  private modelInflight = new Map<string, Promise<Blob | undefined>>()
   private byPostId = new Map<string, ThreadMeta>()
   private animatedBySha = new Map<string, boolean>()
   private footprintBySha = new Map<string, Footprint | null>()
   private queue: Job[] = []
   private inflight = new Map<string, Promise<Texture | undefined>>()
   private active = 0
+  private paused = false
   private poster: PosterRenderer
 
   constructor(private blossoms: BlossomClient, private scene: Scene) {
@@ -52,6 +58,18 @@ export class AssetCache {
     return p
   }
 
+  /**
+   * Drop a queued poster job that nobody is waiting for any more (the card
+   * scrolled away and its slot was recycled). Jobs already rendering finish.
+   */
+  cancelPoster(eventId: string): void {
+    const at = this.queue.findIndex((j) => j.meta.eventId === eventId)
+    if (at < 0) return
+    const [job] = this.queue.splice(at, 1)
+    this.inflight.delete('poster-' + eventId)
+    job.resolve(undefined)
+  }
+
   isAnimated(meta: ThreadMeta): boolean | undefined {
     return this.animatedBySha.get(meta.sha256)
   }
@@ -61,7 +79,19 @@ export class AssetCache {
     return this.footprintBySha.get(meta.sha256)
   }
 
+  /**
+   * Suspend poster work. A GLB parse plus an offscreen render blocks the main
+   * thread for tens to hundreds of milliseconds; the board pauses the queue
+   * while the feed is being flung so those stalls don't land mid-scroll.
+   */
+  setPaused(paused: boolean): void {
+    if (this.paused === paused) return
+    this.paused = paused
+    if (!paused) this.drain()
+  }
+
   private drain(): void {
+    if (this.paused) return
     while (this.active < MAX_POSTER_CONCURRENT && this.queue.length) {
       this.active++
       const job = this.queue.shift()!
@@ -74,7 +104,23 @@ export class AssetCache {
 
   private async produce(meta: ThreadMeta): Promise<Texture | undefined> {
     try {
-      const blob = meta.thumbUrl ? await this.fetchThumb(meta) : await this.renderLocal(meta)
+      // Fast path: freshly rendered posters go straight from the GPU readback
+      // to a RawTexture. The old path went pixels -> PNG -> Image -> canvas ->
+      // getImageData -> texture, i.e. an encode and a decode per poster.
+      if (!meta.thumbUrl) {
+        const direct = await this.renderLocalPixels(meta)
+        if (direct) {
+          const tex = RawTexture.CreateRGBATexture(
+            direct.pixels, direct.width, direct.height, this.scene, false, false, Texture.BILINEAR_SAMPLINGMODE,
+          )
+          tex.name = 'poster-' + meta.eventId.slice(0, 8)
+          tex.wrapU = Texture.CLAMP_ADDRESSMODE
+          tex.wrapV = Texture.CLAMP_ADDRESSMODE
+          this.posterTex.set(meta.eventId, tex)
+          return tex
+        }
+      }
+      const blob = meta.thumbUrl ? await this.fetchThumb(meta) : await this.cachedPoster(meta)
       if (!blob) return undefined
       // Decode the PNG to raw RGBA and upload directly (RawTexture). This
       // sidesteps both the async blob-URL Texture load and DynamicTexture's
@@ -97,22 +143,32 @@ export class AssetCache {
     } catch { return undefined }
   }
 
-  private async renderLocal(meta: ThreadMeta): Promise<Blob | undefined> {
-    if (meta.size > AUTO_POSTER_MAX_BYTES) return undefined // no auto-poster >8 MiB
+  /** Previously rendered poster (PNG) from IndexedDB, if any. */
+  private async cachedPoster(meta: ThreadMeta): Promise<Blob | undefined> {
     const cached = await get<Blob>('posterCache', POSTER_CACHE_V + meta.sha256)
-    if (cached) {
-      const fp = await get<Footprint>('posterCache', POSTER_CACHE_V + meta.sha256 + ':fp')
-      this.footprintBySha.set(meta.sha256, fp ?? null)
-      return cached
-    }
+    if (!cached) return undefined
+    const fp = await get<Footprint>('posterCache', POSTER_CACHE_V + meta.sha256 + ':fp')
+    this.footprintBySha.set(meta.sha256, fp ?? null)
+    return cached
+  }
+
+  /** Render a poster now and hand back the raw GPU pixels (no PNG round trip). */
+  private async renderLocalPixels(meta: ThreadMeta): Promise<{ pixels: Uint8Array; width: number; height: number } | undefined> {
+    if (meta.size > AUTO_POSTER_MAX_BYTES) return undefined // no auto-poster >8 MiB
+    if (await this.cachedPoster(meta)) return undefined     // decode the cached PNG instead
     const model = await this.getModel(meta)
     if (!model) return undefined
     const result = await this.poster.render(model)
     this.animatedBySha.set(meta.sha256, result.animated)
     this.footprintBySha.set(meta.sha256, result.footprint)
-    void put('posterCache', POSTER_CACHE_V + meta.sha256, result.blob)
-    if (result.footprint) void put('posterCache', POSTER_CACHE_V + meta.sha256 + ':fp', result.footprint)
-    return result.blob
+    // Encode the cache copy off the critical path — the card is already up.
+    setTimeout(() => {
+      void result.toPng().then((png) => {
+        void put('posterCache', POSTER_CACHE_V + meta.sha256, png)
+        if (result.footprint) void put('posterCache', POSTER_CACHE_V + meta.sha256 + ':fp', result.footprint)
+      }).catch(() => undefined)
+    }, 0)
+    return { pixels: result.pixels, width: result.width, height: result.height }
   }
 
   private async fetchThumb(meta: ThreadMeta): Promise<Blob | undefined> {
@@ -127,14 +183,42 @@ export class AssetCache {
   async getModel(meta: ThreadMeta): Promise<Blob | undefined> {
     this.byPostId.set(meta.eventId, meta)
     const hit = this.modelBlobs.get(meta.eventId)
-    if (hit) return hit
-    try {
-      const cached = await get<Blob>('modelCache', meta.sha256)
-      const blob = cached ?? await this.blossoms.download(meta.urls, meta.sha256, meta.size)
-      if (!cached) void put('modelCache', meta.sha256, blob)
-      this.modelBlobs.set(meta.eventId, blob)
-      return blob
-    } catch { return undefined }
+    if (hit) {
+      // refresh LRU position
+      this.modelBlobs.delete(meta.eventId)
+      this.modelBlobs.set(meta.eventId, hit)
+      return hit
+    }
+    const inflight = this.modelInflight.get(meta.eventId)
+    if (inflight) return inflight
+    const job = (async () => {
+      try {
+        const cached = await get<Blob>('modelCache', meta.sha256)
+        const blob = cached ?? await this.blossoms.download(meta.urls, meta.sha256, meta.size)
+        if (!cached) void put('modelCache', meta.sha256, blob)
+        this.modelBlobs.set(meta.eventId, blob)
+        this.evictModels()
+        return blob
+      } catch {
+        return undefined
+      } finally {
+        this.modelInflight.delete(meta.eventId)
+      }
+    })()
+    this.modelInflight.set(meta.eventId, job)
+    return job
+  }
+
+  /** Keep the in-RAM blob cache bounded (IndexedDB still has everything). */
+  private evictModels(): void {
+    let bytes = 0
+    for (const b of this.modelBlobs.values()) bytes += b.size
+    while (this.modelBlobs.size > MODEL_RAM_MAX_ITEMS || bytes > MODEL_RAM_BUDGET) {
+      const oldest = this.modelBlobs.keys().next()
+      if (oldest.done) break
+      bytes -= this.modelBlobs.get(oldest.value)?.size ?? 0
+      this.modelBlobs.delete(oldest.value)
+    }
   }
 
   dispose(): void {

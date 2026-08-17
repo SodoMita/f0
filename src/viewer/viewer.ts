@@ -12,7 +12,7 @@ import { Vector3 } from '@babylonjs/core/Maths/math.vector'
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color'
 import type { AssetContainer } from '@babylonjs/core/assetContainer'
 import type { AnimationGroup } from '@babylonjs/core/Animations/animationGroup'
-import '@babylonjs/loaders/glTF'
+import '../model/gltf'
 import type { FormEngine } from '../core/engine'
 import type { ThreadMeta } from '../protocol/thread-index'
 import { toFile } from '../model/poster'
@@ -49,8 +49,11 @@ export class Viewer {
   // container away instead of adding it to the scene.
   private loadToken = 0
   private pending = false
+  private form: FormEngine
+  private camHash = ''
 
   constructor(engine: FormEngine) {
+    this.form = engine
     this.scene = new Scene(engine.engine)
     this.scene.clearColor = Color4.FromHexString(this.background + 'FF')
     this.orbit = new ArcRotateCamera('viewer-orbit', -Math.PI / 2, Math.PI / 2.2, 6, Vector3.Zero(), this.scene)
@@ -124,6 +127,7 @@ export class Viewer {
   }
 
   setBackground(hex: string): void {
+    this.form.invalidate(3)
     this.background = hex
     this.scene.clearColor = Color4.FromHexString(hex + 'FF')
     paintSpotlight(this.backdropTex, hex)
@@ -176,6 +180,7 @@ export class Viewer {
       else if (this.imported.length > 0) idx = 0
       this.applyCamera(idx)
 
+      this.form.invalidate(4)
       if (this.anims.length) {
         const a = meta.previewAnimation ?? 0
         this.active = this.anims[Math.min(a, this.anims.length - 1)]
@@ -189,6 +194,23 @@ export class Viewer {
 
   /** True while a model is being fetched/parsed for this view. */
   get busy(): boolean { return this.pending }
+
+  /**
+   * Render-on-demand probe (see core/engine.ts): the viewer needs frames
+   * while an animation plays, while a model is loading, or while the camera
+   * is still moving — including ArcRotate's inertia glide after a drag.
+   */
+  isAnimating(): boolean {
+    if (this.pending) return true
+    if (this.active?.isPlaying) return true
+    const cam = this.scene.activeCamera
+    if (!cam) return false
+    const p = cam.position
+    const t = (cam as ArcRotateCamera).target
+    const hash = `${p.x.toFixed(4)},${p.y.toFixed(4)},${p.z.toFixed(4)},${t ? t.x.toFixed(4) + ',' + t.y.toFixed(4) + ',' + t.z.toFixed(4) : ''}`
+    if (hash !== this.camHash) { this.camHash = hash; return true }
+    return false
+  }
 
   /**
    * Meshes in the scene that are NOT the viewer's own helpers. Must always

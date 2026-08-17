@@ -11,7 +11,7 @@ import { Vector3 } from '@babylonjs/core/Maths/math.vector'
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color'
 import type { AssetContainer } from '@babylonjs/core/assetContainer'
 import type { AnimationGroup } from '@babylonjs/core/Animations/animationGroup'
-import '@babylonjs/loaders/glTF'
+import '../model/gltf'
 import { configureDraco } from '../model/draco'
 import { dominantFacing, worldBox, frameDistance } from '../model/facing'
 import { toFile } from '../model/poster'
@@ -26,9 +26,17 @@ interface Slot {
   postId: string | null
   phase: number
   facing: Vector3
+  lastRenderAt: number
 }
 
-export interface PreviewPoolOptions { maxSlots: number; rttWidth: number; rttHeight: number; slotsPerFrame: number }
+export interface PreviewPoolOptions {
+  maxSlots: number
+  rttWidth: number
+  rttHeight: number
+  slotsPerFrame: number
+  /** per-slot refresh cap; live cards do not need 60 fps */
+  targetFps: number
+}
 
 /**
  * Bounded RenderTargetTexture pool (step 6 / 03 §5). One hidden stage scene;
@@ -47,7 +55,7 @@ export class PreviewPool {
   onLive: ((postId: string, rtt: RenderTargetTexture) => void) | null = null
 
   constructor(engine: AbstractEngine, private getModel: (postId: string) => Promise<Blob | undefined>, opts?: Partial<PreviewPoolOptions>) {
-    this.opts = { maxSlots: 6, rttWidth: 512, rttHeight: 320, slotsPerFrame: 2, ...opts }
+    this.opts = { maxSlots: 6, rttWidth: 512, rttHeight: 320, slotsPerFrame: 2, targetFps: 20, ...opts }
     configureDraco()
     this.stage = new Scene(engine)
     // Transparent clear per render (see model/poster.ts): the scene owns the
@@ -70,6 +78,28 @@ export class PreviewPool {
   }
 
   get activeCount(): number { return this.byPost.size }
+
+  /**
+   * Is any VISIBLE live slot due for a refresh right now? The board uses this
+   * as its render-on-demand probe, so one animated card makes the board draw
+   * at the preview refresh rate (targetFps) instead of at display rate.
+   */
+  hasWork(visible?: ReadonlySet<string>): boolean {
+    if (this.byPost.size === 0) return false
+    const now = performance.now()
+    const minGap = 1000 / Math.max(1, this.opts.targetFps)
+    for (const slot of this.slots) {
+      if (!slot.postId) continue
+      if (visible && !visible.has(slot.postId)) continue
+      if (now - slot.lastRenderAt >= minGap) return true
+    }
+    return false
+  }
+
+  /** Free every live slot (used when the board goes off screen). */
+  releaseAll(): void {
+    for (const id of [...this.byPost.keys()]) this.release(id)
+  }
   isRejected(postId: string): boolean { return this.rejected.has(postId) }
   rejectReason(postId: string): 'STATIC' | 'FAILED' | undefined { return this.rejected.get(postId) }
   retry(postId: string): void { this.rejected.delete(postId) }
@@ -102,13 +132,23 @@ export class PreviewPool {
    * the live preview blank. Models sit 800 units apart, so each slot's
    * frustum (maxZ) excludes the others.
    */
-  tick(): void {
+  tick(visible?: ReadonlySet<string>): void {
     this.frame++
-    const n = Math.max(1, this.byPost.size)
-    const rate = Math.max(1, Math.ceil(n / this.opts.slotsPerFrame))
+    // Two throttles: a per-slot frame budget (targetFps) and a cap on how
+    // many slots may be drawn in one frame. A live preview is a full offscreen
+    // model render at 512x320 — running every slot at display rate was the
+    // board's biggest continuous GPU cost.
+    const now = performance.now()
+    const minGap = 1000 / Math.max(1, this.opts.targetFps)
+    let budget = Math.max(1, this.opts.slotsPerFrame)
     for (const slot of this.slots) {
       if (!slot.postId) continue
-      if ((this.frame + slot.phase) % rate === 0) this.renderSlot(slot)
+      // offscreen cards keep their model but stop drawing
+      if (visible && !visible.has(slot.postId)) continue
+      if (now - slot.lastRenderAt < minGap) continue
+      this.renderSlot(slot)
+      slot.lastRenderAt = now
+      if (--budget <= 0) break
     }
   }
 
@@ -140,7 +180,10 @@ export class PreviewPool {
     // page background. RGB keeps the poster blank-check comparable.
     rtt.clearColor = new Color4(0, 0, 0, 0)
     const camera = new FreeCamera(`slot-cam-${index}`, Vector3.Zero(), this.stage)
-    const slot: Slot = { index, rtt, camera, container: null, anims: [], postId: null, phase: index, facing: new Vector3(0, 0, 1) }
+    const slot: Slot = {
+      index, rtt, camera, container: null, anims: [], postId: null, phase: index,
+      facing: new Vector3(0, 0, 1), lastRenderAt: 0,
+    }
     this.slots.push(slot)
     return slot
   }

@@ -10,13 +10,15 @@ import { Matrix, Vector3 } from '@babylonjs/core/Maths/math.vector'
 import { Viewport } from '@babylonjs/core/Maths/math.viewport'
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color'
 import type { AssetContainer } from '@babylonjs/core/assetContainer'
-import '@babylonjs/loaders/glTF'
+import './gltf'
 import { configureDraco } from './draco'
 import { dominantFacing, worldBox, frameDistance } from './facing'
 import { validateGLB } from './limits'
 
-export const POSTER_W = 512
-export const POSTER_H = 320
+// Cards display at roughly 320x200 CSS px; 448x280 keeps them sharp on
+// HiDPI while costing ~24% fewer pixels per offscreen render than 512x320.
+export const POSTER_W = 448
+export const POSTER_H = 280
 
 export function toFile(blob: Blob, name: string): File {
   return new File([blob], name, { type: blob.type || 'application/octet-stream' })
@@ -31,7 +33,16 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
  */
 export interface Footprint { cx: number; bottom: number; w: number }
 
-export interface PosterResult { blob: Blob; animated: boolean; footprint: Footprint | null }
+export interface PosterResult {
+  /** Raw RGBA straight off the GPU, BOTTOM-UP (GL order) — upload with invertY=false. */
+  pixels: Uint8Array
+  width: number
+  height: number
+  animated: boolean
+  footprint: Footprint | null
+  /** PNG for the IndexedDB cache; encoded lazily, off the display path. */
+  toPng: () => Promise<Blob>
+}
 
 /**
  * Local thumbnail pipeline (step 4): GLB -> one frame -> 512x320 PNG.
@@ -42,6 +53,9 @@ export interface PosterResult { blob: Blob; animated: boolean; footprint: Footpr
 export class PosterRenderer {
   private scene: Scene
   private headlight: DirectionalLight
+  /** reused readback buffer (0.5 MB per poster otherwise) */
+  private readback = new Uint8Array(POSTER_W * POSTER_H * 4)
+  private rtt: RenderTargetTexture
   // Renders share one scene (shared activeCamera + env); a promise-chain mutex
   // serializes them so concurrent calls can never stomp each other's camera.
   private chain: Promise<unknown> = Promise.resolve()
@@ -69,6 +83,13 @@ export class PosterRenderer {
     // model. Without it, dark models vanish completely on a transparent card.
     this.headlight = new DirectionalLight('ph2', new Vector3(0, 0, 1), this.scene)
     this.headlight.intensity = 0.55
+
+    this.rtt = new RenderTargetTexture('poster-rtt', { width: POSTER_W, height: POSTER_H }, this.scene)
+    this.rtt.renderTargetOptions.generateDepthBuffer = true
+    this.rtt.renderTargetOptions.generateMipMaps = false
+    this.rtt.samples = 1
+    // Transparent background: posters composite over any page/board backdrop.
+    this.rtt.clearColor = new Color4(0, 0, 0, 0)
   }
 
   render(blob: Blob): Promise<PosterResult> {
@@ -81,11 +102,9 @@ export class PosterRenderer {
   private async doRender(blob: Blob): Promise<PosterResult> {
     let container: AssetContainer | null = null
     let ownCamera: FreeCamera | null = null
-    const rtt = new RenderTargetTexture('poster-rtt', { width: POSTER_W, height: POSTER_H }, this.scene)
-    rtt.renderTargetOptions.generateDepthBuffer = true
-    rtt.renderTargetOptions.generateMipMaps = false
-    // Transparent background: posters composite over any page/board backdrop.
-    rtt.clearColor = new Color4(0, 0, 0, 0)
+    // ONE render target for the whole session — allocating and freeing a
+    // 448x280 target per poster churned GPU memory for no reason.
+    const rtt = this.rtt
     try {
       // Enforce GLB limits before Babylon parses (07 §4).
       const bytes = new Uint8Array(await blob.arrayBuffer())
@@ -123,26 +142,40 @@ export class PosterRenderer {
       // manual rtt.render()/renderList path did not do reliably, leaving
       // every poster blank on this GL driver.
       cam.outputRenderTarget = rtt
+      // Warm-up frames first: materials/textures compile over a few frames,
+      // and readPixels is a full GPU sync — doing it once per attempt (with a
+      // 100 ms sleep between attempts, 60 times) was most of the poster cost.
       let pixels: ArrayBufferView | null = null
-      for (let attempt = 0; attempt < 60; attempt++) {
+      for (let attempt = 0; attempt < 14; attempt++) {
         this.scene.render()
-        pixels = await rtt.readPixels(0, 0, undefined, true)
+        if (attempt < 2) { await sleep(0); continue }
+        pixels = await rtt.readPixels(0, 0, this.readback, true)
         if (pixels && !isBlank(pixels)) break
-        await sleep(100)
+        await sleep(attempt < 6 ? 30 : 90)
       }
       cam.outputRenderTarget = null
       if (!pixels) throw new Error('readPixels returned null')
       if (isBlank(pixels)) throw new Error('poster rendered empty')
       const footprint = projectFootprint(cam, min, max)
-      return { blob: await encodePng(pixels, POSTER_W, POSTER_H), animated, footprint }
+      // Copy out of the shared readback buffer; the caller owns these bytes.
+      const src = new Uint8Array(pixels.buffer, pixels.byteOffset, pixels.byteLength)
+      const out = new Uint8Array(src.length)
+      out.set(src)
+      return {
+        pixels: out,
+        width: POSTER_W,
+        height: POSTER_H,
+        animated,
+        footprint,
+        toPng: () => encodePng(out, POSTER_W, POSTER_H),
+      }
     } finally {
-      rtt.dispose()
       ownCamera?.dispose()
       if (container) { container.removeAllFromScene(); container.dispose() }
     }
   }
 
-  dispose(): void { this.scene.dispose() }
+  dispose(): void { this.rtt.dispose(); this.scene.dispose() }
 }
 
 /** Normalised screen-space box of the model's AABB as the poster camera sees it. */
@@ -175,9 +208,12 @@ function isBlank(view: ArrayBufferView): boolean {
   return true
 }
 
+let pngCanvas: HTMLCanvasElement | null = null
+
+/** GL bottom-up RGBA -> top-down PNG (cache format). */
 function encodePng(view: ArrayBufferView, w: number, h: number): Promise<Blob> {
   const bytes = new Uint8Array(view.buffer, view.byteOffset, view.byteLength)
-  const canvas = document.createElement('canvas')
+  const canvas = pngCanvas ?? (pngCanvas = document.createElement('canvas'))
   canvas.width = w
   canvas.height = h
   const ctx = canvas.getContext('2d')!

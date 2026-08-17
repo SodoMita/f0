@@ -39,6 +39,14 @@ interface CardSlot {
   mat: ShaderMaterial
   poster: Texture | null
   live: RenderTargetTexture | null
+  /** poster already requested for the CURRENT meta (avoids re-queueing) */
+  requested: boolean
+  /** the row this recycled slot currently shows */
+  row: Row | null
+  /** poster unavailable (too big / render failed) — no ring, quiet plate */
+  failed: boolean
+  /** when the loading ring started (rings are not allowed to spin forever) */
+  spinSince: number
   // soft elliptical contact shadow under the model (models float on the
   // backdrop now that cards are transparent — the shadow gives them ground).
   // Placed from the poster's measured footprint, not guessed.
@@ -53,13 +61,15 @@ interface CardSlot {
   badgeMat: ShaderMaterial
   badgeTex: DynamicTexture
   replyCount: number
+  /** last count painted into badgeTex (avoids needless canvas + upload) */
+  badgeDrawn: number
 }
 
 interface Row {
   meta: ThreadMeta
-  slot: CardSlot
   top: number
   col: number
+  visible: boolean
 }
 
 // All cards share the poster aspect (512x320 = 16:10) so nothing is stretched.
@@ -68,6 +78,12 @@ const CARD_H = 10
 const GAP_X = 3.0
 const GAP_Y = 3.4
 const MARGIN = 2.4
+const SPIN_STEP_MS = 85
+// How long the board must sit still before it starts fetching/rendering
+// posters for what is now on screen.
+const SCROLL_SETTLE_MS = 150
+// A ring that never stops also means the board can never stop drawing.
+const SPIN_MAX_MS = 25_000
 const BADGE_W = 3.4
 const BADGE_H = 1.25
 
@@ -102,13 +118,25 @@ export class Board {
   private velocity = 0
   private inertia = 0.7
   private activePointers = new Set<number>()
+  private form: FormEngine
+  private visiblePosts = new Set<string>()
+  private lastSyncScroll = Number.NEGATIVE_INFINITY
+  private lastScrollAt = 0
+  private pendingSettle = false
+  /** reply counts survive slot recycling */
+  private replyCounts = new Map<string, number>()
+  private spinStep = -1
+  private rowIds = ''
 
   constructor(engine: FormEngine, cb: BoardCallbacks) {
     const isMobile = /Mobi|Android/i.test(navigator.userAgent)
 
+    this.form = engine
     this.scene = new Scene(engine.engine)
     this.scene.clearColor = Color3.FromHexString(this.background).toColor4(1)
     this.scene.skipPointerMovePicking = true
+    // nothing here casts shadows / needs collision or offline caching
+    this.scene.blockMaterialDirtyMechanism = true
 
     // Ortho camera parked at -Z (see core/gfx.flatCamera): world +X is screen
     // right and card planes are seen from the front, so nothing is mirrored.
@@ -134,13 +162,20 @@ export class Board {
     this.previewPool = new PreviewPool(
       engine.engine,
       (postId) => this.assets?.getModelBlobByPostId(postId) ?? Promise.resolve(undefined),
-      { maxSlots: isMobile ? 2 : 6, rttWidth: 512, rttHeight: 320, slotsPerFrame: 2 },
+      {
+        maxSlots: isMobile ? 2 : 5,
+        rttWidth: isMobile ? 384 : 448,
+        rttHeight: isMobile ? 240 : 280,
+        slotsPerFrame: isMobile ? 1 : 2,
+        targetFps: isMobile ? 12 : 15,
+      },
     )
     this.previewPool.onLive = (postId, rtt) => {
       const slot = this.cards.find((c) => c.meta?.eventId === postId)
       if (!slot) return
       slot.live = rtt
       slot.spinner.setEnabled(false)
+      this.invalidate()
       setCardTexture(slot.mat, rtt)
       setCardWhite(slot.mat)
       setCardOpacity(slot.mat, 1)
@@ -152,6 +187,31 @@ export class Board {
     this.resize()
     this.bindInput()
   }
+
+  /**
+   * Does the board still need frames? (render-on-demand — see core/engine.ts)
+   * True while it is being dragged, while momentum runs, while any loading
+   * ring spins, or while a live preview is animating on a VISIBLE card.
+   */
+  isAnimating(): boolean {
+    if (this.dragging || Math.abs(this.velocity) > 0.0005) return true
+    if (this.pendingSettle) return true   // waiting to start deferred loads
+    // Loading rings advance in 12 discrete steps; only ask for a frame when
+    // the next step is actually due (a spinning ring is not a reason to draw
+    // the whole board 60x a second).
+    const step = Math.floor(performance.now() / SPIN_STEP_MS)
+    if (step !== this.spinStep) {
+      for (const slot of this.cards) {
+        if (slot.spinner.isEnabled() && slot.mesh.isEnabled()) { this.spinStep = step; return true }
+      }
+    }
+    // A live card only needs a board redraw when its render target is due for
+    // a refresh — otherwise the whole board redrew 60x/s to show a 20 fps
+    // preview.
+    return this.previewPool.hasWork(this.visiblePosts)
+  }
+
+  private invalidate(frames = 2): void { this.form.invalidate(frames) }
 
   /** Background colour follows the settings panel (viewer/thread/board). */
   setBackground(hex: string): void {
@@ -168,6 +228,7 @@ export class Board {
     }
     const sepColor = Color3.FromHexString(shade(hex, this.isDark ? 0.16 : -0.16))
     for (const s of this.seps) s.color = sepColor
+    this.invalidate(3)
   }
 
   setAssets(assets: AssetCache): void {
@@ -176,20 +237,29 @@ export class Board {
   }
 
   setMetas(metas: ThreadMeta[]): void {
-    this.rows = metas.slice(0, LIMITS.boardRoots).map((meta, i) => ({
+    // Live relays stream replies constantly; a reply does not change the root
+    // list, and re-laying out the whole board per event was pure churn.
+    const ids = metas.slice(0, LIMITS.boardRoots).map((m) => m.eventId).join(',')
+    if (ids === this.rowIds) return
+    this.rowIds = ids
+    this.rows = metas.slice(0, LIMITS.boardRoots).map((meta) => ({
       meta,
-      slot: this.cards[i],
       top: 0,
       col: 0,
+      visible: false,
     }))
     this.layout()
   }
 
   setReplyCount(eventId: string, count: number): void {
+    this.replyCounts.set(eventId, count)
     const slot = this.cards.find((c) => c.meta?.eventId === eventId)
-    if (!slot) return
+    // Redrawing a badge means a canvas repaint + a texture upload; skip it
+    // when nothing changed (this used to run for every root on every event).
+    if (!slot || slot.replyCount === count) return
     slot.replyCount = count
     this.drawBadge(slot)
+    this.invalidate()
   }
 
   setInertia(v: number): void {
@@ -269,8 +339,9 @@ export class Board {
       setCardFlip(badgeMat, 'dyn')
 
       const slot: CardSlot = {
-        mesh, mat, poster: null, live: null, shadow, shadowMat, spinner, spinnerMat,
-        badge, badgeMat, badgeTex, replyCount: 0, footprint: null,
+        mesh, mat, poster: null, live: null, requested: false, row: null, failed: false, spinSince: 0,
+        shadow, shadowMat, spinner, spinnerMat,
+        badge, badgeMat, badgeTex, replyCount: 0, badgeDrawn: -1, footprint: null,
       }
       this.cards.push(slot)
       mesh.metadata = { card: slot }
@@ -284,6 +355,8 @@ export class Board {
    * a blurry substitute glyph (or a tofu box) at a different baseline.
    */
   private drawBadge(slot: CardSlot): void {
+    if (slot.badgeDrawn === slot.replyCount) return
+    slot.badgeDrawn = slot.replyCount
     const { width: w, height: h } = slot.badgeTex.getSize()
     const ctx = slot.badgeTex.getContext() as CanvasRenderingContext2D
     ctx.clearRect(0, 0, w, h)
@@ -331,6 +404,7 @@ export class Board {
     ctx.fillText(String(slot.replyCount), ax + s * 1.7, cy + h * 0.015)
     slot.badgeTex.update()
     slot.badge.setEnabled(true)
+    this.invalidate()
   }
 
   private layout(): void {
@@ -350,45 +424,162 @@ export class Board {
     this.maxScroll = Math.max(0, contentBottom - viewportH + GAP_Y)
     if (this.scrollY > this.maxScroll) this.scrollY = this.maxScroll
 
-    for (let i = 0; i < this.cards.length; i++) {
-      const slot = this.cards[i]
-      const row = this.rows[i]
-      if (!row) {
-        this.release(slot)
-        slot.meta = undefined
-        slot.mesh.setEnabled(false)
-        slot.badge.setEnabled(false)
-        slot.shadow.setEnabled(false)
-        slot.spinner.setEnabled(false)
-        slot.mesh.isPickable = false
-        continue
-      }
-      const changed = slot.meta?.eventId !== row.meta.eventId
-      if (changed) {
-        this.release(slot)
-        slot.meta = row.meta
-        slot.poster = null
-        slot.live = null
-        slot.replyCount = 0
-        // Placeholder: a barely-there plate, not an opaque slab.
-        setCardTexture(slot.mat, null)
-        setCardTint(slot.mat, row.meta.tint || theme.panel)
-        setCardOpacity(slot.mat, 0.14)
-        setCardFlip(slot.mat, 'raw')
-        slot.footprint = null
-        slot.shadow.setEnabled(false)
-        slot.spinner.setEnabled(true)
-        this.drawBadge(slot)
-      }
-      slot.mesh.setEnabled(true)
-      slot.mesh.isPickable = true
-      slot.mesh.scaling.set(CARD_W / 4, CARD_H / 4, 1)
+    this.buildSeparators()
+    this.syncSlots(true)
+    this.invalidate(3)
+  }
+
+  /**
+   * VIRTUALISED CARDS. The feed holds up to `LIMITS.boardRoots` posts, but the
+   * scene only ever owns `pool` card slots, recycled to whichever rows are
+   * nearest the viewport.
+   *
+   * This was also a correctness bug: slots were bound by index
+   * (`rows[i] -> cards[i]`), so with more roots than slots every row past the
+   * 24th was never drawn — you scrolled into empty space.
+   */
+  private syncSlots(force = false): void {
+    if (!force && Math.abs(this.scrollY - this.lastSyncScroll) < CARD_H * 0.34) {
+      this.positionBoundSlots()
+      return
+    }
+    this.lastSyncScroll = this.scrollY
+
+    // rows worth keeping resident, nearest to the viewport first
+    const keepWindow = this.halfH + CARD_H * 2.2
+    const wanted = new Map<string, Row>()
+    const candidates: { row: Row; d: number }[] = []
+    for (const row of this.rows) {
+      const d = Math.abs(this.worldY(row))
+      if (d < keepWindow) candidates.push({ row, d })
+    }
+    candidates.sort((a, b) => a.d - b.d)
+    for (const c of candidates.slice(0, this.cards.length)) wanted.set(c.row.meta.eventId, c.row)
+
+    // 1. free slots whose row left the window
+    for (const slot of this.cards) {
+      const id = slot.meta?.eventId
+      if (id && wanted.has(id)) { slot.row = wanted.get(id)!; continue }
+      if (slot.meta) this.release(slot)
+      slot.meta = undefined
+      slot.row = null
+      slot.mesh.setEnabled(false)
+      slot.mesh.isPickable = false
+      slot.badge.setEnabled(false)
+      slot.shadow.setEnabled(false)
+      slot.spinner.setEnabled(false)
+    }
+    // 2. bind free slots to rows that still need one
+    const bound = new Set<string>()
+    for (const slot of this.cards) if (slot.meta) bound.add(slot.meta.eventId)
+    let cursor = 0
+    for (const row of wanted.values()) {
+      if (bound.has(row.meta.eventId)) continue
+      while (cursor < this.cards.length && this.cards[cursor].meta) cursor++
+      if (cursor >= this.cards.length) break
+      this.bind(this.cards[cursor++], row)
+    }
+    this.positionBoundSlots()
+    this.refreshVisibility()
+  }
+
+  /** Attach a recycled slot to a row and reset it to the loading state. */
+  private bind(slot: CardSlot, row: Row): void {
+    slot.meta = row.meta
+    slot.row = row
+    slot.poster = null
+    slot.live = null
+    slot.requested = false
+    // the badge texture only encodes a number, so a recycled slot can keep
+    // whatever is already painted if the count matches
+    slot.replyCount = this.replyCounts.get(row.meta.eventId) ?? 0
+    slot.footprint = null
+    // Placeholder: a barely-there plate, not an opaque slab.
+    setCardTexture(slot.mat, null)
+    setCardTint(slot.mat, row.meta.tint || theme.panel)
+    setCardOpacity(slot.mat, 0.14)
+    setCardFlip(slot.mat, 'raw')
+    slot.failed = false
+    slot.spinSince = 0
+    slot.shadow.setEnabled(false)
+    // the ring is switched on by refreshVisibility, and ONLY for slots inside
+    // the prefetch window — a resident-but-offscreen card that keeps spinning
+    // also keeps the whole board rendering
+    slot.spinner.setEnabled(false)
+    slot.mesh.setEnabled(true)
+    slot.mesh.isPickable = true
+    slot.mesh.scaling.set(CARD_W / 4, CARD_H / 4, 1)
+    this.drawBadge(slot)
+  }
+
+  private positionBoundSlots(): void {
+    for (const slot of this.cards) {
+      const row = slot.row
+      if (!slot.meta || !row) continue
       slot.mesh.position.set(this.colX(row.col), this.worldY(row), 0)
       this.positionExtras(slot)
-      if (changed) this.drive(slot)
     }
-    this.buildSeparators()
   }
+
+  /**
+   * Work only on what the user can see: posters are rendered (and live
+   * previews requested) for rows inside a one-screen prefetch window, and
+   * previews for rows that scrolled away are released. A 48-post board used
+   * to queue 48 downloads + 48 offscreen renders at boot and animate them all
+   * forever.
+   */
+  private refreshVisibility(): void {
+    this.visiblePosts.clear()
+    const near = this.halfH + CARD_H * 1.6
+    // Don't start downloads/renders for cards that are flying past: a fling
+    // through 48 posts would otherwise queue ~40 GLB parses and offscreen
+    // renders, and each one blocks a frame. Loads start once scrolling rests.
+    const now = performance.now()
+    const settled = now - this.lastScrollAt > SCROLL_SETTLE_MS
+    // NB both directions: leaving this latched at true kept isAnimating()
+    // true forever, i.e. the board never stopped drawing after a scroll.
+    this.pendingSettle = !settled
+    // stop chewing on GLBs while the feed is moving
+    this.assets?.setPaused(!settled)
+    for (const slot of this.cards) {
+      const row = slot.row
+      if (!slot.meta || !row) continue
+      const y = this.worldY(row)
+      const onScreen = Math.abs(y) < this.halfH + CARD_H * 0.6
+      row.visible = onScreen
+      if (onScreen) this.visiblePosts.add(row.meta.eventId)
+
+      // loading ring: only inside the prefetch window, only while there is
+      // genuinely something to wait for, and never for longer than SPIN_MAX_MS
+      const inRange = Math.abs(y) < near
+      let ring = inRange && !slot.poster && !slot.live && !slot.failed
+      if (ring) {
+        if (!slot.spinner.isEnabled() && slot.spinSince === 0) slot.spinSince = now
+        if (slot.spinSince && now - slot.spinSince > SPIN_MAX_MS) ring = false
+      } else {
+        slot.spinSince = 0
+      }
+      if (slot.spinner.isEnabled() !== ring) { slot.spinner.setEnabled(ring); this.invalidate(2) }
+
+      if (settled && inRange) {
+        if (!slot.requested) { slot.requested = true; this.drive(slot) }
+        if (slot.poster && !slot.live) {
+          const animated = this.assets?.isAnimated(row.meta)
+          if (animated ?? (row.meta.animHint || row.meta.cameraCount > 0)) {
+            this.previewPool.request(row.meta.eventId)
+          }
+        }
+      } else if (slot.live && Math.abs(y) >= near) {
+        this.previewPool.release(row.meta.eventId)
+        slot.live = null
+        if (slot.poster) {
+          setCardTexture(slot.mat, slot.poster); setCardWhite(slot.mat)
+          setCardOpacity(slot.mat, 1); setCardFlip(slot.mat, 'raw')
+        }
+      }
+    }
+  }
+
 
   private positionExtras(slot: CardSlot): void {
     slot.badge.scaling.set(BADGE_W / 4, BADGE_H / 4, 1)
@@ -413,12 +604,12 @@ export class Board {
   }
 
   private applyScroll(): void {
-    for (let i = 0; i < this.rows.length; i++) {
-      const slot = this.rows[i].slot
-      slot.mesh.position.x = this.colX(this.rows[i].col)
-      slot.mesh.position.y = this.worldY(this.rows[i])
-      this.positionExtras(slot)
-    }
+    this.positionBoundSlots()
+    this.applySeparatorScroll()
+    this.syncSlots()
+  }
+
+  private applySeparatorScroll(): void {
     for (let i = 0; i < this.seps.length; i++) {
       this.seps[i].position.y = this.halfH - MARGIN - (this.sepTops[i] - GAP_Y / 2) + this.scrollY
     }
@@ -426,10 +617,15 @@ export class Board {
 
   /** Full-bleed hairline between rows (no card frames — models float). */
   private buildSeparators(): void {
+    const tops = [...new Set(this.rows.map((r) => r.top))].filter((t) => t > 0)
+    // disposing + recreating LinesMeshes on every layout was pure GC churn
+    if (tops.length === this.sepTops.length && tops.every((t, i) => t === this.sepTops[i])) {
+      this.applySeparatorScroll()
+      return
+    }
     for (const l of this.seps) l.dispose()
     this.seps = []
     this.sepTops = []
-    const tops = [...new Set(this.rows.map((r) => r.top))].filter((t) => t > 0)
     const halfW = this.halfH * this.aspect
     for (const top of tops) {
       const line = MeshBuilder.CreateLines(`sep-${top}`, {
@@ -497,10 +693,14 @@ export class Board {
   }
 
   private tick(): void {
-    this.previewPool.tick()
+    if (this.pendingSettle && performance.now() - this.lastScrollAt > SCROLL_SETTLE_MS) {
+      this.refreshVisibility()
+      this.invalidate(2)
+    }
+    this.previewPool.tick(this.visiblePosts)
     // spin the loading rings (stepped, like the HTML one)
     const step = (Math.PI * 2) / 12
-    const phase = Math.floor(performance.now() / 85) * step
+    const phase = Math.floor(performance.now() / SPIN_STEP_MS) * step
     for (const slot of this.cards) {
       if (slot.spinner.isEnabled()) slot.spinner.rotation.z = -phase
     }
@@ -518,7 +718,9 @@ export class Board {
     const next = Math.max(0, Math.min(this.maxScroll, v))
     if (next === this.scrollY) return
     this.scrollY = next
+    this.lastScrollAt = performance.now()
     this.applyScroll()
+    this.invalidate()
   }
 
   private tapAt(x: number, y: number): void {
@@ -536,23 +738,42 @@ export class Board {
     const assets = this.assets
     if (!meta || !assets) return
     void assets.getPoster(meta).then((tex) => {
-      if (slot.meta?.eventId !== meta.eventId || !tex || slot.live) return
+      if (slot.meta?.eventId !== meta.eventId) return
+      if (!tex) {
+        // No poster (too big / render failed / offline): stop the ring and
+        // leave a quiet plate. A ring that spins forever also means the board
+        // can never stop rendering.
+        slot.failed = true
+        slot.spinner.setEnabled(false)
+        setCardOpacity(slot.mat, 0.09)
+        this.invalidate(2)
+        return
+      }
+      if (slot.live) return
       slot.poster = tex
       setCardTexture(slot.mat, tex)
       setCardWhite(slot.mat)
       setCardOpacity(slot.mat, 1)
       setCardFlip(slot.mat, 'raw')
       slot.footprint = assets.getFootprint(meta) ?? null
+      slot.spinSince = 0
       slot.spinner.setEnabled(false)
       slot.shadow.setEnabled(!!slot.footprint)
       this.positionExtras(slot)
+      this.invalidate(2)
       const animated = assets.isAnimated(meta)
-      if (animated ?? (meta.animHint || meta.cameraCount > 0)) this.previewPool.request(meta.eventId)
+      if ((animated ?? (meta.animHint || meta.cameraCount > 0)) && this.visiblePosts.has(meta.eventId)) {
+        this.previewPool.request(meta.eventId)
+      }
     })
   }
 
   private release(slot: CardSlot): void {
-    if (slot.meta) this.previewPool.release(slot.meta.eventId)
+    if (slot.meta) {
+      this.previewPool.release(slot.meta.eventId)
+      // if its poster never started, drop it from the queue
+      if (!slot.poster) this.assets?.cancelPoster(slot.meta.eventId)
+    }
     if (slot.live) {
       slot.live = null
       if (slot.poster) {
@@ -564,6 +785,7 @@ export class Board {
   }
 
   resize(): void {
+    this.lastSyncScroll = Number.NEGATIVE_INFINITY
     const eng = this.scene.getEngine()
     const w = eng.getRenderWidth()
     const h = eng.getRenderHeight()

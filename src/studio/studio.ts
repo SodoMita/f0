@@ -4,7 +4,7 @@ import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight'
 import { LoadAssetContainerAsync } from '@babylonjs/core/Loading/sceneLoader'
 import { Vector3 } from '@babylonjs/core/Maths/math.vector'
 import { Color4 } from '@babylonjs/core/Maths/math.color'
-import '@babylonjs/loaders/glTF'
+import '../model/gltf'
 import type { FormEngine } from '../core/engine'
 import { toFile } from '../model/poster'
 import { validateGLB } from '../model/limits'
@@ -15,6 +15,7 @@ import { theme } from '../theme'
 export class Studio {
   readonly scene: Scene
   private camera: ArcRotateCamera
+  private camHash = ''
 
   constructor(engine: FormEngine) {
     this.scene = new Scene(engine.engine)
@@ -27,6 +28,14 @@ export class Studio {
 
   setBackground(hex: string): void {
     this.scene.clearColor = Color4.FromHexString(hex + 'FF')
+  }
+
+  /** Render-on-demand probe: only while the camera is being moved. */
+  isAnimating(): boolean {
+    const p = this.camera.position
+    const hash = `${p.x.toFixed(4)},${p.y.toFixed(4)},${p.z.toFixed(4)}`
+    if (hash !== this.camHash) { this.camHash = hash; return true }
+    return false
   }
 
   attach(): void { this.camera.attachControl(true) }

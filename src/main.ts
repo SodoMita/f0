@@ -76,8 +76,10 @@ async function boot(): Promise<void> {
   const loadingLabel = $('loading-label')
   const loadingReasons = new Set<string>()
   function setLoading(reason: string, on: boolean, label = ''): void {
+    if (on === loadingReasons.has(reason)) return
     if (on) loadingReasons.add(reason)
     else loadingReasons.delete(reason)
+    engine.invalidate(2)
     loading.hidden = loadingReasons.size === 0
     if (!loading.hidden) loadingLabel.textContent = label || reason
   }
@@ -104,7 +106,7 @@ async function boot(): Promise<void> {
 
   $('btn-home').addEventListener('click', () => router.go({ name: 'board' }))
   $('btn-add').addEventListener('click', () => router.go({ name: 'studio' }))
-  $('btn-shuffle').addEventListener('click', () => board.shuffle(orderedRoots()))
+  $('btn-shuffle').addEventListener('click', () => { board.shuffle(orderedRoots()); engine.invalidate(3) })
   $('btn-close').addEventListener('click', () => router.go({ name: 'board' }))
   $('btn-prev').addEventListener('click', () => void stepViewer(-1))
   $('btn-next').addEventListener('click', () => void stepViewer(1))
@@ -142,6 +144,7 @@ async function boot(): Promise<void> {
     void saveSettings(settings)
   })
   $('btn-settings').addEventListener('click', () => { settingsPanel.hidden = !settingsPanel.hidden })
+  window.addEventListener('pointerdown', () => engine.invalidate(2), { passive: true })
   $('btn-settings-close').addEventListener('click', () => { settingsPanel.hidden = true })
   document.querySelectorAll('#bg-swatches .swatch').forEach((el) => {
     el.addEventListener('click', () => applyBackground((el as HTMLElement).dataset.bg!))
@@ -239,7 +242,7 @@ async function boot(): Promise<void> {
       viewer.clear()
     }
     if (next === 'board') {
-      engine.setActiveScene(board.scene)
+      engine.setActiveScene(board.scene, () => board.isAnimating())
       topbar.hidden = false
       viewerBar.hidden = true
       drawer.hidden = true
@@ -247,13 +250,13 @@ async function boot(): Promise<void> {
       viewer.detach()
       studio.detach()
     } else if (next === 'viewer') {
-      engine.setActiveScene(viewer.scene)
+      engine.setActiveScene(viewer.scene, () => viewer.isAnimating())
       topbar.hidden = false
       viewerBar.hidden = false
       viewer.attach()
       studio.detach()
     } else if (next === 'thread') {
-      engine.setActiveScene(threadView.scene)
+      engine.setActiveScene(threadView.scene, () => threadView.isAnimating())
       topbar.hidden = false
       viewerBar.hidden = true
       drawer.hidden = true
@@ -262,7 +265,7 @@ async function boot(): Promise<void> {
       studio.detach()
       threadView.attach()
     } else {
-      engine.setActiveScene(studio.scene)
+      engine.setActiveScene(studio.scene, () => studio.isAnimating())
       topbar.hidden = false
       viewerBar.hidden = true
       viewer.detach()
@@ -310,17 +313,33 @@ async function boot(): Promise<void> {
 
   // ---------- network ----------
   setLoading('feed', true, 'connecting')
+
+  // Relay bursts arrive dozens of events at a time. Coalesce them into one
+  // board refresh per frame instead of one full re-sort + re-layout +
+  // badge-repaint-per-root per event.
+  let refreshQueued = false
+  function refreshBoard(): void {
+    if (refreshQueued) return
+    refreshQueued = true
+    requestAnimationFrame(() => {
+      refreshQueued = false
+      const roots = orderedRoots()
+      board.setMetas(roots)
+      for (const m of roots) board.setReplyCount(m.eventId, index.childCount(m.eventId))
+    })
+  }
+
   pool.onEvent = (event) => {
     if (event.kind === 5) {
       for (const t of event.tags) if (t[0] === 'e') index.tombstone(t[1])
+      refreshBoard()
       return
     }
     const meta = parseModelEvent(event)
     if (!meta) return
     index.add(meta)
     setLoading('feed', false)
-    board.setMetas(orderedRoots())
-    for (const m of orderedRoots()) board.setReplyCount(m.eventId, index.childCount(m.eventId))
+    refreshBoard()
   }
   pool.onState = () => {
     const states = [...pool.state.values()]
