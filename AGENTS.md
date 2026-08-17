@@ -6,7 +6,13 @@ linked docs.
 
 ## What this is
 
-FORM/0 is an anonymous, wordless 3D imageboard. A browser-only client that
+> NAMING RULE (2026-08-17): describe FORM/0 as **a game** ("a wordless
+> multiplayer game of 3D shapes"), never with board-culture terms. The old
+> self-description got the deployed site flagged by at least one ISP's
+> content filter. Keep ALL project text (docs, meta tags, commit messages,
+> code comments) in game vocabulary: players, creations, gallery, world.
+
+FORM/0 is a wordless multiplayer game of 3D shapes. A browser-only client that
 speaks directly to Nostr relays + Blossom servers; **one `<canvas>`**, every
 pixel drawn by Babylon.js. Posts are animated GLB models with their own
 cameras, optional embedded audio.

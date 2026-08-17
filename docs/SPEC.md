@@ -1,4 +1,4 @@
-FORM/0 BUILD SPEC (condensed). Anonymous wordless 3D imageboard; browser-only, direct to Nostr relays + Blossom; one canvas, Babylon.js. Posts = animated GLB models, own cameras, optional embedded audio.
+FORM/0 BUILD SPEC (condensed). A wordless multiplayer game of 3D shapes; browser-only, direct to Nostr relays + Blossom; one canvas, Babylon.js. Player creations = animated GLB models, own cameras, optional embedded audio.
 Goals: (1) real content from public relays on first run, no seeding/config; (2) build:standalone -> ONE .html from file://, fetches only user content.
 
 BUILD (gated): 1 skeleton (scenes==1); 2 relay pool >=20 real GLB events (Node script vs real relays FIRST); 3 Blossom+SHA >=10 match; 4 thumbnails 512x320; 5 board recognizable; 6 RTT pool 4+ animate; 7 viewer/thread/network; 8 studio pass-through; 9 paint editor; 10 standalone file://.
