@@ -10,10 +10,12 @@ move it to **Done** with a commit reference. One agent per area.
       and studio. The direction combines warm museum-catalogue surfaces with
       an ink navigation rail, coral/acid action signals, generated 3D artwork,
       shared SVG iconography, mobile layouts, and small interactive states.
-      A second image-generation pass produced four more expressive concept
-      boards in `mockups/generated/`, collected in `generated.html`.
-      Production Babylon scenes are intentionally untouched. `npm run build`
-      remains green.
+      Image-generation studies are collected in `generated.html`. The latest
+      Aero Wire pass first generated a dedicated style reference, then supplied
+      it with the primary-page edit: one uninterrupted vertical thread of
+      different-sized, frameless 3D models with minimal transparent controls
+      (`mockups/generated/round-04/`). Production Babylon scenes are
+      intentionally untouched. `npm run build` remains green.
 
 - [x] **Security audit fixes — external-URI GLB fetch, kind-5 author
       check, Blossom redirect/URL hardening, standalone CSP** (agent arena).

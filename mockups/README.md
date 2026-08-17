@@ -9,7 +9,7 @@ The production Babylon client is intentionally untouched.
 - [`viewer.html`](./viewer.html) — immersive single-creation viewer
 - [`thread.html`](./thread.html) — branch map with zoom controls
 - [`studio.html`](./studio.html) — creation studio and inspector
-- [`generated.html`](./generated.html) — four image-generated “round 02” concept boards
+- [`generated.html`](./generated.html) — latest frameless Aero Wire concept, its style reference, and archived studies
 
 ## Direction
 
@@ -21,10 +21,13 @@ The production Babylon client is intentionally untouched.
 - No CDN, web fonts, or runtime image requests
 
 The three artwork renders in `assets/` were generated specifically for this
-mockup. A second image-generation pass used the visual direction and those
-artworks to produce the four aspirational boards in `generated/`. They are
-visual research rather than literal production screens. `mockup.js` adds small
-interactions: gallery filters and density, viewer navigation/play/cameras,
+mockup. The latest image-generation pass first created a dedicated Aero Wire
+style reference, then supplied that reference alongside the primary page for a
+second edit. The result is one uninterrupted vertical thread of different-sized,
+frameless 3D models with minimal transparent controls (`generated/round-04/`).
+Earlier framed studies remain archived for comparison. These boards are visual
+research rather than literal production screens. `mockup.js` adds small
+interactions to the HTML studies: gallery filters and density, viewer navigation,
 thread zoom, studio tabs, live sliders, and a publish confirmation state.
 
 Serve the repository root and open `/mockups/`. For example:

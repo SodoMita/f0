@@ -1108,6 +1108,43 @@ input[type="range"]::-moz-range-thumb { width: 10px; height: 10px; border-radius
 .concept-end .orbit-mark::before,
 .concept-end .orbit-mark::after { inset: 7px; }
 
+.aero-gallery {
+  background:
+    radial-gradient(circle at 76% 10%, rgba(255,255,255,.92), transparent 30rem),
+    linear-gradient(180deg, #edfaff 0%, #d9f7ff 52%, #bcecf8 100%);
+  color: #12324a;
+}
+.aero-gallery .app-rail {
+  background: rgba(13, 45, 62, .86);
+  border-color: rgba(255,255,255,.36);
+  backdrop-filter: blur(20px) saturate(130%);
+}
+.aero-gallery .concept-head,
+.aero-gallery .concept-intro p,
+.aero-gallery .concept-end { border-color: rgba(18,50,74,.24); }
+.aero-gallery .concept-intro h1 em {
+  -webkit-text-stroke-color: #2b8fd9;
+}
+.aero-gallery .concept-card {
+  background: rgba(247,252,255,.48);
+  border-color: rgba(31,116,151,.28);
+  box-shadow: 12px 15px 35px rgba(36,117,145,.12), inset 0 1px rgba(255,255,255,.9);
+  backdrop-filter: blur(18px) saturate(115%);
+}
+.aero-gallery .concept-card footer a,
+.aero-gallery .style-reference-card footer span:last-child { color: rgba(18,50,74,.58); }
+.aero-gallery .style-reference-card { margin-top: clamp(22px, 4vw, 62px); }
+.archive-title {
+  margin: clamp(72px, 10vw, 150px) 0 24px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  color: rgba(18,50,74,.56);
+}
+.archive-title > span:last-child { height: 1px; flex: 1; background: rgba(18,50,74,.2); }
+.archived-concepts { opacity: .68; transition: opacity .25s ease; }
+.archived-concepts:hover { opacity: 1; }
+
 /* ---------- responsive ---------- */
 @media (max-width: 1120px) {
   .world-intro { grid-template-columns: 1fr; gap: 46px; }
