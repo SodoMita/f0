@@ -1,0 +1,63 @@
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #0B0B0C;
+  color: #F2EEE8;
+  font-family: ui-monospace, monospace;
+}
+#engine {
+  width: 100vw;
+  height: 100vh;
+  outline: none;
+  touch-action: none;
+  display: block;
+}
+#fatal {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: #0B0B0C;
+  z-index: 50;
+}
+#fatal[hidden] { display: none; }
+.fatal-card {
+  text-align: center;
+  padding: 32px;
+  border: 1px solid #ffffff1a;
+  border-radius: 16px;
+  background: #121213;
+}
+.fatal-mark {
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 16px;
+  border: 2px solid #FF674B;
+  color: #FF674B;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 32px;
+  font-weight: bold;
+}
+#fatal-reload {
+  margin-top: 16px;
+  padding: 10px 20px;
+  background: #FF5C35;
+  color: #0B0B0C;
+  border: 0;
+  border-radius: 8px;
+  font: inherit;
+  cursor: pointer;
+}
+@font-face {
+  font-family: 'UnifontSubset';
+  src: url('./fonts/UnifontSubset.woff2') format('woff2'),
+       url('./fonts/UnifontSubset.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}

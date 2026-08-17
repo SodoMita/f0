@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#0B0B0C" />
+    <title>FORM/0</title>
+    <link rel="stylesheet" href="./public/style.css" />
+  </head>
+  <body>
+    <canvas id="engine"></canvas>
+
+    <!-- Technical DOM only: hidden file picker, IME textarea, ARIA bridge, fatal error -->
+    <input id="file-input" type="file" multiple hidden accept=".glb,.gltf,.bin,.obj,.mtl,.png,.jpg,.jpeg,.webp,.ktx2,.basis" />
+    <textarea id="ime-input" hidden autocomplete="off" autocorrect="off" spellcheck="false" aria-hidden="true"></textarea>
+
+    <div id="a11y-bridge" hidden></div>
+
+    <div id="fatal" hidden>
+      <div class="fatal-card">
+        <div class="fatal-mark">!</div>
+        <div class="fatal-text" id="fatal-text">WebGL unavailable.</div>
+        <button id="fatal-reload">Reload</button>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

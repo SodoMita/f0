@@ -1,0 +1,8 @@
+node_modules/
+release/
+dist/
+form-zero-standalone.html
+*.local
+.DS_Store
+release/
+form-zero-standalone.html
