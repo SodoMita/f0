@@ -94,7 +94,7 @@ export class Board {
   private pool = 24
   private cb: BoardCallbacks
   private rows: Row[] = []
-  private previewPool: PreviewPool
+  readonly previewPool: PreviewPool
   private assets: AssetCache | null = null
   private halfH = 20
   private aspect = 1.6
@@ -127,6 +127,8 @@ export class Board {
   private replyCounts = new Map<string, number>()
   private spinStep = -1
   private rowIds = ''
+  private prefetchScreens = 1
+  private contactStrength = 0.55
 
   constructor(engine: FormEngine, cb: BoardCallbacks) {
     const isMobile = /Mobi|Android/i.test(navigator.userAgent)
@@ -228,7 +230,7 @@ export class Board {
     paintBackdrop(this.backdropTex, hex)
     for (const slot of this.cards) {
       setCardTint(slot.shadowMat, this.isDark ? '#000000' : '#1b1b22')
-      setCardOpacity(slot.shadowMat, this.isDark ? 0.55 : 0.22)
+      setCardOpacity(slot.shadowMat, this.contactStrength * (this.isDark ? 1 : 0.4))
       setCardTint(slot.spinnerMat, this.isDark ? theme.ink : '#3a3a44')
       setCardOpacity(slot.spinnerMat, this.isDark ? 0.75 : 0.8)
       this.drawBadge(slot)
@@ -267,6 +269,34 @@ export class Board {
     slot.replyCount = count
     this.drawBadge(slot)
     this.invalidate()
+  }
+
+  /** The hidden stage where live previews render (graphics settings apply). */
+  get previewScene(): Scene { return this.previewPool.scene }
+
+  /** Preload window as a fraction of a screen height (settings → Memory). */
+  setPrefetch(screens: number): void {
+    this.prefetchScreens = Math.max(0, screens)
+    this.lastSyncScroll = Number.NEGATIVE_INFINITY
+    this.syncSlots(true)
+  }
+
+  /** Contact shadow opacity (settings → Lighting). 0 hides them. */
+  setContactShadows(strength: number): void {
+    this.contactStrength = Math.max(0, Math.min(1, strength))
+    for (const slot of this.cards) {
+      setCardOpacity(slot.shadowMat, this.contactStrength * (this.isDark ? 1 : 0.45))
+      if (slot.shadow.isEnabled() && this.contactStrength === 0) slot.shadow.setEnabled(false)
+      else if (slot.footprint && this.contactStrength > 0) slot.shadow.setEnabled(true)
+    }
+    this.invalidate(2)
+  }
+
+  /** Number of animated preview slots (settings → Memory). */
+  setLivePreviewSlots(n: number): void {
+    this.previewPool.setMaxSlots(n)
+    this.lastSyncScroll = Number.NEGATIVE_INFINITY
+    this.syncSlots(true)
   }
 
   setInertia(v: number): void {
@@ -312,7 +342,7 @@ export class Board {
       shadow.material = shadowMat
       setCardTexture(shadowMat, this.shadowTex)
       setCardTint(shadowMat, '#000000')
-      setCardOpacity(shadowMat, 0.55)
+      setCardOpacity(shadowMat, this.contactStrength)
       setCardFlip(shadowMat, 'dyn')
 
       const mesh = MeshBuilder.CreatePlane(`card-${i}`, { width: 4, height: 4 }, this.scene)
@@ -525,7 +555,7 @@ export class Board {
       setCardOpacity(slot.mat, 1)
       setCardFlip(slot.mat, 'raw')
       slot.footprint = this.assets?.getFootprint(row.meta) ?? null
-      slot.shadow.setEnabled(!!slot.footprint)
+      slot.shadow.setEnabled(!!slot.footprint && this.contactStrength > 0)
     } else {
       slot.poster = null
       slot.footprint = null
@@ -557,7 +587,7 @@ export class Board {
    */
   private refreshVisibility(): void {
     this.visiblePosts.clear()
-    const near = this.halfH + CARD_H * 1.6
+    const near = this.halfH + CARD_H * 1.6 * Math.max(0.1, this.prefetchScreens)
     // Don't start downloads/renders for cards that are flying past: a fling
     // through 48 posts would otherwise queue ~40 GLB parses and offscreen
     // renders, and each one blocks a frame. Loads start once scrolling rests.
@@ -797,7 +827,7 @@ export class Board {
       slot.footprint = assets.getFootprint(meta) ?? null
       slot.spinSince = 0
       slot.spinner.setEnabled(false)
-      slot.shadow.setEnabled(!!slot.footprint)
+      slot.shadow.setEnabled(!!slot.footprint && this.contactStrength > 0)
       this.positionExtras(slot)
       this.invalidate(2)
       const animated = assets.isAnimated(meta)

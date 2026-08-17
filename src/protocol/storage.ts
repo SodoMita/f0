@@ -59,6 +59,17 @@ export async function getAll<T>(store: StoreName): Promise<T[]> {
   })
 }
 
+export async function clearStore(store: StoreName): Promise<void> {
+  const db = await open()
+  if (!db) { mstore(store).clear(); return }
+  return new Promise((resolve) => {
+    const tx = db.transaction(store, 'readwrite')
+    tx.objectStore(store).clear()
+    tx.oncomplete = () => { db.close(); resolve() }
+    tx.onerror = () => { db.close(); resolve() }
+  })
+}
+
 export interface NetworkConfig { relays: string[]; blossoms: string[] }
 export async function loadNetworkConfig(): Promise<NetworkConfig> {
   return (await get<NetworkConfig>('networkConfig', 'default')) ?? { relays: [], blossoms: [] }

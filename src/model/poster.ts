@@ -14,6 +14,7 @@ import './gltf'
 import { configureDraco } from './draco'
 import { dominantFacing, worldBox, frameDistance } from './facing'
 import { validateGLBCached } from './limits'
+import { graphics } from '../render/graphics'
 
 // Cards display at roughly 320x200 CSS px; 448x280 keeps them sharp on
 // HiDPI while costing ~24% fewer pixels per offscreen render than 512x320.
@@ -53,7 +54,7 @@ export interface PosterResult {
  * facing the content.
  */
 export class PosterRenderer {
-  private scene: Scene
+  readonly scene: Scene
   private headlight: DirectionalLight
   /** reused readback buffer (0.5 MB per poster otherwise) */
   private readbackBuf = new Uint8Array(POSTER_W * POSTER_H * 4)
@@ -116,6 +117,7 @@ export class PosterRenderer {
       // whole model through a FileReader.
       container = await LoadAssetContainerAsync(bytes, this.scene, { pluginExtension: '.glb' })
       container.addAllToScene()
+      graphics.applyToContainer(container)
       // Display-only: render both faces so thin/flat geometry (text, signs)
       // is never invisible from the auto-fit side. The source GLB is untouched.
       for (const m of container.meshes) {

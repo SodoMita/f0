@@ -23,6 +23,43 @@ Settings, navigation, toolbars, metadata, toasts are plain HTML overlays.
 Only the models, the board, the reply badges and the thread map are Babylon.
 Settings: **background color** (viewer/thread/studio) + **scroll inertia**.
 
+## Settings (2026-08-17, round 7)
+
+A full graphics/audio settings system — `src/settings/schema.ts` is the single
+source of truth that drives persistence, the panel, the presets and the
+availability copy.
+
+- **Display & resolution** — auto / scale factor (with power-of-two snapping) /
+  exact pixel size with manual numeric entry, aspect-locked height, fullscreen,
+  brightness, contrast, tone mapping (Standard/ACES) and a calibration pattern.
+- **Framerate & sync** — uncapped or a numeric cap, adaptive resolution,
+  "stop drawing when idle".
+- **Anti-aliasing & upscaling** — MSAA 2/4/8, FXAA, temporal AA with a sample
+  count, a spatial upscaler (render scale + contrast-adaptive sharpen) with
+  Quality→Ultra-performance modes and a sharpness slider.
+- **Textures & materials** — PBR on/off (unlit), specular, reflections,
+  anisotropic filtering, mipmaps, card/preview resolution, and a load-time
+  texture guard.
+- **Lighting & shadows** — off / contact / dynamic self-shadowing with map
+  resolution and softness, SSAO or SSAO2 with strength and samples,
+  screen-space reflections, light-rig intensity.
+- **Post-processing** — bloom (strength, kernel quality, threshold), vignette,
+  film grain.
+- **Camera** — FOV, near/far clip, inertia, invert Y.
+- **Memory & cache** — model RAM budget, resident card textures, live preview
+  slots, preload distance, keep-offscreen, clear caches.
+- **Audio** — output device (`setSinkId`), input device, Master/Music/SFX/
+  Voice/UI mixers, mono/stereo/HRTF/surround, play-when-unfocused.
+- **Interface** — background, scroll inertia, reduce motion, performance overlay.
+- **Presets** Low / Medium / High / Ultra, switching to Custom on any edit,
+  plus search and per-row "why is this unavailable" copy.
+
+**Honest about the platform.** DLSS, FSR, XeSS, frame generation, hardware ray
+tracing, an HDR swapchain, a V-Sync toggle and VRAM reservation do not exist in
+WebGL — each is listed, disabled, with the reason and the real equivalent right
+next to it (render scale + sharpen, SSR, exposure/tone mapping, frame cap, our
+own memory budgets). Runtime failures are reported the same way.
+
 ## Key fixes this round (2026-08-17, round 6 — duplicated work)
 
 Profiled with `scripts/profile.mjs` (V8 sampling profile of a board load) and

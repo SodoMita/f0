@@ -32,10 +32,12 @@ const tBoot = Date.now() - t0
 await page.evaluate(() => window.__form0?.legend?.close()).catch(() => {})
 await page.waitForFunction(() => window.__form0?.board?.rows?.length > 0, null, { timeout: 30000 }).catch(() => {})
 const tFirstCard = Date.now() - t0
+// "posters ready" = the poster pipeline has gone quiet, not a fixed count:
+// on a live feed some downloads legitimately fail and would never arrive.
 await page.waitForFunction(() => {
   const f = window.__form0
-  const roots = [...f.index.byId.values()].filter((m) => m.role === 'root' && !m.tombstoned).length
-  return roots > 0 && f.assets.posterTex.size >= Math.min(roots, f.board.rows.length)
+  const busy = f.assets.queue.length > 0 || f.assets.active > 0
+  return f.assets.posterTex.size > 0 && !busy
 }, null, { timeout: 60000 }).catch(() => {})
 const tAllPosters = Date.now() - t0
 
@@ -182,12 +184,14 @@ const stressHeap = await heap()
 const stressSpinners = await page.evaluate(() => window.__form0.board.cards.filter((c) => c.spinner.isEnabled()).length)
 
 // viewer — restore the real (indexed) metas; the stress clones are not in
-// the index, so clicking one is a no-op by design
+// the index, so clicking one is a no-op by design. Sort a post that actually
+// has a poster to the top so the click lands on loadable content.
 await page.evaluate(() => {
   const f = window.__form0
   f.board.setScroll(0)
-  f.board.setMetas([...f.index.byId.values()].filter((m) => m.role === 'root' && !m.tombstoned)
-    .sort((a, b) => b.createdAt - a.createdAt))
+  const roots = [...f.index.byId.values()].filter((m) => m.role === 'root' && !m.tombstoned)
+  roots.sort((a, b) => Number(f.assets.posterTex.has(b.eventId)) - Number(f.assets.posterTex.has(a.eventId)))
+  f.board.setMetas(roots)
 })
 await page.waitForTimeout(2500)
 const pos = await page.evaluate(() => window.__form0.board.screenPosOf(0))

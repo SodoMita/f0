@@ -1,4 +1,4 @@
-<!doctype html><html><head><meta charset="utf-8"><title>FORM/0 — performance</title>
+<!doctype html><html><head><meta charset="utf-8"><title>FORM/0 — duplicated work</title>
 <style>
 body{margin:0;background:#0d0d10;color:#eceae6;font:14px/1.65 ui-monospace,SFMono-Regular,Menlo,monospace;padding:40px 28px 80px}
 .wrap{max-width:1000px;margin:0 auto}
@@ -9,24 +9,63 @@ table{width:100%;border-collapse:collapse;font-size:13px}
 th{text-align:left;color:#88848c;font-weight:400;font-size:10px;letter-spacing:.16em;text-transform:uppercase;padding:0 10px 8px 0;border-bottom:1px solid #23232b}
 td{padding:9px 10px 9px 0;border-bottom:1px solid #1a1a21;vertical-align:top}
 td.m{color:#b9b5b0} td.b{color:#7d7a75} td.a{color:#98CA72}
+pre{background:#131319;border:1px solid #23232b;border-radius:10px;padding:14px 16px;overflow:auto;font-size:12px;color:#b9b5b0}
 .fix{border-left:2px solid #2a2a33;padding:0 0 0 16px;margin:0 0 16px}
 .fix b.t{display:block;color:#fff;margin-bottom:3px} .fix p{margin:0;color:#b9b5b0;font-size:13px}
 code{background:#1a1a21;padding:1px 5px;border-radius:4px;color:#e7d9c9;font-size:12px}
-.note{color:#7d7a75;font-size:11.5px;margin-top:10px}
 </style></head><body><div class="wrap">
-<h1>FORM<span>/0</span> — performance</h1>
-<div class="sub">measured with the new scripts/perf.mjs harness · headless swiftshader 1280×800 · same feed, same box</div>
-<h2>Measured</h2>
-<table><tr><th>metric</th><th>before</th><th>after</th></tr>
-<tr><td class="m">Idle board (static, nothing moving)</td><td class="b">13.7 renders/sec</td><td class="a"><b>0</b> renders/sec</td></tr><tr><td class="m">Board frame loop</td><td class="b">13.8 fps</td><td class="a"><b>60.1 fps</b></td></tr><tr><td class="m">Board p95 frame</td><td class="b">81.7 ms</td><td class="a"><b>17.4 ms</b></td></tr><tr><td class="m">Viewer</td><td class="b">7.6 fps</td><td class="a"><b>60.1 fps</b></td></tr><tr><td class="m">Thread map</td><td class="b">21.9 fps</td><td class="a"><b>60.1 fps</b></td></tr><tr><td class="m">48-card fling (new stress case)</td><td class="b">5.6 fps · p95 858 ms</td><td class="a"><b>25.8 fps · p95 64.7 ms</b></td></tr><tr><td class="m">All posters ready</td><td class="b">15.0 s</td><td class="a"><b>8.2 s</b></td></tr><tr><td class="m">First card (production build, median of 3)</td><td class="b">2.08 s</td><td class="a"><b>1.22 s</b></td></tr><tr><td class="m">JS transferred / script time</td><td class="b">508 kB · 2128 ms</td><td class="a"><b>445 kB · 740 ms</b></td></tr><tr><td class="m">JS bundle / standalone</td><td class="b">1617 kB / 3.52 MB</td><td class="a"><b>1419 kB / 3.19 MB</b></td></tr><tr><td class="m">Model blobs held in RAM</td><td class="b">unbounded (8 MB and growing)</td><td class="a"><b>LRU: 6 items / 48 MiB</b></td></tr>
+<h1>FORM<span>/0</span> — duplicated work</h1>
+<div class="sub">round 6 · everything below was measured, not guessed</div>
+
+<h2>The shader report was exactly right</h2>
+<pre>$ node scripts/shaders.mjs        <span style="color:#7d7a75"># BEFORE</span>
+after feed + posters   {"programs":14,"effects":14,"cacheHits":292,"cached":2}
+open model A (round 1) programs +2  newEffects +2  cacheHits +2   compile +34ms
+open model A (round 2) programs +1  newEffects +1  cacheHits +0   compile +2ms
+open model A (round 3) programs +1  newEffects +1  cacheHits +0   compile +4ms
+
+$ node scripts/shaders.mjs        <span style="color:#98CA72"># AFTER</span>
+after feed + posters   {"programs":11,"effects":11,"cacheHits":295,"cached":12}
+open model A (round 1) programs +1  newEffects +1  cacheHits +2   compile +22ms
+open model A (round 2) programs +0  newEffects +0  cacheHits +1   compile +0ms
+open model A (round 3) programs +0  newEffects +0  cacheHits +1   compile +0ms</pre>
+<div class="fix"><p>Babylon caches compiled programs per engine, keyed by <code>vertex+fragment@defines</code> — but
+<code>Effect.dispose()</code> <b>deletes the cache entry</b> when the last material using it goes away. We dispose an
+AssetContainer after every poster render, every live-preview swap and every viewer navigation, so identical models
+recompiled from scratch every time and only <b>2 of 14</b> compiled programs survived a board load.
+<code>Effect.PersistentMode = true</code> fixes it; the cache is bounded by distinct define sets, not by models.</p></div>
+
+<h2>CPU profile of a board load</h2>
+<table><tr><th>cost</th><th>before</th><th>after</th></tr>
+<tr><td class="m">readPixels (synchronous GPU stall)</td><td class="b">2985 ms · 11.4%</td><td class="a">gone</td></tr>
+<tr><td class="m">signature verification (main thread)</td><td class="b">~700 ms, 2–3× per event</td><td class="a">gone (worker, once)</td></tr>
+<tr><td class="m">toBlob (poster PNG encode)</td><td class="b">~1000 ms · 4%</td><td class="a">gone (worker)</td></tr>
+<tr><td class="m">GLB bytes copied + validated</td><td class="b">3× per post</td><td class="a">1×</td></tr>
+<tr><td class="m">main thread idle</td><td class="b">71.1%</td><td class="a">82%</td></tr>
 </table>
-<div class="note">SwiftShader is a software rasteriser, so absolute fps is low by design — the ratios are the signal.
-Boot and bundle numbers are from the production build; the rest is the dev server with live relay content.</div>
-<h2>What changed</h2>
-<div class="fix"><b class="t">Render on demand</b><p>The loop draws only when <code>kick()</code>ed (input, content arrival, route change — a 300 ms window) or while a registered animation source reports motion, capped at 30 fps. The sources are precise: motion only while a loading-ring <i>step</i> or a live-preview <i>refresh</i> is actually due, a camera really moved, or drag/momentum is running. A static board now renders <b>zero</b> frames.</p></div><div class="fix"><b class="t">Virtualised board (also a bug fix)</b><p>Card slots are recycled to the rows nearest the viewport. Slots used to be bound by index, so with more roots than slots <b>every row past the 24th was never drawn</b> — you scrolled into empty space. The 48-card stress case exists because of that discovery.</p></div><div class="fix"><b class="t">Work follows the viewport</b><p>Posters and live previews are requested only inside a one-screen prefetch window, and only once scrolling has settled (150 ms); the poster queue is <i>paused</i> while the feed moves so a GLB parse can't stall a fling. Live previews are capped per slot and skipped entirely for offscreen cards.</p></div><div class="fix"><b class="t">Cheaper posters</b><p>Straight from the GPU readback to a texture — the PNG for the IndexedDB cache is encoded off the critical path (it used to go pixels → PNG → Image → canvas → getImageData → texture). One reusable 448×280 render target and readback buffer, and 3 warm-up frames + one readback instead of up to 60 readbacks with 100 ms sleeps.</p></div><div class="fix"><b class="t">Adaptive resolution — made to actually work</b><p>It fed the duration of the <code>render()</code> call into its EMA (~0.9 ms; render() only <i>submits</i> work), so it could never trigger. It now measures the gap between consecutive frames and immediately started doing its job: EMA 80 ms → 0.7× scale during the fling, which is most of the scrolling win. Target ratio = devicePixelRatio clamped by a 2.6 Mpx buffer budget.</p></div><div class="fix"><b class="t">Smaller bundle</b><p>Curated glTF loader (<code>src/model/gltf.ts</code>): drops the glTF 1.0 loader and KHR_interactivity's FlowGraph engine, which a viewer can never execute.</p></div><div class="fix"><b class="t">Two agents, one task</b><p>Another agent (kestrel) was working the same performance task in parallel — my miss, it was claimed in STATUS. The merge keeps <i>their</i> engine API (<code>kick()</code> + <code>addAnimationSource()</code> + adaptive resolution) as the single mechanism and layers this branch's work on top, rather than shipping two competing render loops.</p></div>
-<h2>Guards</h2>
-<div class="fix"><p><code>npm run perf</code> writes <code>shots/perf.json</code> and <code>docs/CONVENTIONS.md</code> now carries a budget
-(idle renders/sec must be 0, board p95 &lt; 25 ms, 48-card fling p95 &lt; 120 ms, first card &lt; 1.5 s, model RAM &lt; 48 MiB,
-bundle &lt; 1.5 MB). <code>npm run boot-ab</code> A/Bs two production builds. orient / interact / smoke / features /
-standalone-file:// all pass after the merge; Pages deploy <code>97ebb3b</code> is green.</p></div>
+
+<h2>What each one was</h2>
+<div class="fix"><b class="t">readPixels</b><p>Babylon's <code>rtt.readPixels()</code> is a Promise-wrapped <i>synchronous</i>
+<code>gl.readPixels</code> — a full pipeline sync, ~120 ms per poster. Posters now read back through a
+PIXEL_PACK_BUFFER + fence (<code>_readPixelsAsync</code>), with the sync call only as a fallback.</p></div>
+<div class="fix"><b class="t">Events verified three times</b><p>nostr-tools' <code>Relay</code> verifies every matching event itself,
+then our ingress verified it, then <code>parseModelEvent</code> verified it <i>again</i> (it even deleted the memo first).
+At ~46 ms of secp256k1 per event, on the main thread. Now: the relay's duplicate check is off, ingress verifies once in an
+inline worker, and our own results are remembered in a WeakSet.</p></div>
+<div class="fix"><b class="t">One decode per model</b><p><code>getModelBytes()</code> shares a single <code>Uint8Array</code>
+between poster, preview and viewer; <code>validateGLBCached()</code> memoises the limit report by hash; Babylon loads from
+those bytes instead of a <code>File</code> (which re-reads the whole model through a FileReader).</p></div>
+<div class="fix"><b class="t">Mipmaps on repainted textures</b><p>Reply badges and loading rings were created with mipmaps, so
+every repaint re-uploaded <i>and</i> rebuilt the whole mip chain — constantly, while slots recycle during scrolling.</p></div>
+
+<h2>Still standing</h2>
+<div class="fix"><p><code>texImage2D</code> (~4%) is the poster texture upload, and <code>getProgramParameter</code> (~3%) is
+Babylon polling shader link status — both are inherent, and both are inflated by the software rasteriser used in CI. The
+next structural step, if it ever matters on real hardware, is to display the poster render target directly instead of
+reading it back and re-uploading it as a texture.</p></div>
+
+<h2>Also</h2>
+<div class="fix"><p>Merged with agent-kestrel's deletion-UI work; <code>renderPosterFor()</code> (their publish flow) was
+adapted to the new bytes+hash signature. All guards pass — orient, interact, features, standalone <code>file://</code>
+boot with blob workers, 0 CDN — and the Pages deploy <code>3f4fbfe</code> is green.</p></div>
 </div></body></html>

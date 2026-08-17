@@ -1,0 +1,109 @@
+import type { FormEngine } from '../core/engine'
+import type { Board } from '../board/board'
+import type { Viewer } from '../viewer/viewer'
+import type { ThreadView } from '../board/threadView'
+import type { Studio } from '../studio/studio'
+import type { AssetCache } from '../core/assets'
+import { graphics } from '../render/graphics'
+import { mixer } from '../audio/mixer'
+import { setLimitOverrides } from '../model/limits'
+import type { SettingsValues } from './schema'
+
+export interface Wiring {
+  engine: FormEngine
+  board: Board
+  viewer: Viewer
+  threadView: ThreadView
+  studio: Studio
+  assets: AssetCache
+  applyBackground: (hex: string) => void
+}
+
+/**
+ * The one place that turns settings values into engine/scene/audio state.
+ * `changed` lets us skip expensive work when a single slider moved.
+ */
+export function applySettings(w: Wiring, v: SettingsValues, changed: string[] | null = null): void {
+  const touched = (...ids: string[]) => !changed || ids.some((id) => changed.includes(id))
+
+  // ---------------------------------------------------------- display
+  if (touched('resolutionMode', 'renderScale', 'renderScalePow2', 'resolutionWidth', 'resolutionHeight', 'aspectLock', 'upscaler', 'upscalerMode')) {
+    const upscale = v.upscaler === 'spatial'
+      ? ({ ultraQuality: 77, quality: 67, balanced: 59, performance: 50, ultraPerformance: 33 } as Record<string, number>)[String(v.upscalerMode ?? 'quality')] ?? 67
+      : 100
+    const mode = String(v.resolutionMode ?? 'auto') as 'auto' | 'scale' | 'manual'
+    w.engine.setResolutionPolicy({
+      // the spatial upscaler IS a render-scale reduction plus sharpening
+      mode: upscale !== 100 && mode === 'auto' ? 'scale' : mode,
+      scale: upscale !== 100 ? upscale : Number(v.renderScale ?? 100),
+      pow2: !!v.renderScalePow2,
+      width: Number(v.resolutionWidth ?? 1920),
+      height: Number(v.resolutionHeight ?? 1080),
+      aspectLock: !!v.aspectLock,
+    })
+    w.board.resize()
+    w.threadView.resize()
+  }
+  if (touched('displayMode')) {
+    const wantFull = v.displayMode === 'fullscreen'
+    const isFull = !!document.fullscreenElement
+    if (wantFull && !isFull) void document.documentElement.requestFullscreen?.().catch(() => undefined)
+    if (!wantFull && isFull) void document.exitFullscreen?.().catch(() => undefined)
+  }
+
+  // -------------------------------------------------------- framerate
+  if (touched('fpsUncapped', 'fpsLimit')) {
+    w.engine.setFpsLimit(v.fpsUncapped ? 0 : Number(v.fpsLimit ?? 60))
+  }
+  if (touched('idleThrottle')) w.engine.setIdleThrottle(!!v.idleThrottle)
+  if (touched('adaptiveResolution')) w.engine.setAdaptiveResolution(!!v.adaptiveResolution)
+
+  // --------------------------------------------- graphics pipelines
+  graphics.apply(v)
+
+  // ---------------------------------------------------------- limits
+  if (touched('textureQuality')) {
+    const cap = Number(v.textureQuality ?? 0)
+    setLimitOverrides({ textureSide: cap > 0 ? cap : undefined })
+  }
+
+  // --------------------------------------------------------- shadows
+  if (touched('shadows', 'contactShadowStrength')) {
+    const strength = v.shadows === 'off' ? 0 : Number(v.contactShadowStrength ?? 55) / 100
+    w.board.setContactShadows(strength)
+    w.viewer.setContactShadows(strength)
+  }
+
+  // ---------------------------------------------------------- camera
+  if (touched('fov', 'nearClip', 'farClip', 'cameraInertia', 'invertY')) {
+    w.viewer.setCameraSettings({
+      fov: Number(v.fov ?? 46),
+      near: Number(v.nearClip ?? 0.01),
+      far: Number(v.farClip ?? 2000),
+      inertia: Number(v.cameraInertia ?? 70) / 100,
+      invertY: !!v.invertY,
+    })
+  }
+
+  // ---------------------------------------------------------- memory
+  if (touched('modelRamBudget', 'textureBudget')) {
+    w.assets.setBudgets({ modelRamMiB: Number(v.modelRamBudget ?? 48), textures: Number(v.textureBudget ?? 32) })
+  }
+  if (touched('livePreviews')) w.board.setLivePreviewSlots(Number(v.livePreviews ?? 5))
+  if (touched('prefetch', 'keepOffscreen')) {
+    w.board.setPrefetch(v.keepOffscreen ? 4 : Number(v.prefetch ?? 100) / 100)
+  }
+
+  // ----------------------------------------------------------- audio
+  mixer.apply(v)
+
+  // ------------------------------------------------------- interface
+  if (touched('background')) w.applyBackground(String(v.background ?? '#0B0B0C'))
+  if (touched('inertia')) w.board.setInertia(Number(v.inertia ?? 70) / 100)
+  if (touched('reduceMotion')) {
+    document.body.classList.toggle('reduce-motion', !!v.reduceMotion)
+  }
+  if (touched('showFps')) document.body.classList.toggle('show-perf', !!v.showFps)
+
+  w.engine.kick()
+}

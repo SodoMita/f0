@@ -22,6 +22,7 @@ import {
   makeCardMaterial, setCardTexture, setCardTint, setCardWhite, setCardFlip, setCardOpacity,
 } from '../board/cardMaterial'
 import { makeSpotlightTexture, paintSpotlight, makeContactShadow, luminance } from '../core/gfx'
+import { graphics } from '../render/graphics'
 import { theme } from '../theme'
 
 /**
@@ -50,6 +51,8 @@ export class Viewer {
   private pending = false
   private form: FormEngine
   private camHash = ''
+  private camPrefs = { fov: 46, near: 0.01, far: 2000, inertia: 0.7, invertY: false }
+  private contactStrength = 0.5
 
   constructor(engine: FormEngine) {
     this.form = engine
@@ -129,6 +132,28 @@ export class Viewer {
     this.backdrop.scaling.set(hh * 2 * aspect, hh * 2, 1)
   }
 
+  /** Settings → Camera. FOV is degrees; clips are world units. */
+  setCameraSettings(o: { fov: number; near: number; far: number; inertia: number; invertY: boolean }): void {
+    this.camPrefs = { ...o }
+    this.orbit.fov = (o.fov * Math.PI) / 180
+    this.orbit.inertia = Math.max(0, Math.min(0.95, o.inertia))
+    this.orbit.panningInertia = this.orbit.inertia
+    this.orbit.invertRotation = o.invertY
+    if (this.container) {
+      this.orbit.minZ = o.near
+      this.orbit.maxZ = o.far
+    }
+    this.form.kick()
+  }
+
+  /** Settings → Lighting: ground contact shadow opacity. */
+  setContactShadows(strength: number): void {
+    this.contactStrength = Math.max(0, Math.min(1, strength))
+    setCardOpacity(this.glowMat, this.contactStrength)
+    if (this.container) this.glow.setEnabled(this.contactStrength > 0)
+    this.form.kick()
+  }
+
   setBackground(hex: string): void {
     this.form.kick()
     this.background = hex
@@ -169,6 +194,9 @@ export class Viewer {
         if (m.material) m.material.backFaceCulling = false
       }
       this.container = container
+      graphics.trackContainer(container)
+      graphics.applyToContainer(container)
+      graphics.setShadowCasters(this.scene, container.meshes.filter((m) => m.getTotalVertices() > 0))
       this.imported = container.cameras.slice()
       this.anims = container.animationGroups
 
@@ -262,12 +290,12 @@ export class Viewer {
     this.orbit.setPosition(center.add(dir.scale(Math.max(0.6, dist))))
     this.orbit.lowerRadiusLimit = Math.max(0.05, radius * 0.1)
     this.orbit.upperRadiusLimit = Math.max(1, radius * 12)
-    this.orbit.minZ = Math.max(0.001, (dist - radius) * 0.2)
-    this.orbit.maxZ = dist + radius * 8
+    this.orbit.minZ = Math.max(this.camPrefs.near, Math.min(this.camPrefs.near * 100, (dist - radius) * 0.2))
+    this.orbit.maxZ = Math.min(this.camPrefs.far, dist + radius * 8)
     this.orbit.wheelPrecision = Math.max(1, 60 / Math.max(0.05, radius))
     this.orbit.panningSensibility = Math.max(10, 900 / Math.max(0.05, radius))
     // contact shadow on the ground plane under the model
-    this.glow.setEnabled(true)
+    this.glow.setEnabled(this.contactStrength > 0)
     this.glow.position.set(center.x, min.y - radius * 0.02, center.z)
     this.glow.scaling.set(radius * 1.9, radius * 1.9, 1)
     this.backdropDistance = Math.max(20, Math.min(dist * 6, radius * 26))
@@ -296,7 +324,11 @@ export class Viewer {
     this.anims = []
     this.imported = []
     this.camIdx = -1
-    if (this.container) { this.container.removeAllFromScene(); this.container.dispose() }
+    if (this.container) {
+      graphics.untrackContainer(this.container)
+      this.container.removeAllFromScene()
+      this.container.dispose()
+    }
     this.container = null
     // Safety net: anything that is not one of the viewer's own helpers must
     // not survive a clear (a leaked container would otherwise stack up).

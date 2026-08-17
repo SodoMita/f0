@@ -11,6 +11,43 @@ export interface LimitReport {
   }
 }
 
+/** Width/height from a PNG / JPEG / WebP header (first bytes only). */
+export function imageDimensions(head: Uint8Array): { width: number; height: number } | null {
+  if (head.length < 16) return null
+  const dv = new DataView(head.buffer, head.byteOffset, head.byteLength)
+  // PNG: 89 50 4E 47 ... IHDR at byte 16
+  if (dv.getUint32(0, false) === 0x89504e47 && head.length >= 24) {
+    return { width: dv.getUint32(16, false), height: dv.getUint32(20, false) }
+  }
+  // JPEG: scan SOFn markers
+  if (head[0] === 0xff && head[1] === 0xd8) {
+    let i = 2
+    while (i + 9 < head.length) {
+      if (head[i] !== 0xff) { i++; continue }
+      const marker = head[i + 1]
+      const len = dv.getUint16(i + 2, false)
+      const isSOF = marker >= 0xc0 && marker <= 0xcf
+        && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc
+      if (isSOF) return { height: dv.getUint16(i + 5, false), width: dv.getUint16(i + 7, false) }
+      i += 2 + len
+    }
+    return null
+  }
+  // WebP: RIFF....WEBP
+  if (dv.getUint32(0, false) === 0x52494646 && head.length >= 30 && dv.getUint32(8, false) === 0x57454250) {
+    const fourcc = dv.getUint32(12, false)
+    if (fourcc === 0x56503820 && head.length >= 30) { // 'VP8 ' lossy
+      return { width: dv.getUint16(26, true) & 0x3fff, height: dv.getUint16(28, true) & 0x3fff }
+    }
+    if (fourcc === 0x56503858 && head.length >= 30) { // 'VP8X' extended
+      const w = 1 + (head[24] | (head[25] << 8) | (head[26] << 16))
+      const h = 1 + (head[27] | (head[28] << 8) | (head[29] << 16))
+      return { width: w, height: h }
+    }
+  }
+  return null
+}
+
 /**
  * GLB complexity validation BEFORE Babylon ever sees the bytes (07 §4).
  * This is what prevents a huge/hostile model from exhausting GPU memory and
@@ -32,6 +69,20 @@ export function validateGLBCached(bytes: Uint8Array, sha256: string): LimitRepor
   return report
 }
 
+/**
+ * Runtime overrides for the device-protection caps (settings → Textures).
+ * A phone can refuse 4K-textured posts outright instead of thrashing VRAM.
+ */
+const overrides: { textureSide?: number; decodedPixels?: number } = {}
+
+export function setLimitOverrides(next: { textureSide?: number; decodedPixels?: number }): void {
+  Object.assign(overrides, next)
+  reportBySha.clear()   // previous verdicts were made under different caps
+}
+
+export function limitTextureSide(): number { return overrides.textureSide ?? LIMITS.textureSide }
+export function limitDecodedPixels(): number { return overrides.decodedPixels ?? LIMITS.decodedPixels }
+
 export function validateGLB(bytes: Uint8Array): LimitReport {
   const stats = { nodes: 0, meshes: 0, primitives: 0, vertices: 0, indices: 0, materials: 0, textures: 0, cameras: 0, lights: 0, skins: 0, animations: 0, channels: 0, keyframes: 0, decodedPixels: 0, depth: 0 }
   const fail = (reason: string): LimitReport => ({ ok: false, reason, stats })
@@ -47,13 +98,14 @@ export function validateGLB(bytes: Uint8Array): LimitReport {
   let off = 12
   let jsonBytes: Uint8Array | null = null
   let binLength = 0
+  let binOffset = 0
   while (off + 8 <= bytes.length) {
     const chunkLen = dv.getUint32(off, true)
     const chunkType = dv.getUint32(off + 4, true)
     off += 8
     if (off + chunkLen > bytes.length) return fail('Truncated GLB chunk.')
     if (chunkType === 0x4e4f534a) jsonBytes = bytes.subarray(off, off + chunkLen)
-    if (chunkType === 0x004e4942) binLength = chunkLen
+    if (chunkType === 0x004e4942) { binLength = chunkLen; binOffset = off }
     off += chunkLen
   }
   if (!jsonBytes) return fail('GLB has no JSON chunk.')
@@ -122,14 +174,27 @@ export function validateGLB(bytes: Uint8Array): LimitReport {
     if ((skin.joints ?? []).length > LIMITS.jointsPerSkin) return fail(`joints per skin > ${LIMITS.jointsPerSkin}`)
   }
 
-  // Decoded-pixel budget from embedded images (PNG/JPEG headers).
+  // Decoded-pixel budget from embedded images. The image DIMENSIONS live in
+  // the PNG/JPEG/WebP headers inside the BIN chunk, so read them: a 4 x 4096²
+  // texture set decodes to 256 MiB of VRAM regardless of how small the file
+  // is, and that is what actually kills a phone.
   for (const img of images) {
     if (img.uri) continue // external URI: Babylon fetches it; not counted here
     const bv = bufferViews[img.bufferView]
-    if (!bv || bv.byteOffset + bv.byteLength > binLength) return fail('Image bufferView out of BIN range.')
-    // We can't slice cheaply here without the BIN; dimensions are checked by
-    // the loader. Count only when a BIN slice is provided (post-download).
-    stats.decodedPixels += 0
+    if (!bv) continue
+    const start = (bv.byteOffset ?? 0)
+    const end = start + (bv.byteLength ?? 0)
+    if (end > binLength) return fail('Image bufferView out of BIN range.')
+    const dims = imageDimensions(bytes.subarray(binOffset + start, binOffset + Math.min(end, start + 64)))
+    if (!dims) continue // unknown codec (KTX2/basis): the loader validates it
+    const side = Math.max(dims.width, dims.height)
+    if (side > limitTextureSide()) {
+      return fail(`texture ${dims.width}x${dims.height} exceeds the ${limitTextureSide()} px limit`)
+    }
+    stats.decodedPixels += dims.width * dims.height * 4
+  }
+  if (stats.decodedPixels > limitDecodedPixels()) {
+    return fail(`decoded texture memory ${(stats.decodedPixels / 1048576).toFixed(0)} MiB > ${(limitDecodedPixels() / 1048576).toFixed(0)} MiB`)
   }
 
   // Scene-graph depth (cycles → reject).

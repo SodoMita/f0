@@ -15,6 +15,7 @@ import '../model/gltf'
 import { configureDraco } from '../model/draco'
 import { dominantFacing, worldBox, frameDistance } from '../model/facing'
 import { validateGLBCached } from '../model/limits'
+import { graphics } from '../render/graphics'
 
 interface Slot {
   index: number
@@ -47,14 +48,14 @@ export interface PreviewPoolOptions {
  * interleaved (00 §3.12). Static/failed posts are remembered (00 §3.5).
  */
 export class PreviewPool {
-  private stage: Scene
+  readonly stage: Scene
   private headlight: DirectionalLight
   private slots: Slot[] = []
   private byPost = new Map<string, Slot>()
   private rejected = new Map<string, 'STATIC' | 'FAILED'>()
   private loading = new Set<string>()
   private frame = 0
-  readonly opts: PreviewPoolOptions
+  opts: PreviewPoolOptions
   onLive: ((postId: string, rtt: RenderTargetTexture) => void) | null = null
 
   constructor(
@@ -84,7 +85,22 @@ export class PreviewPool {
     this.headlight.intensity = 0.55
   }
 
+  get scene(): Scene { return this.stage }
+
   get activeCount(): number { return this.byPost.size }
+
+  /** Settings → Memory: how many cards may animate at once. */
+  setMaxSlots(n: number): void {
+    const next = Math.max(0, Math.round(n))
+    this.opts.maxSlots = next
+    while (this.slots.length > next) {
+      const slot = this.slots.pop()
+      if (!slot) break
+      if (slot.postId) this.release(slot.postId)
+      slot.rtt.dispose()
+      slot.camera.dispose()
+    }
+  }
 
   /**
    * Is any VISIBLE live slot due for a refresh right now? The board uses this
@@ -204,6 +220,7 @@ export class PreviewPool {
       if (!report.ok) throw new Error(report.reason)
 
       container = await LoadAssetContainerAsync(model.bytes, this.stage, { pluginExtension: '.glb' })
+      graphics.applyToContainer(container)
       for (const m of container.meshes) {
         if (m.material) m.material.backFaceCulling = false
       }

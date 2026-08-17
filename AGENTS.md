@@ -86,6 +86,12 @@ bun run build:standalone  # ONE self-contained form-zero-standalone.html
    that animates must say so through its activity probe. Never latch a probe
    flag true; a stuck flag quietly restores full-rate rendering (check
    `scripts/perf.mjs` -> `idleBoard.rendersPerSec`, which must stay ~2-3).
+9j. **Settings live in one schema.** Add to `src/settings/schema.ts` (type,
+   default, group, preset value, availability probe) and wire it in
+   `src/settings/apply.ts`. Never ship a control that does nothing: if the
+   platform cannot do it, give `unavailable()` a reason and offer the real
+   equivalent. Turning a renderer feature on by default is a perf decision —
+   measure it (enabling image processing globally cost ~7x on posters).
 9i. **Don't pay twice.** Before optimising, run `scripts/profile.mjs`. The
    expensive things in this app are duplicated work, not slow algorithms:
    shaders recompiled because a container was disposed, events verified by
@@ -121,6 +127,7 @@ bun scripts/features.mjs            # reply badges + thread view + settings
 bun scripts/capture.mjs             # board/viewer/thread/light/phone screenshots to shots/
 bun scripts/perf.mjs                # PERF: boot, per-view frame cost, 48-card stress, idle, heap
 bun scripts/shaders.mjs             # shader recompiles (repeat model opens must compile 0 programs)
+bun scripts/settings.mjs            # every setting must reach real engine state (20 checks)
 PHASE=load bun scripts/profile.mjs  # CPU profile of a board load, aggregated by self time
 CPU=4 bun scripts/perf.mjs          #   …the same, throttled to emulate a phone
 python3 scripts/visual_critique.py  # orientation + composition on those shots

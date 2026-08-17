@@ -15,7 +15,8 @@
     "smoke": "node scripts/smoke.mjs",
     "features": "node scripts/features.mjs",
     "perf": "node scripts/perf.mjs",
-    "boot-ab": "node scripts/boot-ab.mjs"
+    "boot-ab": "node scripts/boot-ab.mjs",
+    "check:settings": "node scripts/settings.mjs"
   },
   "dependencies": {
     "@babylonjs/core": "8.10.1",

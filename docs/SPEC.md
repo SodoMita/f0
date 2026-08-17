@@ -257,3 +257,45 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     `generateMipMaps = false`. Every `update()` otherwise re-uploads AND
     regenerates the whole mip chain — with slot recycling that fires
     constantly while scrolling.
+
+32. SETTINGS ARE HONEST. `src/settings/schema.ts` is the single source of
+    truth: it drives persistence, the panel UI, the quality presets and the
+    "why is this greyed out" copy, so a new setting is added in exactly one
+    place. Anything the web platform cannot provide is rendered DISABLED with
+    the reason and the closest real equivalent next to it — never a switch
+    that does nothing. Currently unavailable, with copy in
+    `settings/capabilities.ts`: DLSS / FSR / XeSS (native SDK only → offer
+    render scale + sharpen), frame generation, hardware ray tracing (→ SSR),
+    HDR swapchain (→ exposure/tone mapping), V-Sync toggle (rAF is always
+    display-synced → frame cap), VRAM reservation (→ our own budgets).
+    Runtime failures (a pipeline this GPU refuses) are surfaced the same way
+    via `graphics.errors`.
+
+33. Everything else in the panel maps to a REAL engine feature: MSAA
+    (`pipeline.samples`), FXAA, TAA, SSAO/SSAO2, SSR, bloom (weight/kernel/
+    threshold), sharpen, grain, vignette, exposure/contrast/tone mapping,
+    anisotropy, unlit (PBR off), shadow maps with blur, camera FOV/near/far/
+    inertia, drawing-buffer size (auto / scale / exact pixels, power-of-two
+    snapping), frame cap, adaptive resolution, our memory budgets and the
+    Web Audio mixer (per-bus gain, `setSinkId` output routing, device
+    enumeration, HRTF, surround channel count, mute-on-blur).
+
+34. Heavy pipelines load on demand. SSAO2/SSR/TAA/DefaultRenderingPipeline are
+    `await import(...)`ed the first time a setting needs them (they add ~380 kB
+    to the entry chunk otherwise). The standalone build inlines those chunks.
+    SSAO2/SSR additionally need the PrePass + geometry-buffer scene components
+    imported alongside them, or the constructor throws
+    "scene.enablePrePassRenderer is not a function".
+
+35. Image processing is only switched ON when a value deviates from neutral.
+    Enabling `scene.imageProcessingConfiguration` adds IMAGEPROCESSING defines
+    to every PBR material — new shader permutations and a heavier fragment
+    shader — which measurably slowed poster rendering when it was on by
+    default.
+
+36. A settings change must not silently drop content. The texture cap is a
+    LOAD-TIME GUARD ("skip models with textures over N"), defaults to no extra
+    limit, and only the Low preset tightens it; WebGL cannot downscale a
+    model's textures after decode, so pretending otherwise would just hide
+    posts. GLB image dimensions are now really parsed (PNG/JPEG/WebP headers)
+    so the spec's decoded-pixel budget is enforced instead of stubbed.

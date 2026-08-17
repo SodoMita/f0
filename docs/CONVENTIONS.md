@@ -131,3 +131,16 @@ Both write artefacts to `shots/`. Read the profile before optimising anything:
 the four biggest wins of round 6 (`readPixels`, `verifyEvent`, `toBlob`,
 duplicate GLB parses) were all invisible until they were measured, and two of
 them were duplicate work rather than slow code.
+
+
+## Settings (round 7)
+
+`node scripts/settings.mjs` must pass: it asserts that controls reach real
+engine state (drawing-buffer size, frame cap, created pipelines, unlit
+materials, camera FOV, preview slots, contact shadows), that presets move many
+keys at once, that any edit flips the preset to Custom, and that everything
+survives a reload.
+
+When adding a setting: schema entry → `apply.ts` wiring → a check in
+`scripts/settings.mjs`. If it cannot be honoured, give it an `unavailable()`
+reason instead of a dead control.

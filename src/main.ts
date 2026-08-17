@@ -15,7 +15,13 @@ import { configureDraco } from './model/draco'
 import { enforceOffline } from './model/offline'
 import { DEFAULTS, theme } from './theme'
 import { luminance } from './core/gfx'
-import { loadNetworkConfig, loadSettings, saveSettings, listOwnedPosts, type OwnedPostRecord } from './protocol/storage'
+import { loadNetworkConfig, listOwnedPosts, type OwnedPostRecord } from './protocol/storage'
+import { SettingsStore } from './settings/store'
+import { SettingsPanel } from './settings/panel'
+import { detectCapabilities } from './settings/capabilities'
+import { applySettings } from './settings/apply'
+import { graphics } from './render/graphics'
+import { mixer } from './audio/mixer'
 import { hexToBytes } from './util/hex'
 import { DELETE_KIND } from './theme'
 import { Legend } from './hud/legend'
@@ -52,7 +58,8 @@ async function boot(): Promise<void> {
   const cfg = await loadNetworkConfig()
   if (cfg.relays?.length) pool.setRelays(cfg.relays)
   if (cfg.blossoms?.length) blossoms.setServers(cfg.blossoms)
-  const settings = await loadSettings()
+  const settings = new SettingsStore()
+  await settings.load()
 
   const board = new Board(engine, {
     onOpenModel: (meta) => router.go({ name: 'viewer', id: meta.eventId }),
@@ -287,8 +294,8 @@ async function boot(): Promise<void> {
     document.body.classList.remove('drawer-open')
   })
 
-  // ---------- settings (HTML) ----------
-  const settingsPanel = $('settings-panel')
+  // ---------- settings ----------
+  const caps = detectCapabilities(engine.engine._gl as WebGL2RenderingContext | null)
   function applyBackground(hex: string): void {
     // HUD ink follows the backdrop so a light board is still readable
     document.body.dataset.theme = luminance(hex) < 0.5 ? 'dark' : 'light'
@@ -296,32 +303,119 @@ async function boot(): Promise<void> {
     viewer.setBackground(hex)
     studio.setBackground(hex)
     threadView.setBackground(hex)
-    settings.background = hex
-    void saveSettings(settings)
-    document.querySelectorAll('#bg-swatches .swatch').forEach((el) => {
-      el.classList.toggle('active', (el as HTMLElement).dataset.bg === hex)
-    })
-    ;(document.getElementById('bg-custom') as HTMLInputElement).value = hex
   }
-  const inertiaSlider = document.getElementById('inertia') as HTMLInputElement
-  inertiaSlider.addEventListener('input', () => {
-    settings.inertia = Number(inertiaSlider.value) / 100
-    board.setInertia(settings.inertia)
-    void saveSettings(settings)
+
+  const wiring = { engine, board, viewer, threadView, studio, assets, applyBackground }
+  graphics.onInvalidate = () => engine.kick()
+  graphics.onError = () => settingsPanel?.refresh()
+  graphics.register(board.scene, 'flat')
+  graphics.register(threadView.scene, 'flat')
+  graphics.register(viewer.scene, 'viewer', () => viewer.scene.activeCamera)
+  graphics.register(studio.scene, 'studio', () => studio.scene.activeCamera)
+  for (const offscreen of assets.offscreenScenes()) graphics.register(offscreen, 'offscreen')
+  graphics.register(board.previewScene, 'offscreen')
+
+  let settingsPanel: SettingsPanel | undefined
+  settingsPanel = new SettingsPanel(settings, caps, {
+    onAction: (id) => void runSettingsAction(id),
+    runtimeError: (id) => graphics.errors.get(id) ?? null,
+    readout: () => {
+      const b = engine.bufferSize
+      const css = `${Math.round(window.innerWidth)}×${Math.round(window.innerHeight)} css`
+      return `${b.width}×${b.height} drawing buffer · ${css} · scale ${b.ratio}× · ${caps.renderer.slice(0, 42)}`
+    },
   })
-  $('btn-settings').addEventListener('click', () => { settingsPanel.hidden = !settingsPanel.hidden })
-    $('btn-settings-close').addEventListener('click', () => { settingsPanel.hidden = true })
-  document.querySelectorAll('#bg-swatches .swatch').forEach((el) => {
-    el.addEventListener('click', () => applyBackground((el as HTMLElement).dataset.bg!))
-  })
-  ;(document.getElementById('bg-custom') as HTMLInputElement).addEventListener('input', (e) => {
-    applyBackground((e.target as HTMLInputElement).value)
-  })
-  applyBackground(settings.background || '#0B0B0C')
-  if (inertiaSlider) {
-    inertiaSlider.value = String(Math.round((settings.inertia ?? 0.7) * 100))
-    board.setInertia(settings.inertia ?? 0.7)
+
+  async function runSettingsAction(id: string): Promise<void> {
+    if (id === 'clearCache') {
+      await assets.clearCaches()
+      showToast('caches cleared — reload to refetch')
+    } else if (id === 'calibration') {
+      toggleCalibration()
+    }
   }
+
+  // Brightness calibration overlay: greyscale ramp + near-black/near-white bars.
+  let calibrationEl: HTMLElement | null = null
+  function toggleCalibration(): void {
+    if (calibrationEl) { calibrationEl.remove(); calibrationEl = null; return }
+    const wrap = document.createElement('div')
+    wrap.id = 'calibration'
+    wrap.className = 'hud'
+    const ramp = document.createElement('div')
+    ramp.className = 'cal-ramp'
+    for (let i = 0; i <= 20; i++) {
+      const c = document.createElement('i')
+      const l = Math.round((i / 20) * 255)
+      c.style.background = `rgb(${l},${l},${l})`
+      ramp.append(c)
+    }
+    const dark = document.createElement('div')
+    dark.className = 'cal-bars dark'
+    for (let i = 0; i < 6; i++) {
+      const c = document.createElement('i')
+      c.style.background = `rgb(${i * 3},${i * 3},${i * 3})`
+      c.textContent = String(i * 3)
+      dark.append(c)
+    }
+    const light = document.createElement('div')
+    light.className = 'cal-bars light'
+    for (let i = 0; i < 6; i++) {
+      const l = 255 - i * 3
+      const c = document.createElement('i')
+      c.style.background = `rgb(${l},${l},${l})`
+      c.textContent = String(l)
+      light.append(c)
+    }
+    const note = document.createElement('p')
+    note.textContent = 'Raise brightness until the darkest bar on the left is just visible, then lower it until the brightest bars on the right stay distinct. Click to close.'
+    wrap.append(ramp, dark, light, note)
+    wrap.addEventListener('click', () => toggleCalibration())
+    document.body.append(wrap)
+    calibrationEl = wrap
+  }
+
+  // performance overlay (settings → Interface)
+  const perfOverlay = document.createElement('div')
+  perfOverlay.id = 'perf-overlay'
+  perfOverlay.className = 'hud'
+  document.body.append(perfOverlay)
+  setInterval(() => {
+    if (!document.body.classList.contains('show-perf')) return
+    const st = engine.perfStats()
+    const b = engine.bufferSize
+    const heap = (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory
+    perfOverlay.textContent = [
+      `${b.width}×${b.height} @${b.ratio}×`,
+      `frame ${st.emaMs.toFixed(1)} ms`,
+      `renders ${st.renders}`,
+      heap ? `heap ${(heap.usedJSHeapSize / 1048576).toFixed(0)} MB` : '',
+      `live ${board.previewPool.activeCount}`,
+    ].filter(Boolean).join('   ')
+  }, 500)
+
+  settings.subscribe((values, changed) => {
+    applySettings(wiring, values, changed)
+    settingsPanel.refresh()
+  })
+  applySettings(wiring, settings.all, null)
+
+  // audio devices need a permission-free enumerate first; labels fill in later
+  mixer.onDevices = () => {
+    settingsPanel.setOptions('audioOutput', [
+      { value: 'default', label: 'System default' },
+      ...mixer.outputs.map((d) => ({ value: d.id, label: d.label })),
+    ])
+    settingsPanel.setOptions('audioInput', [
+      { value: 'default', label: 'System default' },
+      ...mixer.inputs.map((d) => ({ value: d.id, label: d.label })),
+    ])
+  }
+  void mixer.refreshDevices()
+  window.addEventListener('pointerdown', () => mixer.resume(), { once: true, passive: true })
+  navigator.mediaDevices?.addEventListener?.('devicechange', () => void mixer.refreshDevices())
+
+  $('btn-settings').addEventListener('click', () => settingsPanel.toggle())
 
   function syncPlay(): void {
     // the button holds both icons; CSS swaps them (no glyph swapping)
@@ -564,7 +658,10 @@ async function boot(): Promise<void> {
 
   window.addEventListener('resize', () => { engine.resize(); board.resize(); threadView.resize() })
 
-  ;(window as any).__form0 = { engine, pool, blossoms, index, board, viewer, studio, threadView, router, assets, legend, networkPanel, errorSheet }
+  ;(window as any).__form0 = {
+    engine, pool, blossoms, index, board, viewer, studio, threadView, router, assets,
+    legend, networkPanel, errorSheet, settings, settingsPanel, graphics, mixer, caps,
+  }
 }
 
 boot().catch((err) => console.error(err))

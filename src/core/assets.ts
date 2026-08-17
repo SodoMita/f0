@@ -1,7 +1,7 @@
 import { Texture } from '@babylonjs/core/Materials/Textures/texture'
 import { RawTexture } from '@babylonjs/core/Materials/Textures/rawTexture'
 import { Scene } from '@babylonjs/core/scene'
-import { get, put } from '../protocol/storage'
+import { clearStore, get, put } from '../protocol/storage'
 import { sha256Hex, BlossomClient } from '../protocol/blossom'
 import type { ThreadMeta } from '../protocol/thread-index'
 import { PosterRenderer, POSTER_W, POSTER_H, type Footprint } from '../model/poster'
@@ -14,8 +14,10 @@ const MAX_POSTER_CONCURRENT = 3 // concurrent downloads; the shared render scene
 const AUTO_POSTER_MAX_BYTES = 8 * 1024 * 1024
 // Decoded GLBs stay in IndexedDB; RAM only keeps the few most recent, or a
 // board full of 20 MiB models parks hundreds of megabytes for nothing.
-const MODEL_RAM_BUDGET = 48 * 1024 * 1024
+let MODEL_RAM_BUDGET = 48 * 1024 * 1024
 const MODEL_RAM_MAX_ITEMS = 6
+/** Resident card textures (settings → Memory). Posters are ~0.5 MB each. */
+let POSTER_TEX_BUDGET = 32
 
 interface Job { meta: ThreadMeta; resolve: (tex: Texture | undefined) => void }
 
@@ -79,6 +81,40 @@ export class AssetCache {
    */
   peekPoster(meta: ThreadMeta): Texture | undefined {
     return this.posterTex.get(meta.eventId)
+  }
+
+  /** Scenes that render offscreen content (posters) — graphics settings apply. */
+  offscreenScenes(): import('@babylonjs/core/scene').Scene[] {
+    return [this.poster.scene]
+  }
+
+  /** Wipe the on-disk caches (settings → Memory). */
+  async clearCaches(): Promise<void> {
+    for (const t of this.posterTex.values()) t.dispose()
+    this.posterTex.clear()
+    this.modelBlobs.clear()
+    this.modelBytes.clear()
+    this.footprintBySha.clear()
+    await clearStore('posterCache')
+    await clearStore('modelCache')
+  }
+
+  /** Settings → Memory. */
+  setBudgets(o: { modelRamMiB?: number; textures?: number }): void {
+    if (o.modelRamMiB) MODEL_RAM_BUDGET = Math.max(4, o.modelRamMiB) * 1024 * 1024
+    if (o.textures) POSTER_TEX_BUDGET = Math.max(4, Math.round(o.textures))
+    this.evictModels()
+    this.evictPosters()
+  }
+
+  /** Drop the least recently shown poster textures over budget. */
+  private evictPosters(): void {
+    while (this.posterTex.size > POSTER_TEX_BUDGET) {
+      const oldest = this.posterTex.keys().next()
+      if (oldest.done) break
+      this.posterTex.get(oldest.value)?.dispose()
+      this.posterTex.delete(oldest.value)
+    }
   }
 
   /** Poster: thumb tag = fast path; local render = normal path (00 §2.2). */
@@ -157,6 +193,7 @@ export class AssetCache {
           tex.wrapU = Texture.CLAMP_ADDRESSMODE
           tex.wrapV = Texture.CLAMP_ADDRESSMODE
           this.posterTex.set(meta.eventId, tex)
+          this.evictPosters()
           return tex
         }
       }

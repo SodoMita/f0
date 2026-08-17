@@ -49,29 +49,8 @@
       </button>
     </div>
 
-    <div id="settings-panel" class="hud" hidden>
-      <div class="drawer-head">
-        <span>SETTINGS</span>
-        <button id="btn-settings-close" class="hbtn small" title="close" aria-label="close">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12"/><path d="M18 6L6 18"/></svg>
-        </button>
-      </div>
-      <div class="setting-row">
-        <span class="setting-label">background</span>
-        <div class="swatches" id="bg-swatches">
-          <button class="swatch" data-bg="#0B0B0C" style="background:#0B0B0C" title="dark"></button>
-          <button class="swatch" data-bg="#1d1d22" style="background:#1d1d22" title="graphite"></button>
-          <button class="swatch" data-bg="#3a3a42" style="background:#3a3a42" title="grey"></button>
-          <button class="swatch" data-bg="#101820" style="background:#101820" title="navy"></button>
-          <button class="swatch" data-bg="#ffffff" style="background:#ffffff" title="light"></button>
-          <input type="color" id="bg-custom" value="#0B0B0C" title="custom" />
-        </div>
-      </div>
-      <div class="setting-row">
-        <span class="setting-label">scroll inertia</span>
-        <input type="range" id="inertia" min="0" max="100" value="70" />
-      </div>
-    </div>
+    <!-- Settings drawer: built from src/settings/schema.ts at boot -->
+    <div id="settings-panel" class="hud" hidden></div>
 
     <div id="viewer-bar" class="hud" hidden>
       <div class="rail">

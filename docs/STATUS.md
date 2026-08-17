@@ -166,6 +166,18 @@ move it to **Done** with a commit reference. One agent per area.
       by poster+preview+viewer, and repainted DynamicTextures no longer
       regenerate mipmaps. Main-thread idle during a load: 71% -> 82%.
 
+- [x] **Comprehensive graphics/audio settings** (`src/settings/*`,
+      `src/render/graphics.ts`, `src/audio/mixer.ts`): 11 groups, ~50 settings,
+      Low/Medium/High/Ultra presets + Custom, search, per-row availability
+      copy, live readout of the actual drawing buffer, brightness calibration
+      pattern, performance overlay. Everything maps to a real engine feature;
+      DLSS/FSR/XeSS, frame generation, hardware RT, HDR output, V-Sync toggle
+      and VRAM reservation are shown disabled with the reason and the WebGL
+      equivalent. Guarded by `scripts/settings.mjs` (20 checks: resolution
+      modes, power-of-two snapping, frame cap, pipelines actually created,
+      PBR→unlit, FOV, preview slots, contact shadows, presets, Custom
+      switching, persistence).
+
 ## Incident log
 
 - 2026-08-17: `main` was force-pushed away (replaced by an unrelated 3-commit
