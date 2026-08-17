@@ -137,6 +137,11 @@ move it to **Done** with a commit reference. One agent per area.
   pushes to `main`.
 ## In progress
 
+- [ ] **[claimed: agent-kestrel]** Thread map: per-node reply button
+      (Babylon plane + shared DynamicTexture icon, same visual language as
+      the board badge) -> #/studio?root&parent. Touches threadView, main,
+      legend copy.
+
 
 
 - [ ] Studio: import GLB only. Publish (BUD-01) + audio embed + ownership are
