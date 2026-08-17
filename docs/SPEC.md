@@ -81,3 +81,28 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
    promise-chain mutex (concurrent renders stomp each other's activeCamera);
    downloads stay concurrent (<=3). Containers are removeAllFromScene() before
    dispose so no meshes leak into the next render.
+
+10. Paint editor's primary use case = hand-written text. The Studio's main job
+    is writing text by hand: freehand strokes that form letterforms (Paint 3D
+    ink/doodle style). The brush must feel like a pen FIRST — pointer pressure
+    → stroke width/alpha, path smoothing, coalesced-event sampling, tight
+    stamp spacing, an eraser, and undo. Shape placement and the grid are
+    secondary tools, not the point. (Amanatides–Woo grid DDA is still the hit-
+    test technique; using it does not make this a voxel editor.)
+
+11. Editor priorities (in order): (1) hand-writing text; (2) animation editing
+    (timeline + camera fly-through, spec 05b); (3) audio RECORDING — mic
+    capture via getUserMedia + MediaRecorder, then embed into the GLB
+    (KHR_audio / MSFT_audio_emitter, 8 MiB cap). "Embed" is not enough; the
+    user records in-app.
+
+12. Phone-pose camera while recording. During audio recording the camera
+    animation may be captured from the phone's sensors: rotation from
+    DeviceOrientation (alpha/beta/gamma; works broadly, HTTPS + a permission
+    prompt on iOS), translation from WebXR device pose where available.
+    DeviceMotion acceleration double-integrates with unbounded drift — DO NOT
+    use it for position (rotationRate is fine for rotation smoothing). Pose
+    and audio are sampled on one clock and exported as a synced glTF camera
+    animation + embedded audio. Rotation-only is an acceptable fallback; the
+    recorded camera must play back in the feed's live preview like any other
+    authored camera animation (spec 05b §2.3).

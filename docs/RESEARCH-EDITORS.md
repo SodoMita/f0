@@ -194,6 +194,74 @@ matrices, color = old/new values. Cap the stack and clear redo-on-new-edit.
 5. **Instance store**: packed Float32Array + `thinInstanceSetBuffer`, one draw
    call per (shape, material), swap-last delete (section 5).
 6. **Undo**: command+inverse over the packed store, bounded stack (section 6).
+7. **Hand-writing ink input** (section 8) is the paint editor's primary use
+   case — pressure, coalesced events, smoothing come first.
+8. **Phone-pose camera + audio recording** (section 9) for the recording
+   feature — DeviceOrientation rotation is the safe base, WebXR for position.
+
+---
+
+## 8. Hand-writing / freehand ink input (the paint editor's primary job)
+
+The editor's #1 use case is **writing text by hand** — freehand strokes that
+form letterforms, Paint 3D ink style (spec AMENDMENT 10). The input pipeline
+that makes strokes feel like a pen:
+
+1. **`PointerEvent.pressure`** (0..1) → stamp size and/or alpha. Pen/touch
+   report real pressure; mouse reports 0.5 or a button-press constant — so
+   always provide a fallback size.
+2. **`touch-action: none`** on the canvas + `setPointerCapture` on pointerdown,
+   or the browser treats the pen as a clicker and you get `pointercancel`
+   mid-stroke (a classic bug).
+3. **`getCoalescedEvents()`** — browsers coalesce pointermove to the frame
+   rate; this returns the raw sub-frame points, which is what makes fast
+   handwriting smooth instead of polygonal. (Optional `getPredictedEvents()`
+   for low-latency ink.)
+4. **Also available:** `tiltX/tiltY` (pen angle → calligraphic stroke shape),
+   `tangentialPressure`, `twist`, `width/height` (contact geometry).
+5. **Path smoothing:** resample the polyline (moving average or Catmull-Rom /
+   quadratic Bézier) before stamping — stamp spacing along the smoothed path
+   (spec 05 §2.1), never stamp raw event positions.
+6. **Taper:** stroke width can scale with speed (fast = thinner) and/or
+   pressure; this is what separates "ink" from "a chain of discs".
+7. **Eraser** = the same stroke machinery with remove-instead-of-add.
+
+This is the same machinery as spec 05 §2 (spacing/interpolation/pressure/
+jitter); the new part is making it *feel* like writing: coalesced events +
+smoothing + pressure-driven width, then optionally **extrude** the flattened
+stroke into 3D (which is how the existing "form-zero-extruded-text" posts are
+made — hand-drawn letters extruded to depth).
+
+## 9. Phone-pose camera + audio recording
+
+Feature (spec AMENDMENT 12): while recording audio, drive the camera animation
+from the phone's sensors, so the user "walks the camera" as they talk. Device
+API facts that constrain the design:
+
+- **DeviceOrientation** (`deviceorientation` / `deviceorientationabsolute`):
+  `alpha` (yaw/heading), `beta` (front-back tilt), `gamma` (left-right tilt).
+  This is *rotation only*, but it's exactly what a camera orbit needs, and it
+  works broadly. Requirements: **secure context (HTTPS)**, and on **iOS 13+
+  `DeviceOrientationEvent.requestPermission()` must be called from a user
+  gesture** (a tap on "start recording") or the events never fire.
+- **DeviceMotion** (`devicemotion`): `accelerationIncludingGravity`,
+  `rotationRate` (deg/s), `interval`. **Double-integrating acceleration for
+  position drifts unboundedly — never use it for camera translation.**
+  `rotationRate` is fine for smoothing the orientation feed.
+- **WebXR** (`navigator.xr`, ARCore/ARKit-backed) is the only reliable source
+  of **6-DOF position**. Requires HTTPS, a supported device, and a user
+  gesture; treat as an optional enhancement. Rotation-only is the fallback.
+- **Audio recording:** `navigator.mediaDevices.getUserMedia({ audio: true })`
+  (secure context + mic permission) → `MediaRecorder` → `dataavailable`
+  chunks → one Blob. Note the container/codec varies (Chrome `audio/webm;opus`,
+  Safari `audio/mp4;aac`) — normalize to the GLB's embedded format
+  (KHR_audio uses MP3, MSFT_audio_emitter uses WAV, per spec).
+- **Sync:** sample the pose at a fixed rate with timestamps on the same clock
+  as the recording (`AudioContext.currentTime` or performance.now offset), so
+  the camera track and audio start/stop together. Export the sampled pose as a
+  real glTF camera animation (quaternion keys + sign-flip guard, spec 05b
+  §2.4); embed the audio; the result plays in feed preview slots like any
+  other authored camera animation.
 
 ---
 
@@ -211,3 +279,6 @@ matrices, color = old/new values. Cap the stack and clear redo-on-new-edit.
 - Babylon GPU picking + scene.pick/multiPick: https://doc.babylonjs.com/features/featuresDeepDive/mesh/interactions/picking_collisions
 - Babylon thin instances: https://doc.babylonjs.com/features/featuresDeepDive/mesh/copies/thinInstances ; thousands of entities: https://babylonjs.medium.com/creating-thousands-of-animated-entities-in-babylon-js-ce3c439bdacf ; thin-vs-regular + swap-last delete: https://forum.babylonjs.com/t/questions-of-thin-instances-v-s-regular-instances/59420
 - Undo/redo Command + Memento: https://refactoring.guru/design-patterns/memento ; https://gist.github.com/vxhviet/7751379bf3357e5d5e3eb72949957d88
+- Pointer events (pressure/tilt/coalesced/predicted, touch-action: none): https://www.w3.org/TR/pointerevents/ ; coalesced-events drawing example: https://stackoverflow.com/questions/57711515/javascript-eventlistener-pointermove-points-per-second ; pointercancel + touch-action fix: https://stackoverflow.com/questions/59010779/pointer-event-issue-pointercancel-with-pressure-input-pen
+- Device orientation/motion (alpha/beta/gamma, requestPermission, HTTPS, gotchas): https://github.com/osteele/p5-orientation-and-motion-example ; MDN detecting device orientation: https://udn.realityripple.com/docs/Web/API/Detecting_device_orientation ; PWA demo: https://progressier.com/pwa-capabilities/device-orientation-event
+- Audio recording (getUserMedia + MediaRecorder, chunks → Blob, MIME caveats): https://github.com/remarkablemark/remarkablemark.github.io/blob/master/_posts/2021/2021-01-02-record-microphone-audio-on-webpage.md ; Web Audio + MediaRecorder pipeline: https://blog.openreplay.com/record-audio-browser-web-audio-api/

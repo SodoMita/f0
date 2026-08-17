@@ -34,34 +34,47 @@ move it to **Done** with a commit reference. One agent per area.
 - [ ] Studio: import GLB only. Publish (BUD-01) + audio embed + ownership are
       **not** implemented (`studio/studio.ts` is a stub).
 
-## Next (spec order — pick one and claim it)
+## Next (priority order — pick one and claim it)
 
-- [ ] **First-run legend** (spec 02 §1.1 — mandatory, not implemented yet).
-- [ ] **Network panel** (add/remove/probe/reset relays + Blossom; only a status
-      dot exists today).
-- [ ] **Error sheets** (card/action error → code + cause + action; today it's a
-      toast only).
-- [ ] **Reply authoring** (reply button currently only opens the thread; no
-      compose→publish flow).
+**Editor core (the product's primary use cases — do these first):**
+
+- [ ] **Paint editor, primary = hand-writing text** (Paint 3D ink style; NOT a
+      voxel editor — free overlapping shape strokes, fine grid only for
+      snapping; spec 05 Part B + AMENDMENT 10). The brush must feel like a pen:
+      `PointerEvent.pressure`→width/alpha, `getCoalescedEvents()`, path
+      smoothing, tight stamp spacing, eraser, undo. Then selection (solid/x-ray/
+      wireframe), transforms via Babylon `GizmoManager`+`BoundingBoxGizmo`
+      (don't hand-roll), packed Float32Array + `thinInstanceSetBuffer` +
+      swap-last delete, command+inverse undo. See `docs/RESEARCH-EDITORS.md`
+      (§1.1 fit-to-bounds fix, §2 gizmos, §3 grid DDA, §4 picking, §5 instances,
+      §6 undo, §8 ink).
+- [ ] **Animation editor** (spec 05b): timeline, keyframes, record-toggle, camera
+      fly-through authoring, real glTF animation export (quaternion sign guard).
+      Split from low-poly text (text is its own task below).
+- [ ] **Audio recording** (AMENDMENT 11): mic via `getUserMedia` + `MediaRecorder`,
+      in-app record/stop/preview, embed into GLB (KHR_audio / MSFT_audio_emitter,
+      8 MiB cap). Do NOT re-export the model (append to BIN chunk).
+- [ ] **Phone-pose camera while recording** (AMENDMENT 12): record camera
+      animation from DeviceOrientation (rotation; HTTPS + iOS permission prompt),
+      optionally WebXR pose for translation (DeviceMotion acceleration drifts —
+      never use for position). Sync pose + audio on one clock, export as glTF
+      camera animation + audio; play back in feed preview slots.
+
+**Rest (spec order):**
+
+- [ ] **Low-poly text geometry** (spec 05b §1): pixel-font table, run-merge,
+      weld, live triangle count — pairs with hand-writing (extrude strokes or
+      offer the typed fallback).
 - [ ] **Studio publish flow**: BUD-01 upload, kind-1063 event, ownership
-      secrets, preservation report, partial-success UI.
-- [ ] **Audio**: embed into GLB (KHR_audio / MSFT_audio_emitter), 8 MiB cap,
-      play on gesture.
-- [ ] **Paint editor** (Paint 3D-style brush; NOT a voxel editor — free
-      overlapping shape strokes, fine grid only for snapping; spec 05 Part B):
-      grid/cube-size independence, strokes, selection, transforms, erase, undo.
-      See `docs/RESEARCH-EDITORS.md` — use Babylon `GizmoManager`+
-      `BoundingBoxGizmo` (don't hand-roll gizmos), Amanatides–Woo grid DDA for
-      brush/eraser hit tests, packed Float32Array + `thinInstanceSetBuffer` +
-      swap-last delete, command+inverse undo stack. Also: fix fit-to-bounds to
-      per-axis box extents (see research §1.1).
-- [ ] **Low-poly text** + **animation editor** (spec 05b): pixel-font geometry,
-      timeline, camera fly-through export.
+      secrets, preservation report (blocks publish on loss), partial-success UI.
+- [ ] **First-run legend** (spec 02 §1.1 — mandatory).
+- [ ] **Network panel** (add/remove/probe/reset relays + Blossom).
+- [ ] **Error sheets** (card/action error → code + cause + action).
+- [ ] **Reply authoring** (compose → publish flow).
+- [ ] **Deletion UI** (tombstones already applied in the index).
 - [ ] **Tests**: Vitest unit suite (URL normalize, tags, NIP-10, VFS, GLB
       round-trip, text tris, quaternions) + Playwright browser suite
       (plateau, churn, preview isolation, 404 retry bound, publish round-trip).
-- [ ] Deletion UI (tombstones already applied in the index; no user-facing
-      delete action yet).
 
 ## Known gaps / debt
 
