@@ -68,6 +68,10 @@ move it to **Done** with a commit reference. One agent per area.
 
 - [ ] Studio: import GLB only. Publish (BUD-01) + audio embed + ownership are
       **not** implemented (`studio/studio.ts` is a stub).
+- [ ] **[claimed: agent-kestrel, 2026-08-17]** First-run legend (spec 02 §1.1,
+      mandatory) + Network panel (`#/network`: add/remove/probe/reset relays &
+      Blossom) + Error sheets (code+cause+action). HUD-layer only — no editor
+      or protocol-pipeline files touched.
 
 ## Next (priority order — pick one and claim it)
 
@@ -102,9 +106,6 @@ move it to **Done** with a commit reference. One agent per area.
       offer the typed fallback).
 - [ ] **Studio publish flow**: BUD-01 upload, kind-1063 event, ownership
       secrets, preservation report (blocks publish on loss), partial-success UI.
-- [ ] **First-run legend** (spec 02 §1.1 — mandatory).
-- [ ] **Network panel** (add/remove/probe/reset relays + Blossom).
-- [ ] **Error sheets** (card/action error → code + cause + action).
 - [ ] **Reply authoring** (compose → publish flow).
 - [ ] **Deletion UI** (tombstones already applied in the index).
 - [ ] **Tests**: Vitest unit suite (URL normalize, tags, NIP-10, VFS, GLB
