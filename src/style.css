@@ -484,3 +484,34 @@ body[data-theme="light"] .sheet-card { background: rgba(253, 246, 245, 0.97); bo
 /* delete button (viewer, owned posts only) */
 .hbtn.danger { color: var(--danger); border-color: rgba(255, 103, 75, 0.4); }
 .hbtn.danger:hover { background: rgba(255, 103, 75, 0.14); border-color: rgba(255, 103, 75, 0.6); }
+
+/* Studio editor: typed text + camera settings */
+.studio-editor {
+  left: 50%;
+  top: 88px;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  background: rgba(18,18,19,0.78);
+  border: 1px solid var(--line);
+  backdrop-filter: blur(12px);
+  width: min(560px, calc(100vw - 32px));
+}
+.studio-row { display: flex; align-items: center; gap: 8px; }
+.studio-row.cam-row label { display: flex; align-items: center; gap: 4px; font: 10px/1 ui-monospace, monospace; color: var(--muted); flex: 1; }
+.studio-row.cam-row input[type=range] { flex: 1; accent-color: var(--accent); }
+.studio-label { font: 12px/1 ui-monospace, monospace; color: var(--accent); width: 18px; }
+#studio-text {
+  flex: 1;
+  background: #0b0b0c;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  padding: 8px 10px;
+  font: 13px/1.2 ui-monospace, monospace;
+}
+#studio-text:focus { outline: none; border-color: var(--accent); }
+.studio-editor .hbtn.small { width: 34px; height: 34px; }

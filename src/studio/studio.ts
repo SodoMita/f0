@@ -8,11 +8,13 @@ import { Vector3 } from '@babylonjs/core/Maths/math.vector'
 import { Color4, Color3 } from '@babylonjs/core/Maths/math.color'
 // curated glTF loader (SPEC 24): NOT the '@babylonjs/loaders/glTF' barrel
 import '../model/gltf'
+import { GLTF2Export } from '@babylonjs/serializers/glTF'
 import type { FormEngine } from '../core/engine'
 import { toFile } from '../model/poster'
 import { validateGLB, type LimitReport } from '../model/limits'
 import { worldCenter, worldRadius } from '../model/facing'
 import { theme } from '../theme'
+import { buildTextMesh, type TextMeshResult } from './textTool'
 
 export interface ImportedModel {
   file: File
@@ -33,6 +35,9 @@ export class Studio {
   private container: AssetContainer | null = null
   private imported: ImportedModel | null = null
   private tint: string = theme.accent
+  private textMesh: TextMeshResult | null = null
+  private textValue = '/0'
+  private textAlign: 'left' | 'center' | 'right' = 'center'
   private form: FormEngine
 
   constructor(engine: FormEngine) {
@@ -77,6 +82,7 @@ export class Studio {
   get currentModel(): ImportedModel | null { return this.imported }
 
   hasModel(): boolean { return this.imported !== null }
+  hasContent(): boolean { return this.imported !== null || this.textValue.trim().length > 0 }
 
   /** Clear the current preview so a new import does not stack meshes. */
   clearModel(): void {
@@ -86,7 +92,76 @@ export class Studio {
       this.container.dispose()
       this.container = null
     }
+    if (this.textMesh) {
+      this.textMesh.mesh.dispose()
+      this.textMesh = null
+    }
     this.imported = null
+  }
+
+  // ---- typed text tool (SPEC TEXT+ANIM: flat low-poly geometry) ----
+  setText(text: string): void {
+    this.textValue = text
+    this.form?.kick()
+  }
+  setTextColor(hex: string): void {
+    this.tint = hex
+    this.form?.kick()
+  }
+  setTextAlign(align: 'left' | 'center' | 'right'): void {
+    this.textAlign = align
+    this.form?.kick()
+  }
+  get text(): string { return this.textValue }
+
+  /** Build/rebuild the text geometry and frame it. */
+  rebuildText(): void {
+    if (this.textMesh) {
+      this.textMesh.mesh.dispose()
+      this.textMesh = null
+    }
+    if (!this.textValue.trim()) return
+    const result = buildTextMesh(this.scene, this.textValue, this.tint, this.textAlign)
+    this.textMesh = result
+    const dist = Math.max(result.width, result.height, 1) * 2.4 + 1
+    this.camera.radius = dist
+    this.camera.setTarget(Vector3.Zero())
+  }
+
+  // ---- camera settings ----
+  getCameraState() {
+    return {
+      alpha: this.camera.alpha,
+      beta: this.camera.beta,
+      radius: this.camera.radius,
+      target: this.camera.target.asArray(),
+      fov: this.camera.fov,
+    }
+  }
+  setCameraState(patch: Partial<{ alpha: number; beta: number; radius: number; fov: number }>): void {
+    if (typeof patch.alpha === 'number') this.camera.alpha = patch.alpha
+    if (typeof patch.beta === 'number') this.camera.beta = patch.beta
+    if (typeof patch.radius === 'number') this.camera.radius = patch.radius
+    if (typeof patch.fov === 'number') {
+      this.camera.fov = patch.fov
+      const cam = this.camera as ArcRotateCamera & { fovMode?: number }
+      // Perspective projection is 0; fov in radians.
+      cam.mode = 0
+    }
+    this.form?.kick(160)
+  }
+  frameCamera(): void {
+    if (this.container) {
+      const center = worldCenter(this.container)
+      const radius = worldRadius(this.container)
+      this.camera.setTarget(center)
+      this.camera.radius = Math.max(0.6, radius * 2.6)
+    } else if (this.textMesh) {
+      const dist = Math.max(this.textMesh.width, this.textMesh.height, 1) * 2.4 + 1
+      this.camera.radius = dist
+      this.camera.setTarget(Vector3.Zero())
+    }
+    this.form?.kick(500)
   }
 
   /**
@@ -113,6 +188,23 @@ export class Studio {
     // black until the user wiggles the mouse.
     this.form.kick(1000)
     return imported
+  }
+
+  /**
+   * The bytes + filename to publish. If a self-contained GLB was imported,
+   * returns those original bytes pass-through (no re-export). Otherwise
+   * (typed text) exports the studio scene to GLB.
+   */
+  async getContentForPublish(): Promise<{ blob: Blob; filename: string; sourceFormat: 'glb' | 'generated' }> {
+    if (this.imported) return { blob: this.imported.file, filename: this.imported.file.name, sourceFormat: 'glb' }
+    // Text mode: make sure the geometry exists.
+    if (!this.textMesh) this.rebuildText()
+    const res = await GLTF2Export.GLBAsync(this.scene, 'text', {
+      shouldExportNode: (n) => n === this.textMesh?.mesh,
+    })
+    const file = Object.values(res.files)[0]
+    const blob = file instanceof Blob ? file : new Blob([file], { type: 'model/gltf-binary' })
+    return { blob, filename: 'text.glb', sourceFormat: 'generated' }
   }
 
   dispose(): void {
