@@ -37,31 +37,74 @@
     </div>
 
 
-    <div id="studio-bar" class="hud" hidden>
-      <button id="btn-studio-import" class="hbtn" title="import GLB" aria-label="import GLB">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4"/><path d="M7 9l5-5 5 5"/><path d="M5 16v3a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3"/></svg>
-      </button>
-      <span class="studio-filename" id="studio-filename"></span>
-      <div class="spacer"></div>
-      <span id="studio-status" class="studio-status"></span>
-      <button id="btn-studio-publish" class="hbtn primary" title="publish to Nostr + Blossom" aria-label="publish" disabled>
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l4 4L19 6"/></svg>
-      </button>
-    </div>
+    <!-- Studio: single tabbed editor (upload | type | paint | symbols) -->
+    <div id="studio" class="hud studio" hidden>
+      <aside class="studio-rail">
+        <button class="rail-btn active" data-tab="upload" title="upload GLB" aria-label="upload">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4"/><path d="M7 9l5-5 5 5"/><path d="M5 16v3a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3"/></svg>
+        </button>
+        <button class="rail-btn" data-tab="type" title="text" aria-label="text">T</button>
+        <button class="rail-btn" data-tab="paint" title="paint" aria-label="paint">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17l5-5 6 6-5 5z"/><path d="M14 7l3-3 3 3-3 3z"/></svg>
+        </button>
+        <button class="rail-btn" data-tab="symbols" title="symbols" aria-label="symbols">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l10 10-10 10L2 12z"/></svg>
+        </button>
+      </aside>
 
-    <!-- Studio editor: text input + camera settings (hidden unless in #/studio) -->
-    <div id="studio-editor" class="hud studio-editor" hidden>
-      <div class="studio-row">
-        <label for="studio-text" class="studio-label">T</label>
-        <input id="studio-text" type="text" maxlength="48" value="/0" spellcheck="false" autocomplete="off" aria-label="text" />
-        <button id="studio-align" class="hbtn small" title="align" aria-label="align">C</button>
-      </div>
-      <div class="studio-row cam-row">
-        <button class="hbtn small" data-cam="frame" title="frame" aria-label="frame camera">F</button>
-        <label>α<input id="cam-alpha" type="range" min="-3.14" max="3.14" step="0.01" aria-label="azimuth" /></label>
-        <label>β<input id="cam-beta" type="range" min="0.1" max="3.04" step="0.01" aria-label="elevation" /></label>
-        <label>r<input id="cam-radius" type="range" min="0.5" max="30" step="0.1" aria-label="distance" /></label>
-      </div>
+      <main class="studio-stage">
+        <span id="studio-filename" class="studio-filename"></span>
+        <div class="spacer"></div>
+        <span id="studio-status" class="studio-status"></span>
+      </main>
+
+      <aside class="studio-inspector">
+        <!-- upload panel -->
+        <section class="studio-panel" data-panel="upload">
+          <button id="btn-studio-import" class="big-button">choose GLB…</button>
+          <p class="hint">Self-contained GLBs pass through byte-for-byte. glTF sidecars and OBJ are repacked.</p>
+        </section>
+
+        <!-- type panel -->
+        <section class="studio-panel" data-panel="type" hidden>
+          <label class="field"><span>T</span><input id="studio-text" type="text" maxlength="48" value="/0" spellcheck="false" autocomplete="off" /></label>
+          <div class="studio-row">
+            <button id="studio-align" class="hbtn small" title="align">C</button>
+            <input id="studio-color" type="color" value="#FF5C35" title="color" />
+          </div>
+          <details class="cam-advanced">
+            <summary>camera</summary>
+            <div class="num-grid">
+              <label>X<input id="cam-tx" type="number" step="0.1" value="0" /></label>
+              <label>Y<input id="cam-ty" type="number" step="0.1" value="0" /></label>
+              <label>Z<input id="cam-tz" type="number" step="0.1" value="0" /></label>
+              <label>rotX<input id="cam-rx" type="number" step="1" value="0" /></label>
+              <label>rotY<input id="cam-ry" type="number" step="1" value="0" /></label>
+              <label>rotZ<input id="cam-rz" type="number" step="1" value="0" /></label>
+              <label>fov°<input id="cam-fov" type="number" step="1" min="1" max="170" value="46" /></label>
+              <label>dist<input id="cam-radius" type="number" step="0.1" min="0.1" value="4" /></label>
+            </div>
+            <div class="studio-row">
+              <button class="hbtn small" data-cam="persp" title="perspective">persp</button>
+              <button class="hbtn small" data-cam="ortho" title="orthographic">ortho</button>
+              <button class="hbtn small" data-cam="frame" title="frame">frame</button>
+            </div>
+          </details>
+          <p class="hint" id="text-budget">/0 · 40 tris</p>
+        </section>
+
+        <!-- paint panel -->
+        <section class="studio-panel" data-panel="paint" hidden>
+          <p class="hint">Hand-writing / cube-trail painting is the next editor milestone (AMENDMENT 10). For now use typed text.</p>
+        </section>
+
+        <!-- symbols panel -->
+        <section class="studio-panel" data-panel="symbols" hidden>
+          <div class="symbol-grid" id="symbol-grid"></div>
+        </section>
+
+        <button id="btn-studio-publish" class="big-button primary" disabled>publish</button>
+      </aside>
     </div>
 
     <div id="settings-panel" class="hud" hidden>

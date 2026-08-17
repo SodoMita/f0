@@ -13,7 +13,22 @@ import type { FormEngine } from '../core/engine'
 import { toFile } from '../model/poster'
 import { validateGLB, type LimitReport } from '../model/limits'
 import { worldCenter, worldRadius } from '../model/facing'
+
 import { theme } from '../theme'
+
+export interface CameraState {
+  projection: 'perspective' | 'ortho'
+  target: [number, number, number]
+  /** euler XYZ in degrees */
+  rotationDeg: [number, number, number]
+  radius: number
+  /** vertical field of view in degrees (perspective) */
+  fovDeg: number
+}
+
+const deg2rad = (d: number): number => (d * Math.PI) / 180
+const rad2deg = (r: number): number => (r * 180) / Math.PI
+
 import { buildTextMesh, type TextMeshResult } from './textTool'
 
 export interface ImportedModel {
@@ -76,6 +91,9 @@ export class Studio {
   get tintColor(): string { return this.tint }
   setTintColor(hex: string): void { this.tint = hex }
 
+  /** Request a render (render-on-demand engine). */
+  kick(ms?: number): void { this.form.kick(ms) }
+
   attach(): void { this.camera.attachControl(true) }
   detach(): void { this.camera.detachControl() }
 
@@ -129,26 +147,54 @@ export class Studio {
   }
 
   // ---- camera settings ----
-  getCameraState() {
+  // ArcRotateCamera: position is a function of (alpha,beta,radius,target).
+  // Rotation is exposed as euler degrees so it is directly editable.
+  getCameraState(): CameraState {
+    // ArcRotateCamera orients around the target by alpha (azimuth) and beta
+    // (polar angle, 0 = +Y). Convert to editable yaw/pitch degrees.
+    const yaw = -this.camera.alpha - Math.PI / 2
+    const pitch = Math.PI / 2 - this.camera.beta
     return {
-      alpha: this.camera.alpha,
-      beta: this.camera.beta,
+      projection: this.camera.mode === 1 ? 'ortho' : 'perspective',
+      target: this.camera.target.asArray() as [number, number, number],
+      rotationDeg: [0, rad2deg(yaw), rad2deg(pitch)],
       radius: this.camera.radius,
-      target: this.camera.target.asArray(),
-      fov: this.camera.fov,
+      fovDeg: rad2deg(this.camera.fov),
     }
   }
-  setCameraState(patch: Partial<{ alpha: number; beta: number; radius: number; fov: number }>): void {
-    if (typeof patch.alpha === 'number') this.camera.alpha = patch.alpha
-    if (typeof patch.beta === 'number') this.camera.beta = patch.beta
-    if (typeof patch.radius === 'number') this.camera.radius = patch.radius
-    if (typeof patch.fov === 'number') {
-      this.camera.fov = patch.fov
-      const cam = this.camera as ArcRotateCamera & { fovMode?: number }
-      // Perspective projection is 0; fov in radians.
-      cam.mode = 0
+
+  setCameraState(patch: Partial<CameraState>): void {
+    if (patch.projection === 'perspective') {
+      this.camera.mode = 0
+    } else if (patch.projection === 'ortho') {
+      this.camera.mode = 1
     }
-    this.form?.kick(160)
+    if (patch.target) {
+      this.camera.setTarget(new Vector3(patch.target[0], patch.target[1], patch.target[2]))
+    }
+    if (patch.radius !== undefined) this.camera.radius = Math.max(0.01, patch.radius)
+    if (patch.fovDeg !== undefined) {
+      this.camera.fov = deg2rad(patch.fovDeg)
+    }
+    if (patch.rotationDeg) {
+      // alpha/beta are derived from the look direction (roll is ignored by
+      // ArcRotateCamera): yaw -> alpha, pitch -> beta.
+      const [, yaw, pitch] = patch.rotationDeg
+      this.camera.alpha = -deg2rad(yaw) - Math.PI / 2
+      this.camera.beta = Math.PI / 2 - deg2rad(pitch)
+    }
+    // Orthographic framing: drive the ortho half-height from radius so zoom
+    // (distance) still makes the subject larger/smaller. Width follows aspect.
+    if (this.camera.mode === 1) {
+      const eng = this.form.engine
+      const aspect = eng.getRenderWidth() / Math.max(1, eng.getRenderHeight())
+      const h = Math.max(0.1, this.camera.radius * 0.55)
+      this.camera.orthoTop = h
+      this.camera.orthoBottom = -h
+      this.camera.orthoLeft = -h * aspect
+      this.camera.orthoRight = h * aspect
+    }
+    this.form?.kick(300)
   }
   frameCamera(): void {
     if (this.container) {
