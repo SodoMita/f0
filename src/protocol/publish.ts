@@ -2,7 +2,7 @@ import { finalizeEvent, generateSecretKey, type EventTemplate } from 'nostr-tool
 import { BlossomClient } from './blossom'
 import { RelayPool } from './nostr'
 import { bytesToHex } from '../util/hex'
-import { FORM_ZERO_TAG, MODEL_KIND, LIMITS, DEFAULTS } from '../theme'
+import { FORM_ZERO_TAG, MODEL_KIND, LIMITS } from '../theme'
 import { saveOwnedPost } from './storage'
 
 export type PublishRole = 'root' | 'reply'
@@ -147,4 +147,3 @@ export async function publishModel(
   return { eventId, ok, failed }
 }
 
-export { DEFAULTS }

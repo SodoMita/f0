@@ -51,10 +51,11 @@ export class Studio {
 
   setBackground(hex: string): void {
     this.scene.clearColor = Color4.FromHexString(hex + 'FF')
-    this.tint = hex
   }
 
+  /** Accent/tint applied to the published model's `color` tag. */
   get tintColor(): string { return this.tint }
+  setTintColor(hex: string): void { this.tint = hex }
 
   attach(): void { this.camera.attachControl(true) }
   detach(): void { this.camera.detachControl() }

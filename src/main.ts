@@ -109,6 +109,7 @@ async function boot(): Promise<void> {
   }
 
   let currentMeta: ThreadMeta | null = null
+  let studioReply: { rootId: string; parentId: string } | null = null
   // Every viewer navigation takes a ticket. A download/parse that finishes
   // after the user has moved on must not paint into the current view (that is
   // how two models ended up stacked in the single-model viewer).
@@ -132,9 +133,15 @@ async function boot(): Promise<void> {
 
   async function pickStudioFile(): Promise<void> {
     fileInput.value = ''
+    const prevAccept = fileInput.accept
+    const prevMultiple = fileInput.multiple
     fileInput.accept = '.glb'
-    fileInput.onchange = async () => {
+    fileInput.multiple = false
+    fileInput.addEventListener('change', async () => {
       const file = fileInput.files?.[0]
+      // Restore the shared input to its neutral state.
+      fileInput.accept = prevAccept
+      fileInput.multiple = prevMultiple
       if (!file) return
       try {
         setStudioStatus('importing…', 'busy')
@@ -145,7 +152,7 @@ async function boot(): Promise<void> {
       } catch (err) {
         setStudioStatus(err instanceof Error ? err.message : 'import failed', 'err')
       }
-    }
+    }, { once: true })
     // File dialog must open from a trusted click.
     fileInput.click()
   }
@@ -174,11 +181,16 @@ async function boot(): Promise<void> {
           sourceFormat: 'glb',
           cameraCount: imported.report.stats.cameras,
           hasAnimation: imported.report.stats.animations > 0,
+          role: studioReply ? 'reply' : 'root',
+          rootId: studioReply?.rootId,
+          parentId: studioReply?.parentId,
         },
         { relays: pool.relayUrls, blossoms: blossoms.servers, pool, onProgress: onProgress },
       )
       // Open the freshly published model.
-      router.go({ name: 'viewer', id: result.eventId })
+      if (studioReply) router.go({ name: 'thread', rootId: studioReply.rootId, focusId: result.eventId })
+      else router.go({ name: 'viewer', id: result.eventId })
+      studioReply = null
     } catch (err) {
       setStudioStatus(err instanceof Error ? err.message : 'publish failed', 'err')
       btnStudioPublish.disabled = false
@@ -195,6 +207,12 @@ async function boot(): Promise<void> {
   btnPlay.addEventListener('click', () => { viewer.toggleAnimation(); syncPlay() })
   $('btn-thread').addEventListener('click', () => {
     if (currentMeta) router.go({ name: 'thread', rootId: currentMeta.refs.rootId ?? currentMeta.eventId })
+  })
+  $('btn-reply').addEventListener('click', () => {
+    if (currentMeta) {
+      const rootId = currentMeta.refs.rootId ?? currentMeta.eventId
+      router.go({ name: 'studio', rootId, parentId: currentMeta.eventId })
+    }
   })
   $('btn-download').addEventListener('click', () => void downloadCurrent())
   $('btn-meta').addEventListener('click', toggleDrawer)
@@ -388,7 +406,14 @@ async function boot(): Promise<void> {
       void threadView.open(route.rootId).finally(() => setLoading('thread', false))
     }
     else if (route.name === 'viewer') void openViewer(route.id)
-    else if (route.name === 'studio') setMode('studio')
+    else if (route.name === 'studio') {
+      studioReply = route.rootId && route.parentId ? { rootId: route.rootId, parentId: route.parentId } : null
+      setMode('studio')
+      // Fresh composer each time (drop the previous import preview).
+      studioFilename.textContent = ''
+      btnStudioPublish.disabled = true
+      setStudioStatus(studioReply ? 'replying…' : '')
+    }
     else if (route.name === 'network') {
       setMode('board')
       networkPanel.open(() => { if (router.current.name === 'network') router.go({ name: 'board' }) })
