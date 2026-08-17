@@ -490,25 +490,21 @@ export class Board {
     this.refreshVisibility()
   }
 
-  /** Attach a recycled slot to a row and reset it to the loading state. */
+  /** Attach a recycled slot to a row. INSTANT when the poster is still in
+   * RAM: a scrolled-back card re-shows its texture in the same frame
+   * (enable/disable semantics, like any game engine) instead of resetting to
+   * a placeholder and re-queueing an async poster job — that reset was the
+   * "posts take half a second to reappear" bug. */
   private bind(slot: CardSlot, row: Row): void {
     slot.meta = row.meta
     slot.row = row
-    slot.poster = null
     slot.live = null
     slot.requested = false
     // the badge texture only encodes a number, so a recycled slot can keep
     // whatever is already painted if the count matches
     slot.replyCount = this.replyCounts.get(row.meta.eventId) ?? 0
-    slot.footprint = null
-    // Placeholder: a barely-there plate, not an opaque slab.
-    setCardTexture(slot.mat, null)
-    setCardTint(slot.mat, row.meta.tint || theme.panel)
-    setCardOpacity(slot.mat, 0.14)
-    setCardFlip(slot.mat, 'raw')
     slot.failed = false
     slot.spinSince = 0
-    slot.shadow.setEnabled(false)
     // the ring is switched on by refreshVisibility, and ONLY for slots inside
     // the prefetch window — a resident-but-offscreen card that keeps spinning
     // also keeps the whole board rendering
@@ -516,6 +512,28 @@ export class Board {
     slot.mesh.setEnabled(true)
     slot.mesh.isPickable = true
     slot.mesh.scaling.set(CARD_W / 4, CARD_H / 4, 1)
+
+    // Fast path: poster texture still on the GPU -> rebind synchronously.
+    const cached = this.assets?.peekPoster(row.meta)
+    if (cached) {
+      slot.poster = cached
+      slot.requested = true // nothing to download; skip the drive() round trip
+      setCardTexture(slot.mat, cached)
+      setCardWhite(slot.mat)
+      setCardOpacity(slot.mat, 1)
+      setCardFlip(slot.mat, 'raw')
+      slot.footprint = this.assets?.getFootprint(row.meta) ?? null
+      slot.shadow.setEnabled(!!slot.footprint)
+    } else {
+      slot.poster = null
+      slot.footprint = null
+      // Placeholder: a barely-there plate, not an opaque slab.
+      setCardTexture(slot.mat, null)
+      setCardTint(slot.mat, row.meta.tint || theme.panel)
+      setCardOpacity(slot.mat, 0.14)
+      setCardFlip(slot.mat, 'raw')
+      slot.shadow.setEnabled(false)
+    }
     this.drawBadge(slot)
   }
 
@@ -542,7 +560,7 @@ export class Board {
     // through 48 posts would otherwise queue ~40 GLB parses and offscreen
     // renders, and each one blocks a frame. Loads start once scrolling rests.
     const now = performance.now()
-    const settled = now - this.lastScrollAt > SCROLL_SETTLE_MS
+    const settled = this.isSettled(now)
     // NB both directions: leaving this latched at true kept isAnimating()
     // true forever, i.e. the board never stopped drawing after a scroll.
     this.pendingSettle = !settled
@@ -700,7 +718,7 @@ export class Board {
   }
 
   private tick(): void {
-    if (this.pendingSettle && performance.now() - this.lastScrollAt > SCROLL_SETTLE_MS) {
+    if (this.pendingSettle && this.isSettled(performance.now())) {
       this.refreshVisibility()
       this.invalidate(2)
     }
@@ -719,6 +737,18 @@ export class Board {
     } else if (this.inertia === 0) {
       this.velocity = 0
     }
+  }
+
+  /**
+   * "Settled" gates deferred loads. Two ways to settle: the scroll stopped
+   * for SCROLL_SETTLE_MS, OR the inertia glide is already slow — the tail of
+   * a glide lasts ~1s and kept lastScrollAt fresh the whole time, so loads
+   * (and therefore posters/previews) were needlessly held back that long.
+   */
+  private isSettled(now: number): boolean {
+    if (this.dragging) return false
+    if (Math.abs(this.velocity) < 0.15) return true
+    return now - this.lastScrollAt > SCROLL_SETTLE_MS
   }
 
   private setScroll(v: number): void {

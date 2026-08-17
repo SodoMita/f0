@@ -41,6 +41,16 @@ export class AssetCache {
     return meta ? this.getModel(meta) : Promise.resolve(undefined)
   }
 
+  /**
+   * Synchronous RAM-cache lookup. The board uses this to re-apply a poster
+   * the moment a scrolled-back card is rebound to a slot — the texture never
+   * left the GPU, so there is nothing to wait for (game-engine style
+   * enable/disable, not reload).
+   */
+  peekPoster(meta: ThreadMeta): Texture | undefined {
+    return this.posterTex.get(meta.eventId)
+  }
+
   /** Poster: thumb tag = fast path; local render = normal path (00 §2.2). */
   getPoster(meta: ThreadMeta): Promise<Texture | undefined> {
     this.byPostId.set(meta.eventId, meta)
@@ -149,6 +159,14 @@ export class AssetCache {
     if (!cached) return undefined
     const fp = await get<Footprint>('posterCache', POSTER_CACHE_V + meta.sha256 + ':fp')
     this.footprintBySha.set(meta.sha256, fp ?? null)
+    // The animated flag is part of the poster cache record: without it a
+    // reload "forgot" which posts animate (events carry no anim hint), so
+    // live previews were never requested again — posts stopped animating
+    // for everyone with a warm cache.
+    if (!this.animatedBySha.has(meta.sha256)) {
+      const anim = await get<boolean>('posterCache', POSTER_CACHE_V + meta.sha256 + ':anim')
+      if (anim !== undefined) this.animatedBySha.set(meta.sha256, anim)
+    }
     return cached
   }
 
@@ -166,6 +184,7 @@ export class AssetCache {
       void result.toPng().then((png) => {
         void put('posterCache', POSTER_CACHE_V + meta.sha256, png)
         if (result.footprint) void put('posterCache', POSTER_CACHE_V + meta.sha256 + ':fp', result.footprint)
+        void put('posterCache', POSTER_CACHE_V + meta.sha256 + ':anim', result.animated)
       }).catch(() => undefined)
     }, 0)
     return { pixels: result.pixels, width: result.width, height: result.height }
