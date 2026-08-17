@@ -11,7 +11,7 @@ export interface LimitReport {
   }
 }
 
-/** Width/height from a PNG / JPEG / WebP header (first bytes only). */
+/** Width/height from a supported image header (up to the first 64 KiB). */
 export function imageDimensions(head: Uint8Array): { width: number; height: number } | null {
   if (head.length < 16) return null
   const dv = new DataView(head.buffer, head.byteOffset, head.byteLength)
@@ -19,7 +19,7 @@ export function imageDimensions(head: Uint8Array): { width: number; height: numb
   if (dv.getUint32(0, false) === 0x89504e47 && head.length >= 24) {
     return { width: dv.getUint32(16, false), height: dv.getUint32(20, false) }
   }
-  // JPEG: scan SOFn markers
+  // JPEG: scan SOFn markers. EXIF/ICC segments can put SOF many KiB in.
   if (head[0] === 0xff && head[1] === 0xd8) {
     let i = 2
     while (i + 9 < head.length) {
@@ -29,6 +29,7 @@ export function imageDimensions(head: Uint8Array): { width: number; height: numb
       const isSOF = marker >= 0xc0 && marker <= 0xcf
         && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc
       if (isSOF) return { height: dv.getUint16(i + 5, false), width: dv.getUint16(i + 7, false) }
+      if (len < 2) return null
       i += 2 + len
     }
     return null
@@ -44,8 +45,50 @@ export function imageDimensions(head: Uint8Array): { width: number; height: numb
       const h = 1 + (head[27] | (head[28] << 8) | (head[29] << 16))
       return { width: w, height: h }
     }
+    if (fourcc === 0x5650384c && head.length >= 25 && head[20] === 0x2f) { // 'VP8L' lossless
+      return {
+        width: 1 + head[21] + ((head[22] & 0x3f) << 8),
+        height: 1 + (head[22] >> 6) + (head[23] << 2) + ((head[24] & 0x0f) << 10),
+      }
+    }
+  }
+  // GIF87a / GIF89a.
+  if (head[0] === 0x47 && head[1] === 0x49 && head[2] === 0x46 && head[3] === 0x38) {
+    return { width: dv.getUint16(6, true), height: dv.getUint16(8, true) }
+  }
+  // BMP DIB width/height.
+  if (head[0] === 0x42 && head[1] === 0x4d && head.length >= 26) {
+    return { width: Math.abs(dv.getInt32(18, true)), height: Math.abs(dv.getInt32(22, true)) }
+  }
+  // TGA has no magic; restrict this to its defined image types + bit depths.
+  if (head.length >= 18 && [1, 2, 3, 9, 10, 11].includes(head[2]) && [8, 16, 24, 32].includes(head[16])) {
+    return { width: dv.getUint16(12, true), height: dv.getUint16(14, true) }
+  }
+  // KTX2 identifier, then vkFormat/typeSize/pixelWidth/pixelHeight.
+  const ktx2 = [0xab, 0x4b, 0x54, 0x58, 0x20, 0x32, 0x30, 0xbb, 0x0d, 0x0a, 0x1a, 0x0a]
+  if (head.length >= 28 && ktx2.every((b, i) => head[i] === b)) {
+    return { width: dv.getUint32(20, true), height: dv.getUint32(24, true) }
   }
   return null
+}
+
+/** Decode only enough of an image data URI to inspect its dimensions. */
+export function dataUriImageHead(uri: string, maxBytes = 64 * 1024): Uint8Array | null {
+  const match = /^data:([^;,]*)(;base64)?,(.*)$/is.exec(uri)
+  // Deliberately exclude SVG: an image document can itself reference remote
+  // resources, defeating the "self-contained model" network boundary.
+  if (!match || !/^image\/(png|jpe?g|webp|gif|bmp|ktx2)$/i.test(match[1])) return null
+  try {
+    if (match[2]) {
+      // 4 base64 chars encode 3 bytes. Keep a little padding for a partial quartet.
+      const encoded = match[3].replace(/\s/g, '').slice(0, Math.ceil(maxBytes / 3) * 4 + 4)
+      const raw = atob(encoded)
+      const out = new Uint8Array(Math.min(raw.length, maxBytes))
+      for (let i = 0; i < out.length; i++) out[i] = raw.charCodeAt(i)
+      return out
+    }
+    return new TextEncoder().encode(decodeURIComponent(match[3])).subarray(0, maxBytes)
+  } catch { return null }
 }
 
 /**
@@ -208,15 +251,21 @@ export function validateGLB(bytes: Uint8Array): LimitReport {
       const acc = accessors[prim.attributes?.POSITION]
       if (!acc || acc.componentType !== FLOAT || acc.type !== 'VEC3') continue
       if (prim.extensions?.KHR_draco_mesh_compression || prim.extensions?.EXT_meshopt_compression) continue
+      if (acc.sparse) return fail('Sparse POSITION accessors are not accepted by the safety scanner.')
       const bv = bufferViews[acc.bufferView]
       if (!bv || typeof bv.byteLength !== 'number' || bv.byteLength < 12) continue
       const bStart = bv.byteOffset ?? 0
+      const aStart = acc.byteOffset ?? 0
+      if (!Number.isSafeInteger(aStart) || aStart < 0 || aStart + 12 > bv.byteLength) return fail('Position accessor offset out of range.')
       if (bStart + bv.byteLength > binLength) return fail('Position bufferView out of BIN range.')
-      const stride = acc.byteStride ?? 12
-      if (stride < 12) return fail('Position accessor stride too small.')
-      const dv = new DataView(bytes.buffer, bytes.byteOffset + binOffset + bStart, bv.byteLength)
-      const rows = Math.min(acc.count ?? 0, Math.floor((bv.byteLength - 12) / stride) + 1)
-      for (let i = 0; i < rows; i++) {
+      const stride = bv.byteStride ?? 12
+      if (!Number.isSafeInteger(stride) || stride < 12) return fail('Position accessor stride too small.')
+      const count = acc.count ?? 0
+      if (!Number.isSafeInteger(count) || count < 0 || (count > 0 && aStart + (count - 1) * stride + 12 > bv.byteLength)) {
+        return fail('Position accessor exceeds its bufferView.')
+      }
+      const dv = new DataView(bytes.buffer, bytes.byteOffset + binOffset + bStart + aStart, bv.byteLength - aStart)
+      for (let i = 0; i < count; i++) {
         const o = i * stride
         if (!Number.isFinite(dv.getFloat32(o, true)) ||
             !Number.isFinite(dv.getFloat32(o + 4, true)) ||
@@ -227,21 +276,29 @@ export function validateGLB(bytes: Uint8Array): LimitReport {
     }
   }
 
-  // Decoded-pixel budget from embedded images. The image DIMENSIONS live in
-  // the PNG/JPEG/WebP headers inside the BIN chunk, so read them: a 4 x 4096²
-  // texture set decodes to 256 MiB of VRAM regardless of how small the file
-  // is, and that is what actually kills a phone.
+  // Decoded-image budget from embedded bufferViews AND data: URIs. A tiny
+  // compressed image (or just a forged header) can declare enormous output
+  // dimensions, so the container/JSON byte caps alone do not protect VRAM.
   for (const img of images) {
-    if (img.uri) continue // external URI: Babylon fetches it; not counted here
-    const bv = bufferViews[img.bufferView]
-    if (!bv) continue
-    const start = (bv.byteOffset ?? 0)
-    const end = start + (bv.byteLength ?? 0)
-    if (end > binLength) return fail('Image bufferView out of BIN range.')
-    const dims = imageDimensions(bytes.subarray(binOffset + start, binOffset + Math.min(end, start + 64)))
-    if (!dims) continue // unknown codec (KTX2/basis): the loader validates it
+    let head: Uint8Array | null = null
+    if (img.bufferView !== undefined && !/^image\/(png|jpe?g|webp|gif|bmp|ktx2)$/i.test(String(img.mimeType ?? ''))) {
+      return fail('Embedded image has an unsupported or unsafe MIME type.')
+    }
+    if (typeof img.uri === 'string' && /^data:/i.test(img.uri)) {
+      head = dataUriImageHead(img.uri)
+      if (!head) return fail('Image data URI is malformed or has a non-image MIME type.')
+    } else {
+      const bv = bufferViews[img.bufferView]
+      if (!bv) continue
+      const start = (bv.byteOffset ?? 0)
+      const end = start + (bv.byteLength ?? 0)
+      if (end > binLength) return fail('Image bufferView out of BIN range.')
+      head = bytes.subarray(binOffset + start, binOffset + Math.min(end, start + 64 * 1024))
+    }
+    const dims = imageDimensions(head)
+    if (!dims) return fail('Embedded image dimensions could not be validated.')
     const side = Math.max(dims.width, dims.height)
-    if (side > limitTextureSide()) {
+    if (dims.width < 1 || dims.height < 1 || side > limitTextureSide()) {
       return fail(`texture ${dims.width}x${dims.height} exceeds the ${limitTextureSide()} px limit`)
     }
     stats.decodedPixels += dims.width * dims.height * 4

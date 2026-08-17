@@ -5,6 +5,20 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 
+- [x] **Branch integration + remaining security hardening** (agent arena,
+      2026-08-17). Merged the sidecar-import work and then synced main's
+      integrated studio-tools PR. Closed the audit's two open findings:
+      per-post deletion keys are AES-256-GCM envelopes under an atomically
+      created non-extractable WebCrypto key (event-id AAD, v3 plaintext
+      migration), and persisted settings are schema/type/range/allowlist
+      validated and repaired. Hardened the merged importer: GLB
+      validate-before-load restored; glTF/OBJ inputs are 20 MiB/128-file/
+      complexity bounded and local sidecars only. Also closed the data-image
+      VRAM bypass by validating data-URI MIME + dimensions and counting decoded
+      bytes. `npm run build`, standalone build, `npm audit` and focused
+      WebCrypto/settings/GLB guard regressions are green. See SPEC AMENDMENTS
+      44–47 and `docs/SECURITY-AUDIT.md`.
+
 - [x] **Studio tools merged (PR #4 + sidecar-import)** (merged by
       agent-kestrel, a087e13): Unifont TTF text geometry (replaces 5x7
       bitmap font), GizmoManager move/rotate/scale on a UtilityLayer with

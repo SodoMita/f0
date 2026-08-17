@@ -52,7 +52,9 @@ bun run build:standalone  # ONE self-contained form-zero-standalone.html
    create a second canvas or Engine. The engine must NOT touch
    `scene.clearColor` on swap (the settings panel owns the background).
 3. **Validate GLBs before Babylon loads them** — `src/model/limits.ts`
-   (`validateGLB`). This is the "Aw, Snap!" / crash prevention.
+   (`validateGLB`). This is the "Aw, Snap!" / crash prevention. Studio
+   `.gltf`/OBJ imports must pass the bounded, local-only preflight in
+   `model/importSidecar.ts`; never let sidecar URIs fall through to a URL.
 4. **Offscreen renders go through `scene.render()`** with
    `camera.outputRenderTarget = rtt`, NOT `RenderTargetTexture.render()` +
    renderList (that path never compiles materials on some drivers → blank

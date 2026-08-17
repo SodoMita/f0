@@ -16,13 +16,15 @@ trusted; everything arriving over the wire is not until verified.
 | ID | Severity | Finding | Status |
 |----|----------|---------|--------|
 | H1 | **High** | Untrusted GLBs can trigger arbitrary, uncapped network fetches (tab crash + viewer-IP leak) | **Fixed** |
+| H2 | **High** | `data:` textures bypass decoded-image limits (VRAM exhaustion) | **Fixed** |
 | M1 | **Medium** | Anyone can hide any post for all users (kind-5 tombstone without NIP-09 author check) | **Fixed** |
-| M2 | **Medium** | Deployed standalone shipped with **no CSP** (the web build had a strict one) | **Fixed** (tradeoff, see §2.3) |
-| M3 | Medium | Per-post deletion secrets stored in plaintext IndexedDB (spec claims AES-GCM) | Not fixed — recommendation §4 |
+| M2 | **Medium** | Deployed standalone shipped with **no CSP** (the web build had a strict one) | **Fixed** (tradeoff in M2) |
+| M3 | Medium | Per-post deletion secrets stored in plaintext IndexedDB (spec claims AES-GCM) | **Fixed** |
+| M4 | Medium | Sidecar imports could fetch remote resources and loaded GLBs before validation | **Fixed** |
 | L1 | Low | Blossom download never enforced the documented "no cross-origin redirects" | **Fixed** |
 | L2 | Low | Malicious Blossom response (`{"url":"https://"}`) crashes the publish flow | **Fixed** |
 | L3 | Low | Non-finite (NaN/±Inf) vertex positions poison the auto-fit cameras | **Fixed** |
-| L4 | Low | Persisted settings not range-validated on load (local tampering → boot failure) | Not fixed — recommendation §4 |
+| L4 | Low | Persisted settings not range-validated on load (local tampering → boot failure) | **Fixed** |
 
 Verified clean: no XSS sinks, event signature handling is sound, download
 path is cap+hash+magic verified, dependency audit is clean, no secrets in
@@ -77,11 +79,27 @@ fetch), no hash check, no timeout of our own.
 not a `data:` URI, anywhere in the JSON (buffers, images, extensions). The
 product already only publishes self-contained GLBs (spec PIPELINE "external
 URIs forbidden"), so this aligns enforcement with the spec. `data:` URIs
-remain allowed — they are bounded by the 2 MiB JSON-chunk cap.
+remain allowed, but image data URIs are MIME-allowlisted and dimension-scanned
+before decode (H2).
 
-**Verification:** 7-case Node test against the real `limits.ts` (external
-buffer.uri / image.uri rejected, data: allowed, self-contained passes, NaN
-and Infinity positions rejected, interleaved accessor scan) — all green.
+**Verification:** Node regression tests against the real `limits.ts` cover
+external buffer/image URIs, self-contained files, non-finite positions,
+interleaved accessors, unsafe SVG data URIs and oversized data-texture headers.
+
+### H2 — Data-URI textures bypassed decoded-image limits
+
+**Where:** `src/model/limits.ts` image-budget loop.
+
+The H1 fix deliberately allowed `data:` URIs because their compressed bytes
+fit inside the 2 MiB JSON cap. Compressed size is not decoded size: up to 64
+small solid-colour 4096² images can fit in that cap and ask the browser for
+roughly 4 GiB of RGBA textures. The old image loop skipped every `img.uri`, so
+none contributed to the decoded-pixel budget.
+
+**Fix (applied):** data-image headers are decoded only far enough to read their
+dimensions; PNG, JPEG (up to 64 KiB marker scan), every WebP framing, GIF, BMP
+and KTX2 are covered. Unsafe/active image formats such as SVG and unknown
+headers fail closed. BufferView images use the same parser and MIME allowlist.
 
 ---
 
@@ -147,14 +165,42 @@ bytesToHex(secret), … })`; `src/protocol/storage.ts` (IndexedDB
 `ownedPosts`).
 
 **What:** docs/SPEC.md SECURITY claims "Secrets: per-post keys, envelope
-only" and PROTOCOL claims "secrets AES-GCM"; the code stores the per-post
-Nostr signing key as plaintext hex in IndexedDB. `crypto.subtle` is used
-only for SHA-256. Blast radius: the key signs kind-5 tombstones for that
-one post (and the kind-24242 Blossom upload auth, which is replay-only for
-that hash). Not remotely exploitable today — no XSS sink was found and
-IndexedDB is same-origin — but anyone with profile access (or any future
-XSS) gets the keys, and an AES-GCM envelope with a non-extractable
-WebCrypto key is cheap and is what the spec promises. See §4.
+only" and PROTOCOL claims "secrets AES-GCM"; the code stored each per-post
+Nostr signing key as plaintext hex in IndexedDB.
+
+**Fix (applied):** database v4 adds a `keyring` store. It atomically creates
+one non-extractable 256-bit WebCrypto AES-GCM key (the read + conditional put
+share a readwrite transaction, so two tabs cannot race). `ownedPosts` now
+stores `{v, algorithm, iv, ciphertext}`; the event id is authenticated as AAD,
+so envelopes cannot be swapped between posts. v3 plaintext records migrate
+one-way before reaching the deletion service, malformed/decryption-failed
+records are not exposed to signing, and secret byte arrays are zeroed after
+use. Security-sensitive writes propagate quota/clone failures and complete
+before relay broadcast, so the app does not knowingly publish a creation it
+cannot later sign a deletion for.
+
+The wrapping key remains same-origin browser state so deletion survives a
+reload. This is at-rest envelope protection and fulfills the spec; it is not a
+claim that client-side encryption can defeat arbitrary same-origin script
+execution, which could ask WebCrypto to decrypt on its behalf.
+
+**Verification:** real WebCrypto round-trip test plus an AAD substitution test
+(event-id swap) passed; the production typecheck/build is green.
+
+### M4 — Sidecar imports crossed the network boundary and bypassed pre-validation
+
+The merged sidecar branch called Babylon on `.glb` bytes before `validateGLB`
+and allowed `.gltf`/OBJ/MTL references to fall through to HTTP or app-origin
+URLs. An imported file could therefore restore H1's request/DoS behavior.
+
+**Fix (applied):** GLBs are validated before load. Multi-file imports are
+limited to 128 files / 20 MiB total; glTF structure, buffers, accessors, scene
+depth and texture dimensions are preflighted; OBJ vertices/faces/materials are
+bounded. Every dependency must be a selected local basename (or a safe `data:`
+URI for glTF), remote/absolute/missing/ambiguous references fail closed, and
+the global OBJ hook only intercepts `file:` dependencies. The importer uses the
+curated glTF loader rather than the barrel, so it does not globally re-enable
+`KHR_interactivity`/FlowGraph for remote posts.
 
 ---
 
@@ -186,35 +232,36 @@ meshopt primitives stay covered by container caps.
 
 ### L4 — Persisted settings are not range-validated on load
 
-`SettingsStore.load` merges any string/number/boolean from IndexedDB into
+`SettingsStore.load` merged any string/number/boolean from IndexedDB into
 the schema — a corrupted/tampered record (`background: "garbage"`,
-`resolutionWidth: 1e9`) can fail `Color4.FromHexString` or request a
-ludicrous drawing buffer and break boot. Same-origin tampering only (an
-attacker with IndexedDB access already has the page). Cheap hardening: a
-per-key validator on load. **Not fixed.**
+`resolutionWidth: 1e9`) could fail `Color4.FromHexString` or request a
+ludicrous drawing buffer and break boot.
+
+**Fixed:** schema-driven validation now accepts only known stateful keys with
+exact types, finite values, declared min/max ranges, select allowlists and
+six-digit colours. Invalid values fall back to defaults, unknown/action/info
+keys are dropped, `nearClip < farClip` is enforced, and the repaired record is
+persisted. Runtime patches pass through the same boundary. Network config and
+the legacy settings helper also validate their IndexedDB shapes.
+
+**Verification:** a tampered-record regression test covered bad colour,
+1e9 resolution, Infinity budget, inverted clip range, forged select values and
+an unknown prototype key; all reset while valid values survived.
 
 ---
 
-## 4. Recommendations (not yet implemented)
+## 4. Remaining recommendations
 
-1. **M3 — wrap `ownedPosts` secrets with AES-GCM.** Generate a non-
-   extractable WebCrypto AES-GCM key at first boot (store it in-memory
-   only), encrypt each per-post secret before persisting. Costs ~30 lines;
-   closes the spec gap and the offline-profile-theft vector. (If the
-   product genuinely wants the secret recoverable across devices, document
-   that and downgrade the claim in SPEC.md.)
-2. **Browser-level re-verification of the standalone under the new CSP**
-   (repo suite: `bun scripts/smoke.mjs`, `features.mjs`, `perf.mjs`) once
-   a Playwright browser is available in CI/sandbox.
-3. **L4 — validate settings on load** (hex-color regex for `background`,
-   sane ranges for resolutions/budgets; drop invalid keys back to defaults).
-4. **Consider pinning transitive deps** (`bun.lock` is committed; npm audit
-   is clean today — keep it that way with a scheduled `npm audit` check).
-5. Optional: keep `KHR_materials_*`/loader-extension allowlist in
+1. **Browser-level re-verification of the standalone under the CSP** (repo
+   suite: `scripts/smoke.mjs`, `features.mjs`, `perf.mjs`) once a Playwright
+   browser is available in CI/sandbox.
+2. **Pin GitHub Actions and consider scheduled dependency audits.** Runtime
+   package versions are locked and `npm audit` is clean today; action tags are
+   still mutable upstream references.
+3. Optional: keep `KHR_materials_*`/loader-extension allowlist in
    `src/model/gltf.ts` documented — it already excludes
-   `KHR_interactivity` (Babylon's FlowGraph) and is the right instinct;
-   add a comment/regression note when adding extensions that can fetch
-   external data.
+   `KHR_interactivity` (Babylon's FlowGraph); add a security review whenever
+   enabling an extension that can fetch external data or execute behavior.
 
 ---
 
@@ -227,7 +274,7 @@ per-key validator on load. **Not fixed.**
 | Event schema hardening | mime allowlist, sha256 hex64, size ∈ [1, 20 MiB], future-timestamp cap (+300 s), https-only `url`/`fallback`/`thumb`, thread refs validated as exactly-one hex64 root+reply, non-hex/future → dropped. |
 | Download path | Streaming size cap (20 MiB model / 2 MiB thumb), 30 s timeout, `credentials: 'omit'`, per-replica SHA-256 + magic-byte + exact-size verification, poster fallback to local render. |
 | Endpoints | Relay URLs: `wss:` only, credentials stripped (`normalizeRelay`). Blossom: `https:` only. Private-network targets are additionally blocked by Chrome's Private Network Access / mixed-content rules. |
-| Crypto | Only `crypto.subtle` (SHA-256); per-post secrets from `generateSecretKey`; Blossom auth kind-24242 carries a 10-minute `expiration`. |
+| Crypto | SHA-256 plus AES-256-GCM ownership envelopes with random 96-bit IVs and event-id AAD; the wrapping key is non-extractable. Per-post signing secrets come from `generateSecretKey`; Blossom auth kind-24242 carries a 10-minute `expiration`. |
 | CSP (web build) | Strict: `script-src 'self'`, no unsafe-eval, `base-uri/object-src/frame-src` locked. |
 | Dependencies | `npm audit` (prod + dev): **0 vulnerabilities** today. |
 | Deployment | No secrets in repo or workflow; GitHub token least-privilege for the mirror push; Pages source stays `workflow`-built artifact. |
@@ -237,8 +284,9 @@ per-key validator on load. **Not fixed.**
 
 ## 6. Scope notes
 
-- The audit covered the client code, both Vite configs, the standalone
-  bundler, the deploy workflow, and dependency advisories. It did **not**
+- The audit covered the client code (including the subsequently merged
+  sidecar importer), both Vite configs, the standalone bundler, the deploy
+  workflow, and dependency advisories. It did **not**
   audit Babylon.js / nostr-tools internals beyond the loader fetch path
   (they are the trusted third-party surface; both are pinned exact, and the
   loader-extension allowlist in `src/model/gltf.ts` is the right control).

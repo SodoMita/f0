@@ -3,9 +3,11 @@ ARCHITECTURE — quick reference (digest of docs/ARCHITECTURE.md)
 MODULES: main.ts (boot+HUD+routing) · core/engine (1 canvas/context, scene
 swap) · core/router (hash routes) · core/assets (poster/model cache by SHA,
 <=3 concurrent dl, serialized renders) · protocol/{nostr (Relay pool, backoff),
-blossom (SHA verify + BUD-01), events, thread-index, storage} · model/{draco
-(local), offline (blank CDN URLs), limits (pre-load GLB caps), facing (auto-fit
-math), poster} · board/{board (1-3 col grid, inertia, badges), cardMaterial
+blossom (SHA verify + BUD-01), events, thread-index, storage (validated config +
+AES-GCM ownership envelopes/keyring), ownedSecrets} · model/{importSidecar
+(bounded local-only glTF/OBJ repack), draco (local), offline (blank CDN URLs),
+limits (pre-load GLB + image decode caps), facing (auto-fit math), poster} ·
+board/{board (1-3 col grid, inertia, badges), cardMaterial
 (custom unlit shader), previewPool (RTT slots), threadView (2D tree map;
 planned 3D mode = actual models via main-camera-as-model-transform)}
 · viewer (orbit + authored cameras) · studio (stub).

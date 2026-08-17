@@ -16,9 +16,11 @@ src/
     blossom.ts       download (replicas→SHA-256→GLB magic) + BUD-01 upload + auth
     events.ts        kind-1063 parse/validate (mime, x/ox, size, urls, v3 tags)
     thread-index.ts  ThreadIndex: roots, children, tombstones, childCount, flatten
-    storage.ts       IndexedDB (+in-memory fallback): model/poster cache, settings,
-                     network config
+    storage.ts       IndexedDB (+in-memory fallback): model/poster cache, validated
+                     settings/network config, AES-GCM owned-post envelopes + keyring
+    ownedSecrets.ts  AES-256-GCM envelope codec (random IV, event-id AAD)
   model/
+    importSidecar.ts bounded/local-only GLB + glTF sidecar + OBJ import/repack
     draco.ts         local Draco decoders (data: URIs), numWorkers:0
     offline.ts       blank KTX2/MSC CDN URLs (zero-CDN guarantee)
     limits.ts        validateGLB() — pre-load GLB complexity caps (crash guard)

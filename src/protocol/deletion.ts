@@ -27,6 +27,7 @@ export class DeletionService {
 
   /** Load ownership records from IndexedDB (once at boot, and after publishes). */
   async refresh(): Promise<void> {
+    this.owned.clear()
     for (const rec of await listOwnedPosts()) this.owned.set(rec.eventId, rec)
   }
 
@@ -49,6 +50,11 @@ export class DeletionService {
       tags: [['e', rec.eventId]],
       content: '',
     }
-    return this.pool.publish(template, hexToBytes(rec.secretKey))
+    const secret = hexToBytes(rec.secretKey)
+    try {
+      return await this.pool.publish(template, secret)
+    } finally {
+      secret.fill(0)
+    }
   }
 }

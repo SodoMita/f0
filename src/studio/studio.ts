@@ -44,7 +44,7 @@ export interface ImportedModel {
   file: File
   bytes: Uint8Array
   report: LimitReport
-  sourceFormat: 'glb' | 'gltf' | 'generated'
+  sourceFormat: 'glb' | 'gltf' | 'obj' | 'generated'
 }
 
 /**
@@ -61,6 +61,7 @@ export class Studio {
   private imported: ImportedModel | null = null
   private tint: string = theme.accent
   private textMesh: TextMeshResult | null = null
+  private textBuildToken = 0
   private textValue = '/0'
   private textAlign: 'left' | 'center' | 'right' = 'center'
   private form: FormEngine
@@ -102,7 +103,6 @@ export class Studio {
       const picked = info.pickInfo?.pickedMesh ?? null
       this.select(picked && this.isEditable(picked) ? picked : null)
     })
-    engine.addAnimationSource(() => engine.activeScene === this.scene && this.isAnimating())
   }
 
   setBackground(hex: string): void {
@@ -112,11 +112,12 @@ export class Studio {
 
   /** Render-on-demand probe: camera inertia glide (drags arrive as kicks). */
   isAnimating(): boolean {
-    if (this.gizmos.attachedMesh) return true // keep rendering while a gizmo is active
-    const cam = this.scene.activeCamera as ArcRotateCamera
-    return Math.abs(cam.inertialAlphaOffset) > 1e-5
-      || Math.abs(cam.inertialBetaOffset) > 1e-5
-      || Math.abs(cam.inertialRadiusOffset) > 1e-4
+    // Pointer input already kicks frames while a gizmo is dragged; merely
+    // having a selected mesh must not latch the demand loop on forever.
+    if (this.scene.activeCamera !== this.camera) return false
+    return Math.abs(this.camera.inertialAlphaOffset) > 1e-5
+      || Math.abs(this.camera.inertialBetaOffset) > 1e-5
+      || Math.abs(this.camera.inertialRadiusOffset) > 1e-4
   }
 
   /** Accent/tint applied to the published model's `color` tag. */
@@ -126,8 +127,14 @@ export class Studio {
   /** Request a render (render-on-demand engine). */
   kick(ms?: number): void { this.form.kick(ms) }
 
-  attach(): void { this.camera.attachControl(true) }
-  detach(): void { this.camera.detachControl() }
+  attach(): void {
+    if (this.freeCam) this.freeCam.attachControl(true, false)
+    else this.camera.attachControl(true)
+  }
+  detach(): void {
+    this.camera.detachControl()
+    this.freeCam?.detachControl()
+  }
 
   private isEditable(m: AbstractMesh): boolean {
     // The root __root__ container and gizmo-layer meshes are not selectable.
@@ -155,6 +162,11 @@ export class Studio {
     if (!this.selection) return
     const m = this.selection
     this.select(null)
+    if (this.textMesh?.mesh === m) {
+      this.textBuildToken++
+      this.textMesh = null
+      this.textValue = ''
+    }
     m.dispose(false, true)
     this.kick(500)
   }
@@ -188,6 +200,7 @@ export class Studio {
 
   /** Clear the current preview so a new import does not stack meshes. */
   clearModel(): void {
+    this.textBuildToken++
     this.select(null)
     this.form?.kick()
     if (this.container) {
@@ -219,19 +232,23 @@ export class Studio {
 
   /** Build/rebuild the text geometry and frame it. */
   async rebuildText(): Promise<void> {
+    const token = ++this.textBuildToken
     if (this.textMesh) {
       this.textMesh.mesh.dispose()
       this.textMesh = null
     }
     if (!this.textValue.trim()) return
     const result = await buildTextMesh(this.scene, this.textValue, this.tint, this.textAlign)
+    if (token !== this.textBuildToken) {
+      result.mesh.dispose()
+      return
+    }
     this.textMesh = result
     const dist = Math.max(result.width, result.height, 1) * 2.4 + 1
     this.camera.radius = dist
     this.camera.setTarget(Vector3.Zero())
     this.select(result.mesh)
     this.form.kick(300)
-    return
   }
 
   // ---- camera settings ----
@@ -322,7 +339,7 @@ export class Studio {
     const radius = worldRadius(result.container)
     this.camera.setTarget(center)
     this.camera.radius = Math.max(0.6, radius * 2.6)
-    const imported: ImportedModel = { file, bytes, report, sourceFormat: result.filename.endsWith('.glb') ? 'glb' : 'gltf' }
+    const imported: ImportedModel = { file, bytes, report, sourceFormat: result.sourceFormat }
     this.imported = imported
     const first = result.container.meshes.find((m) => m.name !== '__root__') ?? null
     if (first) this.select(first as AbstractMesh)
@@ -340,10 +357,14 @@ export class Studio {
    * returns those original bytes pass-through (no re-export). Otherwise
    * (typed text) exports the studio scene to GLB.
    */
-  async getContentForPublish(): Promise<{ blob: Blob; filename: string; sourceFormat: 'glb' | 'generated' }> {
-    if (this.imported) return { blob: this.imported.file, filename: this.imported.file.name, sourceFormat: 'glb' }
-    // Text mode: make sure the geometry exists.
-    if (!this.textMesh) this.rebuildText()
+  async getContentForPublish(): Promise<{ blob: Blob; filename: string; sourceFormat: 'glb' | 'gltf' | 'obj' | 'generated' }> {
+    if (this.imported) return {
+      blob: this.imported.file,
+      filename: this.imported.file.name,
+      sourceFormat: this.imported.sourceFormat,
+    }
+    // Text mode: make sure asynchronous font geometry exists before export.
+    if (!this.textMesh) await this.rebuildText()
     const res = await GLTF2Export.GLBAsync(this.scene, 'text', {
       shouldExportNode: (n) => n === this.textMesh?.mesh,
     })
