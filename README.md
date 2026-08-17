@@ -309,13 +309,20 @@ Multiple agents work on this repo. Start with **`AGENTS.md`** (root), then:
 ## Mirrors (if github.io is filtered for you)
 
 The site is ONE self-contained HTML file, so any static host can serve it.
-CI pushes every build to the `site` branch; these mirrors serve it directly:
+CI pushes every build to the `site` branch. Verified working mirror:
 
-- https://cdn.jsdelivr.net/gh/SodoMita/f0@site/index.html
 - https://rawcdn.githack.com/SodoMita/f0/site/index.html
+  (first visit shows a one-click githack interstitial, then loads normally;
+  verified end-to-end: boots, connects to relays, live previews play)
 
-Or grab `index.html` from the `site` branch and open it from `file://` — it
-works offline-first and only talks to Nostr relays / Blossom servers.
+Also always available:
+- download `index.html` from the `site` branch (or jsDelivr:
+  https://cdn.jsdelivr.net/gh/SodoMita/f0@site/index.html — save it, since
+  jsDelivr serves HTML as text) and open it from `file://`. The app runs
+  identically offline-first and only talks to Nostr relays / Blossom.
+
+For a dedicated domain later: point any static host (Cloudflare Pages,
+Netlify, a VPS) at the `site` branch — no build step needed.
 
 ## Deploy to GitHub Pages
 
