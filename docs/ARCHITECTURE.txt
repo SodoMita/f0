@@ -1,0 +1,25 @@
+ARCHITECTURE — quick reference (digest of docs/ARCHITECTURE.md)
+
+MODULES: main.ts (boot+HUD+routing) · core/engine (1 canvas/context, scene
+swap) · core/router (hash routes) · core/assets (poster/model cache by SHA,
+<=3 concurrent dl, serialized renders) · protocol/{nostr (Relay pool, backoff),
+blossom (SHA verify + BUD-01), events, thread-index, storage} · model/{draco
+(local), offline (blank CDN URLs), limits (pre-load GLB caps), facing (auto-fit
+math), poster} · board/{board (1-3 col grid, inertia, badges), cardMaterial
+(custom unlit shader), previewPool (RTT slots), threadView (force-relaxed map)}
+· viewer (orbit + authored cameras) · studio (stub).
+
+DATA FLOW: relays -> parseModelEvent -> ThreadIndex -> board (setMetas +
+setReplyCount). Per card: AssetCache.getPoster -> PosterRenderer -> RawTexture
+(flip Y) | PreviewPool.request -> RTT (no flip) -> card shader. tap card ->
+#/viewer/:id; tap badge -> #/thread/:id.
+
+SCENES (swapped, never recreated): board / viewer / thread / studio / ui.
+setActiveScene attaches input; must NOT reset clearColor (settings own bg).
+
+TEXTURE FLIP (verified, test/orient2.ts): shader always samples 1.0-uv.x.
+flip.y = 1 for posters(RawTexture), 0 for live RTT and badges(DynamicTexture).
+
+KEY TRAPS: offscreen render via scene.render() (not rtt.render()); no IBL;
+posters auto-fit; whenReadyAsync() hangs on a never-rendered scene; nostr-tools
+SimplePool.subscribeMany is broken (use Relay).

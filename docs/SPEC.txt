@@ -1,0 +1,33 @@
+FORM/0 BUILD SPEC — quick reference (digest of docs/SPEC.md; the .md is authoritative)
+
+WHAT: anonymous, wordless 3D imageboard. Browser-only, talks directly to Nostr
+relays + Blossom. One canvas, Babylon.js. Posts = animated GLB models w/ own
+cameras + optional embedded audio.
+GOALS: (1) real content from real relays on first run, no config;
+(2) bun run build:standalone -> ONE .html from file://, fetches only user content.
+
+STACK: TypeScript strict + Vite + Babylon(core/gui/loaders/serializers) +
+nostr-tools, Bun as toolchain, Vitest+Playwright for tests. No React/Vue/Three/CDN.
+
+BUILD ORDER (gated): skeleton -> relay pool (>=20 live GLBs) -> Blossom+SHA
+(>=10) -> local posters 512x320 -> board -> RTT preview pool -> viewer/thread/
+network -> studio publish -> paint editor -> standalone.
+
+MEASURED NETWORK: '#m' filter = 66/66 models (bare kinds = 94% junk); no
+poster tags exist in the wild -> render posters locally; form-zero content
+exists (24 posts, 12 replies/7 roots); Draco mandatory, local decoders, zero CDN.
+
+TRAPS: 13 in the spec (SVG->PNG, emissive white-out, calc() ADT, RTT->meshes,
+rejection memory, scene audio emitter, side-effect imports, BOOT/BOARD '#/',
+ARIA clobber, trusted-click dialogs, RTT interleave, no dist/ commits).
+
+AMENDMENTS (override earlier wording): 1 HTML HUD ok for chrome. 2 replies +
+badges in Babylon. 3 thread = 2D force-relaxed tree map. 4 scroll inertia
+setting. 5 settings own background (engine must not reset clearColor).
+6 posters ALWAYS auto-fit (authored cameras only in viewer). 7 offscreen
+renders via scene.render() not rtt.render(). 8 no IBL (lights-only). 9 serialize
+poster renders (mutex), concurrent downloads <=3. 10 paint editor's primary job
+= hand-writing text (ink-style). 11 editor priorities: handwriting -> animation
+editing -> audio recording (getUserMedia+MediaRecorder). 12 phone-pose camera
+while recording (DeviceOrientation rotation; WebXR for translation; never
+double-integrate DeviceMotion acceleration).

@@ -1,0 +1,22 @@
+STATUS — task board (digest of docs/STATUS.md; the .md is authoritative)
+
+DONE: skeleton+router · relay pool + live feed · Blossom download+SHA ·
+poster pipeline · board (1-3 col, inertia, badges) · preview slot pool ·
+viewer (orbit + authored cameras) · thread 2D map · HTML HUD + settings ·
+local Draco + GLB limits · standalone + GitHub Pages · visual pass + flip fix.
+
+IN PROGRESS: studio (import-only stub; publish/audio/ownership not done).
+
+NEXT — EDITOR CORE FIRST (primary use cases):
+ 1 paint editor, primary = hand-writing text (ink: pressure, coalesced events,
+   smoothing, eraser, undo; then selection + gizmos + thin instances)
+ 2 animation editor (timeline, keyframes, camera fly-through, glTF export)
+ 3 audio recording (getUserMedia + MediaRecorder, embed into GLB <=8MiB)
+ 4 phone-pose camera while recording (DeviceOrientation rotation; WebXR for
+   position; sync pose+audio on one clock -> glTF camera anim)
+
+REST: low-poly text · studio publish (BUD-01) · first-run legend · network
+panel · error sheets · reply authoring · deletion UI · Vitest+Playwright suite.
+
+DEBT: studio is a stub · #/network falls back to board · poster/preview pool
+shares one scene (mutex) · no service worker.

@@ -1,0 +1,38 @@
+RESEARCH — simple 3D viewers & editors (digest of docs/RESEARCH-EDITORS.md)
+
+FIT-TO-BOUNDS: per-axis box extents, not sphere radius:
+ distance = max( size.z/2 + |size.x/2 / tan(fovH/2)|,  size.z/2 + |size.y/2 / tan(fovV/2)| ).
+Fixes over-zoom on flat models (fix in model/facing.ts).
+
+ORBIT: turntable style (Blender) = no phi clamp, pole-crossing flip. model-viewer
+is the reference: orbit target + click-to-focus-on-surface + fov/orbit limits.
+
+GIZMOS: use Babylon GizmoManager + BoundingBoxGizmo (translate/rotate/scale +
+AABB handles, snapping, local/world). Do NOT hand-roll. three.js
+TransformControls = same pattern: gizmo+helper per mode, quaternion rotation.
+
+BRUSH: raycast -> offset by hit normal -> snap to grid; strokes = stamp every N
+cells with interpolation; hit tests via Amanatides-Woo grid DDA (O(cells crossed)).
+
+PICKING: single click = scene.pick(predicate); box/lasso solid mode =
+GPUPicker.multiPickAsync (Babylon built-in, returns thinInstanceIndex); x-ray =
+spatial hash + CPU. == spec 05 solid/x-ray. ID buffer needs nearest filter, no mips.
+
+INSTANCES: thin instances = one draw call (343k cubes @70fps). Swap-last +
+shrink for delete (== spec packed-array). One draw call per (shape, material).
+
+UNDO: Command + Memento — inverse command or pre-state snapshot, bounded stack,
+redo tail cleared on new edit. Prefer inverse for large paint strokes.
+
+INK INPUT (primary use case = hand-writing): pressure->width/alpha, touch-action:
+none + setPointerCapture (else pointercancel), getCoalescedEvents() for smooth
+strokes, tilt for calligraphy, path smoothing + speed/pressure taper. Then
+extrude the flattened stroke to 3D.
+
+PHONE-POSE CAMERA + AUDIO REC: rotation = DeviceOrientation alpha/beta/gamma
+(HTTPS + iOS requestPermission from gesture); position = WebXR only
+(DeviceMotion acceleration drifts - never integrate). Audio = getUserMedia ->
+MediaRecorder -> Blob (codec varies: Chrome webm/opus, Safari mp4/aac).
+Sync pose+audio on one clock -> glTF camera animation + embedded audio.
+
+SOURCES: full list at bottom of the .md.
