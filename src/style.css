@@ -204,6 +204,27 @@ body.drawer-open #viewer-bar { padding-right: calc(min(400px, 92vw) + 16px); }
   margin: 0;
 }
 
+/* ---------- loading ring ---------- */
+#loading {
+  left: 50%; top: 50%; transform: translate(-50%, -50%);
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+  pointer-events: none;
+}
+#loading .ring {
+  width: 44px; height: 44px;
+  fill: var(--ink);
+  animation: ring-spin 1.02s steps(12, end) infinite;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.45));
+}
+.loading-label {
+  font-size: 9px; letter-spacing: 0.24em; text-transform: uppercase;
+  color: var(--muted);
+}
+@keyframes ring-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  #loading .ring { animation-duration: 2.4s; }
+}
+
 /* ---------- toast ---------- */
 #toast {
   left: 50%; bottom: 108px; transform: translateX(-50%);

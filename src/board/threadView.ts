@@ -15,7 +15,7 @@ import {
   makeCardMaterial, setCardTexture, setCardTint, setCardWhite, setCardFlip, setCardOpacity,
 } from './cardMaterial'
 import type { ShaderMaterial } from '@babylonjs/core/Materials/shaderMaterial'
-import { flatCamera, makeBackdropTexture, paintBackdrop, roundRect, luminance, shade } from '../core/gfx'
+import { flatCamera, makeBackdropTexture, paintBackdrop, makeSpinnerTexture, roundRect, luminance, shade } from '../core/gfx'
 import { theme } from '../theme'
 
 interface TNode {
@@ -24,6 +24,8 @@ interface TNode {
   mat: ShaderMaterial
   frame: Mesh
   frameMat: ShaderMaterial
+  spinner: Mesh
+  spinnerMat: ShaderMaterial
   x: number
   y: number
   w: number
@@ -69,6 +71,7 @@ export class ThreadView {
   private backdrop: Mesh
   private backdropTex: DynamicTexture
   private frameTex: DynamicTexture
+  private spinnerTex: DynamicTexture
   private rootFrameTex: DynamicTexture
   private background: string = theme.background
   private isDark = true
@@ -80,6 +83,8 @@ export class ThreadView {
   private pointers = new Map<number, { x: number; y: number }>()
   private moved = 0
   private pinchDist = 0
+  private generation = 0
+  private spinObserver = false
   private canvas: HTMLCanvasElement | null = null
   private attached = false
 
@@ -98,6 +103,7 @@ export class ThreadView {
     setCardWhite(bgMat)
     setCardFlip(bgMat, 'dyn')
 
+    this.spinnerTex = makeSpinnerTexture(this.scene, 'thread-spinner-tex')
     this.frameTex = this.makeFrameTexture('thread-frame', false)
     this.rootFrameTex = this.makeFrameTexture('thread-frame-root', true)
 
@@ -109,6 +115,7 @@ export class ThreadView {
     this.isDark = luminance(hex) < 0.5
     this.scene.clearColor = Color4.FromHexString(hex + 'FF')
     paintBackdrop(this.backdropTex, hex)
+    for (const n of this.nodes.values()) setCardTint(n.spinnerMat, this.isDark ? theme.ink : '#3a3a44')
     this.paintFrame(this.frameTex, false)
     this.paintFrame(this.rootFrameTex, true)
     const edge = Color3.FromHexString(shade(hex, this.isDark ? 0.3 : -0.3))
@@ -145,6 +152,15 @@ export class ThreadView {
 
   async open(rootId: string): Promise<void> {
     this.clear()
+    this.generation++
+    if (!this.spinObserver) {
+      // stepped rotation of every visible loading ring
+      this.scene.onBeforeRenderObservable.add(() => {
+        const phase = Math.floor(performance.now() / 85) * ((Math.PI * 2) / 12)
+        for (const n of this.nodes.values()) if (n.spinner.isEnabled()) n.spinner.rotation.z = -phase
+      })
+      this.spinObserver = true
+    }
     if (!this.assets || !this.index) return
     const metas = this.index.flatten(rootId)
     if (metas.length === 0) return
@@ -177,16 +193,31 @@ export class ThreadView {
       mesh.isPickable = true
       mesh.metadata = { tnode: meta }
 
+      const spinner = MeshBuilder.CreatePlane(`tspin-${meta.eventId.slice(0, 8)}`, { width: 4, height: 4 }, this.scene)
+      const spinnerMat = makeCardMaterial(this.scene)
+      spinner.material = spinnerMat
+      setCardTexture(spinnerMat, this.spinnerTex)
+      setCardTint(spinnerMat, this.isDark ? theme.ink : '#3a3a44')
+      setCardOpacity(spinnerMat, 0.75)
+      setCardFlip(spinnerMat, 'dyn')
+      const ring = Math.min(h * 0.34, w * 0.2)
+      spinner.scaling.set(ring / 4, ring / 4, 1)
+      spinner.position.set(p.x, p.y, -0.05)
+      spinner.isPickable = false
+
       setCardTint(mat, meta.tint || theme.panel)
       setCardOpacity(mat, 0.16)
+      const gen = this.generation
       void this.assets.getPoster(meta).then((tex) => {
-        if (!tex) return
+        // the map may have been cleared/reopened while the poster rendered
+        if (!tex || gen !== this.generation || mesh.isDisposed()) return
         setCardTexture(mat, tex)
         setCardWhite(mat)
         setCardOpacity(mat, 1)
+        spinner.setEnabled(false)
       })
 
-      this.nodes.set(meta.eventId, { meta, mesh, mat, frame, frameMat, x: p.x, y: p.y, w, h, depth: p.depth })
+      this.nodes.set(meta.eventId, { meta, mesh, mat, frame, frameMat, spinner, spinnerMat, x: p.x, y: p.y, w, h, depth: p.depth })
     }
 
     for (const meta of metas) {
@@ -475,8 +506,10 @@ export class ThreadView {
   }
 
   clear(): void {
+    this.generation++
     for (const n of this.nodes.values()) {
       n.mesh.dispose(); n.mat.dispose(); n.frame.dispose(); n.frameMat.dispose()
+      n.spinner.dispose(); n.spinnerMat.dispose()
     }
     this.nodes.clear()
     for (const l of this.lineMeshes) l.dispose()

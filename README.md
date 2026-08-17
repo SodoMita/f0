@@ -23,6 +23,25 @@ Settings, navigation, toolbars, metadata, toasts are plain HTML overlays.
 Only the models, the board, the reply badges and the thread map are Babylon.
 Settings: **background color** (viewer/thread/studio) + **scroll inertia**.
 
+## Key fixes this round (2026-08-17, round 4, see git history)
+
+### Loading is visible everywhere
+A 12-dot **spinning ring** is now the single loading idiom: an SVG ring in the
+HUD (labelled *connecting* / *loading model* / *building thread*, reference
+counted per reason) and an in-canvas ring on every board card and thread node
+that has no poster yet — drawn once into a texture and spun by `rotation.z`,
+so it stays crisp at any DPR/zoom.
+
+### One model in the single-model view
+`Viewer.load()` cleared the scene and *then* awaited the GLB parse, so racing
+navigations (fast prev/next, or bouncing back to the board) added several
+containers to the same scene and never disposed the earlier ones — models drew
+on top of each other. Loads now take a token: a parse that returns stale
+disposes its own container; `clear()` cancels in-flight loads and sweeps any
+non-helper mesh/transform/camera; `main.ts` holds a matching navigation
+ticket. `scripts/interact.mjs` hammers next/prev and asserts the scene holds
+exactly the current container's meshes.
+
 ## Key fixes this round (2026-08-17, round 3, see git history)
 
 ### Mirroring: root-caused in the camera, calibration deleted

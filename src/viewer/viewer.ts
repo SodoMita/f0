@@ -44,6 +44,11 @@ export class Viewer {
   private glowMat: ShaderMaterial
   private background: string = theme.background
   private backdropDistance = 120
+  // Guards against overlapping models: every load takes a ticket, and a load
+  // whose ticket is stale by the time its GLB finishes parsing throws its
+  // container away instead of adding it to the scene.
+  private loadToken = 0
+  private pending = false
 
   constructor(engine: FormEngine) {
     this.scene = new Scene(engine.engine)
@@ -136,11 +141,23 @@ export class Viewer {
 
   async load(blob: Blob, meta: ThreadMeta): Promise<void> {
     this.clear()
+    const token = ++this.loadToken
+    this.pending = true
     try {
       const bytes = new Uint8Array(await blob.arrayBuffer())
       const report = validateGLB(bytes)
       if (!report.ok) throw new Error(report.reason)
       const container = await LoadAssetContainerAsync(toFile(blob, 'model.glb'), this.scene)
+      // Superseded while we were parsing (fast prev/next, or the user went
+      // back to the board): drop it on the floor. Without this, BOTH models
+      // ended up in the single-model view, stacked on top of each other, and
+      // the older container was never disposed.
+      if (token !== this.loadToken) {
+        container.removeAllFromScene()
+        container.dispose()
+        return
+      }
+      this.pending = false
       container.addAllToScene()
       for (const m of container.meshes) {
         if (m.material) m.material.backFaceCulling = false
@@ -164,10 +181,24 @@ export class Viewer {
         this.active = this.anims[Math.min(a, this.anims.length - 1)]
         this.active.start(true)
       }
-    } catch {
-      this.clear()
-      throw new Error('model failed to load')
+    } catch (err) {
+      if (token === this.loadToken) { this.pending = false; this.clear() }
+      throw new Error('model failed to load: ' + (err as Error)?.message)
     }
+  }
+
+  /** True while a model is being fetched/parsed for this view. */
+  get busy(): boolean { return this.pending }
+
+  /**
+   * Meshes in the scene that are NOT the viewer's own helpers. Must always
+   * equal the current container's mesh count — anything more means a stale
+   * model leaked into the single-model view (scripts/interact.mjs asserts it).
+   */
+  sceneModelMeshCount(): number {
+    let n = 0
+    for (const m of this.scene.meshes) if (m !== this.backdrop && m !== this.glow) n++
+    return n
   }
 
   applyCamera(idx: number): void {
@@ -232,6 +263,9 @@ export class Viewer {
   }
 
   clear(): void {
+    // cancel anything still in flight so it cannot land in the scene later
+    this.loadToken++
+    this.pending = false
     this.glow?.setEnabled(false)
     this.active?.stop()
     this.active = null
@@ -240,6 +274,13 @@ export class Viewer {
     this.camIdx = -1
     if (this.container) { this.container.removeAllFromScene(); this.container.dispose() }
     this.container = null
+    // Safety net: anything that is not one of the viewer's own helpers must
+    // not survive a clear (a leaked container would otherwise stack up).
+    for (const mesh of [...this.scene.meshes]) {
+      if (mesh !== this.backdrop && mesh !== this.glow) mesh.dispose()
+    }
+    for (const tn of [...this.scene.transformNodes]) tn.dispose()
+    for (const cam of [...this.scene.cameras]) if (cam !== this.orbit) cam.dispose()
     this.scene.activeCamera = this.orbit
   }
 

@@ -100,6 +100,13 @@
       <pre id="meta-text"></pre>
     </div>
 
+    <!-- Loading indicator: a spinning ring of dots. Pure SVG + one CSS
+         rotation so it stays crisp at any DPR (no sprite, no font glyph). -->
+    <div id="loading" class="hud" hidden>
+      <svg class="ring" viewBox="0 0 48 48" aria-hidden="true"><circle cx="24.00" cy="7.50" r="3.00" opacity="1.0"/><circle cx="32.25" cy="9.71" r="2.88" opacity="0.859"/><circle cx="38.29" cy="15.75" r="2.77" opacity="0.731"/><circle cx="40.50" cy="24.00" r="2.65" opacity="0.615"/><circle cx="38.29" cy="32.25" r="2.53" opacity="0.511"/><circle cx="32.25" cy="38.29" r="2.42" opacity="0.419"/><circle cx="24.00" cy="40.50" r="2.30" opacity="0.34"/><circle cx="15.75" cy="38.29" r="2.18" opacity="0.273"/><circle cx="9.71" cy="32.25" r="2.07" opacity="0.218"/><circle cx="7.50" cy="24.00" r="1.95" opacity="0.175"/><circle cx="9.71" cy="15.75" r="1.83" opacity="0.144"/><circle cx="15.75" cy="9.71" r="1.72" opacity="0.126"/></svg>
+      <span id="loading-label" class="loading-label"></span>
+    </div>
+
     <div id="toast" class="hud" hidden></div>
 
     <input id="file-input" type="file" multiple hidden accept=".glb,.gltf,.bin,.obj,.mtl,.png,.jpg,.jpeg,.webp" />

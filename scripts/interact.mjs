@@ -134,6 +134,66 @@ if (!rootId) {
   check('tap on a thread node opens the viewer', hash.startsWith('#/viewer/'), hash)
 }
 
+// -------------------------------------------------- viewer: one model only
+// Regression: load() awaited the GLB parse AFTER clear(), so racing
+// navigations (fast next/next/next) added several containers to the single
+// model scene and left the earlier ones undisposed.
+await page.evaluate(() => { location.hash = '#/' })
+await page.waitForTimeout(1000)
+const firstPos = await page.evaluate(() => window.__form0.board.screenPosOf(0))
+if (firstPos) {
+  await page.mouse.click(firstPos.x, firstPos.y)
+  await page.waitForTimeout(800)
+  // hammer prev/next while models are still downloading/parsing
+  for (let i = 0; i < 6; i++) {
+    await page.evaluate(() => document.getElementById('btn-next').click())
+    await page.waitForTimeout(180)
+  }
+  await page.evaluate(() => document.getElementById('btn-prev').click())
+  await page.waitForTimeout(9000)
+  const v = await page.evaluate(() => ({
+    inScene: window.__form0.viewer.sceneModelMeshCount(),
+    ofContainer: window.__form0.viewer.stats().meshes,
+    cameras: window.__form0.viewer.scene.cameras.length,
+  }))
+  check('exactly one model is present after rapid switching',
+    v.inScene === v.ofContainer, `scene=${v.inScene} container=${v.ofContainer}`)
+  check('no stale cameras accumulate', v.cameras <= 1 + (await page.evaluate(() => window.__form0.viewer.cameraCount)),
+    `cameras=${v.cameras}`)
+}
+
+// ------------------------------------------------------- loading indicator
+await page.evaluate(() => { location.hash = '#/' })
+await page.waitForTimeout(800)
+const pos2 = await page.evaluate(() => window.__form0.board.screenPosOf(1))
+if (pos2) {
+  // deterministic: make the fetch slow so the ring must be observable even
+  // when the blob is already cached
+  await page.evaluate(() => {
+    const a = window.__form0.assets
+    const orig = a.getModel.bind(a)
+    window.__restoreGetModel = () => { a.getModel = orig }
+    a.getModel = (m) => new Promise((res) => setTimeout(() => res(orig(m)), 1500))
+  })
+  await page.mouse.click(pos2.x, pos2.y)
+  const shown = await page.waitForFunction(
+    () => !document.getElementById('loading').hidden &&
+          document.querySelector('#loading .ring') !== null, null, { timeout: 4000 })
+    .then(() => true).catch(() => false)
+  check('loading ring appears while a model loads', shown)
+  const spins = await page.evaluate(() => {
+    const el = document.querySelector('#loading .ring')
+    const st = getComputedStyle(el)
+    return { dots: el.querySelectorAll('circle').length, anim: st.animationName, dur: st.animationDuration }
+  })
+  check('ring is 12 animated dots', spins.dots === 12 && spins.anim === 'ring-spin' && parseFloat(spins.dur) > 0,
+    JSON.stringify(spins))
+  const hidden = await page.waitForFunction(() => document.getElementById('loading').hidden, null, { timeout: 30000 })
+    .then(() => true).catch(() => false)
+  check('loading ring disappears when the model is ready', hidden)
+  await page.evaluate(() => window.__restoreGetModel?.())
+}
+
 // ---------------------------------------------------------------- board
 await page.evaluate(() => { location.hash = '#/' })
 await page.waitForTimeout(1200)

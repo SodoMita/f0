@@ -56,6 +56,14 @@ move it to **Done** with a commit reference. One agent per area.
       reply tree constrained to a <90° cone (measured ~84°), ghost badges +
       glassy HUD. (commit 9dfda25)
 
+- [x] **Loading indicator**: spinning ring of dots — HUD overlay (connecting /
+      loading model / building thread) + per-card and per-thread-node rings
+      while posters render. (`gfx.makeSpinnerTexture`, `#loading`)
+- [x] **Viewer overlap fixed**: load tokens in `Viewer.load` + a `viewerNav`
+      ticket in `main.ts`, plus a stale-mesh sweep in `clear()`. Racing
+      navigations can no longer stack two models in the single-model view.
+      Guard: `scripts/interact.mjs`.
+
 ## In progress
 
 - [ ] Studio: import GLB only. Publish (BUD-01) + audio embed + ownership are

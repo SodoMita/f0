@@ -23,7 +23,8 @@ import {
 } from './cardMaterial'
 import type { ShaderMaterial } from '@babylonjs/core/Materials/shaderMaterial'
 import {
-  flatCamera, makeBackdropTexture, paintBackdrop, makeContactShadow, roundRect, luminance, shade,
+  flatCamera, makeBackdropTexture, paintBackdrop, makeContactShadow, makeSpinnerTexture,
+  roundRect, luminance, shade,
 } from '../core/gfx'
 import { theme, LIMITS } from '../theme'
 
@@ -44,6 +45,9 @@ interface CardSlot {
   shadow: Mesh
   shadowMat: ShaderMaterial
   footprint: { cx: number; bottom: number; w: number } | null
+  // spinning ring shown until the poster (or live preview) arrives
+  spinner: Mesh
+  spinnerMat: ShaderMaterial
   // reply badge (Babylon — same space as the cards): "↩ N" pill -> thread
   badge: Mesh
   badgeMat: ShaderMaterial
@@ -85,6 +89,7 @@ export class Board {
   private backdrop: Mesh
   private backdropTex: DynamicTexture
   private shadowTex: DynamicTexture
+  private spinnerTex: DynamicTexture
   private seps: LinesMesh[] = []
   private sepTops: number[] = []
   private background: string = theme.background
@@ -123,6 +128,7 @@ export class Board {
     setCardFlip(bgMat, 'dyn')
 
     this.shadowTex = makeContactShadow(this.scene, 'card-shadow-tex')
+    this.spinnerTex = makeSpinnerTexture(this.scene, 'card-spinner-tex')
 
     this.cb = cb
     this.previewPool = new PreviewPool(
@@ -134,6 +140,7 @@ export class Board {
       const slot = this.cards.find((c) => c.meta?.eventId === postId)
       if (!slot) return
       slot.live = rtt
+      slot.spinner.setEnabled(false)
       setCardTexture(slot.mat, rtt)
       setCardWhite(slot.mat)
       setCardOpacity(slot.mat, 1)
@@ -155,6 +162,8 @@ export class Board {
     for (const slot of this.cards) {
       setCardTint(slot.shadowMat, this.isDark ? '#000000' : '#1b1b22')
       setCardOpacity(slot.shadowMat, this.isDark ? 0.55 : 0.22)
+      setCardTint(slot.spinnerMat, this.isDark ? theme.ink : '#3a3a44')
+      setCardOpacity(slot.spinnerMat, this.isDark ? 0.75 : 0.8)
       this.drawBadge(slot)
     }
     const sepColor = Color3.FromHexString(shade(hex, this.isDark ? 0.16 : -0.16))
@@ -236,6 +245,17 @@ export class Board {
       const mat = makeCardMaterial(this.scene)
       mesh.material = mat
 
+      const spinner = MeshBuilder.CreatePlane(`spinner-${i}`, { width: 4, height: 4 }, this.scene)
+      spinner.setEnabled(false)
+      spinner.isPickable = false
+      spinner.position.z = -0.02
+      const spinnerMat = makeCardMaterial(this.scene)
+      spinner.material = spinnerMat
+      setCardTexture(spinnerMat, this.spinnerTex)
+      setCardTint(spinnerMat, theme.ink)
+      setCardOpacity(spinnerMat, 0.75)
+      setCardFlip(spinnerMat, 'dyn')
+
       const badge = MeshBuilder.CreatePlane(`badge-${i}`, { width: 4, height: 4 }, this.scene)
       badge.setEnabled(false)
       badge.isPickable = false
@@ -249,8 +269,8 @@ export class Board {
       setCardFlip(badgeMat, 'dyn')
 
       const slot: CardSlot = {
-        mesh, mat, poster: null, live: null, shadow, shadowMat, badge, badgeMat, badgeTex,
-        replyCount: 0, footprint: null,
+        mesh, mat, poster: null, live: null, shadow, shadowMat, spinner, spinnerMat,
+        badge, badgeMat, badgeTex, replyCount: 0, footprint: null,
       }
       this.cards.push(slot)
       mesh.metadata = { card: slot }
@@ -339,6 +359,7 @@ export class Board {
         slot.mesh.setEnabled(false)
         slot.badge.setEnabled(false)
         slot.shadow.setEnabled(false)
+        slot.spinner.setEnabled(false)
         slot.mesh.isPickable = false
         continue
       }
@@ -356,6 +377,7 @@ export class Board {
         setCardFlip(slot.mat, 'raw')
         slot.footprint = null
         slot.shadow.setEnabled(false)
+        slot.spinner.setEnabled(true)
         this.drawBadge(slot)
       }
       slot.mesh.setEnabled(true)
@@ -374,6 +396,10 @@ export class Board {
     slot.badge.position.y = slot.mesh.position.y - CARD_H / 2 + BADGE_H / 2 + 0.5
     slot.badge.position.z = -0.05
     slot.badge.setEnabled(slot.replyCount > 0 && slot.mesh.isEnabled())
+
+    const ring = Math.min(CARD_H * 0.38, CARD_W * 0.18)
+    slot.spinner.scaling.set(ring / 4, ring / 4, 1)
+    slot.spinner.position.set(slot.mesh.position.x, slot.mesh.position.y, -0.02)
 
     const fp = slot.footprint
     if (fp) {
@@ -472,6 +498,12 @@ export class Board {
 
   private tick(): void {
     this.previewPool.tick()
+    // spin the loading rings (stepped, like the HTML one)
+    const step = (Math.PI * 2) / 12
+    const phase = Math.floor(performance.now() / 85) * step
+    for (const slot of this.cards) {
+      if (slot.spinner.isEnabled()) slot.spinner.rotation.z = -phase
+    }
     // scroll inertia: momentum decays between inputs
     if (!this.dragging && this.inertia > 0 && Math.abs(this.velocity) > 0.0005) {
       this.setScroll(this.scrollY + this.velocity)
@@ -511,6 +543,7 @@ export class Board {
       setCardOpacity(slot.mat, 1)
       setCardFlip(slot.mat, 'raw')
       slot.footprint = assets.getFootprint(meta) ?? null
+      slot.spinner.setEnabled(false)
       slot.shadow.setEnabled(!!slot.footprint)
       this.positionExtras(slot)
       const animated = assets.isAnimated(meta)

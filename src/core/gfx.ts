@@ -164,6 +164,35 @@ export function makeContactShadow(scene: Scene, name: string): DynamicTexture {
   return tex
 }
 
+/**
+ * Spinning-ring loading indicator: 12 dots on a circle with a fading trail.
+ * The texture is static — the mesh spins (see Board.tick / ThreadView), which
+ * keeps it perfectly crisp at any zoom and costs nothing per frame.
+ */
+export function makeSpinnerTexture(scene: Scene, name: string): DynamicTexture {
+  const S = 256
+  const DOTS = 12
+  const tex = new DynamicTexture(name, { width: S, height: S }, scene, true)
+  tex.hasAlpha = true
+  const ctx = tex.getContext() as CanvasRenderingContext2D
+  ctx.clearRect(0, 0, S, S)
+  const ringR = S * 0.34
+  for (let i = 0; i < DOTS; i++) {
+    // dot 0 is the head of the trail
+    const a = (i / DOTS) * Math.PI * 2 - Math.PI / 2
+    const t = 1 - i / DOTS
+    const r = S * (0.036 + 0.030 * t)
+    ctx.globalAlpha = 0.12 + 0.88 * t * t
+    ctx.fillStyle = '#ffffff'
+    ctx.beginPath()
+    ctx.arc(S / 2 + Math.cos(a) * ringR, S / 2 + Math.sin(a) * ringR, r, 0, Math.PI * 2)
+    ctx.fill()
+  }
+  ctx.globalAlpha = 1
+  tex.update()
+  return tex
+}
+
 /** Rounded-rect path helper for canvas 2D (badges, node frames). */
 export function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
   const rr = Math.min(r, w / 2, h / 2)

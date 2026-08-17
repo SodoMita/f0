@@ -148,3 +148,24 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     to a blurry substitute face; the reply badge draws its arrow with canvas
     vector strokes. The engine renders at devicePixelRatio (capped at 2) — it
     was pinned to 1.0/1.25, which softened everything Babylon drew on HiDPI.
+
+20. One model in the single-model view. Viewer.load() clears, then AWAITS the
+    GLB parse — so racing navigations (fast prev/next, or leaving for the
+    board) used to add several containers to the same scene and never dispose
+    the earlier ones (models drawn on top of each other). Every load takes a
+    token (`++this.loadToken`); a parse that returns with a stale token
+    removeAllFromScene()+dispose()s its container instead of adding it.
+    clear() bumps the token (cancels in flight), disposes the container, and
+    sweeps any non-helper mesh/transform/camera left in the scene. main.ts
+    mirrors this with a `viewerNav` ticket so a late download cannot paint into
+    a view the user already left. Guard: scripts/interact.mjs asserts
+    `viewer.sceneModelMeshCount() === viewer.stats().meshes` after hammering
+    next/prev.
+
+21. Loading is always visible. A 12-dot spinning ring is the one loading
+    idiom: `#loading` in the HUD (SVG + CSS `steps(12)` rotation, with a label:
+    connecting / loading model / building thread) and an in-canvas ring on
+    every board card and thread node that has no poster yet
+    (`gfx.makeSpinnerTexture` + stepped `rotation.z`, so it stays crisp at any
+    zoom). setLoading(reason, on) is reference-counted by reason — never hide
+    the ring while another reason is still loading.

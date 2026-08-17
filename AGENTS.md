@@ -75,6 +75,14 @@ bun run build:standalone  # ONE self-contained form-zero-standalone.html
    alone leaves models sitting on black.
 9c. **HUD icons are inline SVG**, never font glyphs (⤨ ⏃ ⤓ … fall back to a
    blurry substitute face), and the engine renders at `devicePixelRatio`.
+9e. **Async loads take a token.** `Viewer.load()` awaits a GLB parse after
+   clearing; without `++this.loadToken` (and the `viewerNav` ticket in
+   `main.ts`) a superseded load lands in the scene and you get two models
+   stacked in the single-model view. Anything that awaits then mutates a scene
+   must re-check its token first.
+9f. **Show the ring.** Any wait longer than a frame gets the spinning-ring
+   indicator: `setLoading(reason, on, label)` for the HUD, or the in-canvas
+   ring for cards/nodes. It is reference-counted per reason.
 9d. **The thread map binds native pointer events** — Babylon drops the second
    finger via `navigator.maxTouchPoints` slots. Pan integrates the delta since
    the previous move event (anchor-based deltas drift forever).

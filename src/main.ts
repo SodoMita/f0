@@ -71,6 +71,18 @@ async function boot(): Promise<void> {
   const metaText = $('meta-text')
   const toast = $('toast')
 
+  // ---------- loading ring ----------
+  const loading = $('loading')
+  const loadingLabel = $('loading-label')
+  const loadingReasons = new Set<string>()
+  function setLoading(reason: string, on: boolean, label = ''): void {
+    if (on) loadingReasons.add(reason)
+    else loadingReasons.delete(reason)
+    loading.hidden = loadingReasons.size === 0
+    if (!loading.hidden) loadingLabel.textContent = label || reason
+  }
+  ;(window as any).__loading = loadingReasons
+
   let toastTimer = 0
   function showToast(msg: string): void {
     toast.textContent = msg
@@ -80,6 +92,10 @@ async function boot(): Promise<void> {
   }
 
   let currentMeta: ThreadMeta | null = null
+  // Every viewer navigation takes a ticket. A download/parse that finishes
+  // after the user has moved on must not paint into the current view (that is
+  // how two models ended up stacked in the single-model viewer).
+  let viewerNav = 0
 
   const orderedRoots = (): ThreadMeta[] =>
     [...index.byId.values()]
@@ -217,6 +233,11 @@ async function boot(): Promise<void> {
     if (mode === next) return
     mode = next
     if (next !== 'thread') threadView.detach()
+    if (next !== 'viewer') {
+      viewerNav++            // abandon any in-flight model load
+      setLoading('model', false)
+      viewer.clear()
+    }
     if (next === 'board') {
       engine.setActiveScene(board.scene)
       topbar.hidden = false
@@ -253,19 +274,23 @@ async function boot(): Promise<void> {
     if (!id) { setMode('board'); return }
     const meta = index.byId.get(id)
     if (!meta) { setMode('board'); return }
+    const nav = ++viewerNav
     currentMeta = meta
     setMode('viewer')
-    const blob = await assets.getModel(meta)
-    if (blob) {
-      try {
-        await viewer.load(blob, meta)
-        renderCamDots()
-        syncPlay()
-      } catch {
-        showToast('model failed to load')
-      }
-    } else {
-      showToast('model download failed')
+    camDots.innerHTML = ''
+    setLoading('model', true, 'loading model')
+    try {
+      const blob = await assets.getModel(meta)
+      if (nav !== viewerNav) return
+      if (!blob) { showToast('model download failed'); return }
+      await viewer.load(blob, meta)
+      if (nav !== viewerNav) return
+      renderCamDots()
+      syncPlay()
+    } catch {
+      if (nav === viewerNav) showToast('model failed to load')
+    } finally {
+      if (nav === viewerNav) setLoading('model', false)
     }
   }
 
@@ -273,7 +298,8 @@ async function boot(): Promise<void> {
     if (route.name === 'board') setMode('board')
     else if (route.name === 'thread') {
       setMode('thread')
-      void threadView.open(route.rootId)
+      setLoading('thread', true, 'building thread')
+      void threadView.open(route.rootId).finally(() => setLoading('thread', false))
     }
     else if (route.name === 'viewer') void openViewer(route.id)
     else if (route.name === 'studio') setMode('studio')
@@ -283,6 +309,7 @@ async function boot(): Promise<void> {
   applyRoute()
 
   // ---------- network ----------
+  setLoading('feed', true, 'connecting')
   pool.onEvent = (event) => {
     if (event.kind === 5) {
       for (const t of event.tags) if (t[0] === 'e') index.tombstone(t[1])
@@ -291,6 +318,7 @@ async function boot(): Promise<void> {
     const meta = parseModelEvent(event)
     if (!meta) return
     index.add(meta)
+    setLoading('feed', false)
     board.setMetas(orderedRoots())
     for (const m of orderedRoots()) board.setReplyCount(m.eventId, index.childCount(m.eventId))
   }
