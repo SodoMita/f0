@@ -125,22 +125,35 @@ export class PosterRenderer {
       }
       const animated = container.animationGroups.some((g) => g.targetedAnimations.length > 0)
 
-      // Camera policy: ALWAYS auto-fit for the poster thumbnail. The model's
-      // own camera may point anywhere (it is an authored view, not a framing
-      // hint), which produced blank posters. The model's cameras belong in
-      // the detail viewer (camera dots), not the thumbnail.
+      // Camera policy: the poster shows the model from its OWN camera when
+      // the GLB ships one (the poster must match the view the author framed);
+      // auto-fit is only the fallback for models without a camera.
       const { min, max, center, radius } = worldBox(container)
-      const facing = dominantFacing(container)
-      // Tight, aspect-aware framing: wide models must fill the 16:10 card.
-      const fov = 0.7
-      const dist = frameDistance(min, max, center, facing.scale(-1), fov, POSTER_W / POSTER_H, 0.86)
-      this.headlight.direction = facing.scale(-1)
-      ownCamera = new FreeCamera('poster-cam', center.add(facing.scale(dist)), this.scene)
-      ownCamera.setTarget(center)
-      ownCamera.fov = fov
-      ownCamera.minZ = Math.max(0.001, (dist - radius) * 0.2)
-      ownCamera.maxZ = dist + radius * 6
-      const cam: Camera = ownCamera
+      let cam: Camera
+      const authored = container.cameras[0]
+      if (authored) {
+        authored.computeWorldMatrix()
+        // Display-only: authored near/far often clips tiny or offset models.
+        // The GLB itself is never touched (same rule as backFaceCulling).
+        const camPos = authored.getWorldMatrix().getTranslation()
+        const dist = Vector3.Distance(camPos, center)
+        authored.minZ = Math.max(0.0001, Math.min(authored.minZ, (dist - radius) * 0.2))
+        authored.maxZ = Math.max(authored.maxZ, dist + radius * 6)
+        this.headlight.direction = authored.getDirection(Vector3.Forward())
+        cam = authored
+      } else {
+        const facing = dominantFacing(container)
+        // Tight, aspect-aware framing: wide models must fill the 16:10 card.
+        const fov = 0.7
+        const dist = frameDistance(min, max, center, facing.scale(-1), fov, POSTER_W / POSTER_H, 0.86)
+        this.headlight.direction = facing.scale(-1)
+        ownCamera = new FreeCamera('poster-cam', center.add(facing.scale(dist)), this.scene)
+        ownCamera.setTarget(center)
+        ownCamera.fov = fov
+        ownCamera.minZ = Math.max(0.001, (dist - radius) * 0.2)
+        ownCamera.maxZ = dist + radius * 6
+        cam = ownCamera
+      }
       this.scene.activeCamera = cam
       // Render the scene into the RTT via the SAME path the detail viewer
       // uses (scene.render()): this compiles materials over frames, which the

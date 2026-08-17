@@ -44,12 +44,12 @@ export class AssetCache {
     return meta ? this.getModel(meta) : Promise.resolve(undefined)
   }
 
-  /** Shared bytes + content hash for a post (preview pool / viewer). */
-  async getModelBytesByPostId(postId: string): Promise<{ bytes: Uint8Array; sha256: string } | undefined> {
+  /** Shared bytes + content hash + camera hint for a post (preview pool). */
+  async getModelBytesByPostId(postId: string): Promise<{ bytes: Uint8Array; sha256: string; previewCamera?: number } | undefined> {
     const meta = this.byPostId.get(postId)
     if (!meta) return undefined
     const bytes = await this.getModelBytes(meta)
-    return bytes ? { bytes, sha256: meta.sha256 } : undefined
+    return bytes ? { bytes, sha256: meta.sha256, previewCamera: meta.previewCamera } : undefined
   }
 
   /**

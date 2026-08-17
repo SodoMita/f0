@@ -61,9 +61,11 @@ bun run build:standalone  # ONE self-contained form-zero-standalone.html
    posters/previews). See `poster.ts` / `previewPool.ts`.
 5. **No `scene.environmentTexture` (IBL)** — it rendered every PBR model black.
    Lights-only rig (hemispheric + directional + fill).
-6. **Posters always auto-fit** (`worldBounds` + `dominantFacing` +
-   `fitDistance` in `model/facing.ts`). The model's authored cameras belong in
-   the **viewer** (camera dots), never the thumbnail.
+6. **Posters use the model's authored camera when it has one** (the poster
+   must show the view the author framed); auto-fit (`worldBounds` +
+   `dominantFacing` + `fitDistance` in `model/facing.ts`) is the fallback for
+   models without a camera. Live previews follow the same policy
+   (`preview-camera` index → first imported camera → auto-fit).
 7. **Display rendering is double-sided** (`backFaceCulling = false`) so flat
    text/models are never invisible; never modify the source GLB.
 8. **Side-effect imports** are required for `scene.pick` (`@babylonjs/core/Culling/ray`)

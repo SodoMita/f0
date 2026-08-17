@@ -89,7 +89,12 @@ export function applySettings(w: Wiring, v: SettingsValues, changed: string[] | 
   if (touched('modelRamBudget', 'textureBudget')) {
     w.assets.setBudgets({ modelRamMiB: Number(v.modelRamBudget ?? 48), textures: Number(v.textureBudget ?? 32) })
   }
-  if (touched('livePreviews')) w.board.setLivePreviewSlots(Number(v.livePreviews ?? 5))
+  if (touched('livePreviews')) {
+    const slots = Number(v.livePreviews ?? 5)
+    w.board.setLivePreviewSlots(slots)
+    // the thread map gets a small share of the same budget
+    w.threadView.setLivePreviewSlots(Math.max(0, Math.min(3, slots)))
+  }
   if (touched('prefetch', 'keepOffscreen')) {
     w.board.setPrefetch(v.keepOffscreen ? 4 : Number(v.prefetch ?? 100) / 100)
   }

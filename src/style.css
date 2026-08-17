@@ -636,7 +636,12 @@ body[data-theme="light"] .sheet-card { background: rgba(253, 246, 245, 0.97); bo
   z-index: 30;
   pointer-events: none;
 }
-.studio-rail, .studio-stage, .studio-inspector { pointer-events: auto; }
+.studio-rail, .studio-inspector { pointer-events: auto; }
+/* The stage IS the 3D viewport: it must not intercept pointer events, or
+   gizmo handles, orbit drags and mesh taps above the W/E/R toolbar never
+   reach the canvas. Only the real controls inside it (toolbar, top bar
+   buttons, fold handle — all .hbtn/pointer-events:auto themselves) grab. */
+.studio-stage, .stage-top { pointer-events: none; }
 .studio-rail {
   display: flex; flex-direction: column; gap: 8px;
   padding: 8px; border-radius: 18px;
@@ -717,13 +722,15 @@ body[data-theme="light"] .sheet-card { background: rgba(253, 246, 245, 0.97); bo
 .tool-btn:hover { background: rgba(255,255,255,.1); }
 .tool-btn.active { background: var(--accent); color: #1a0e0a; }
 
-/* Studio top + fold */
+/* Studio top + fold. Non-interactive strip: pass events through to the
+   canvas (gizmos reach the top of the viewport); only the fold button
+   (.hbtn) grabs pointer events. */
 .stage-top {
   position: absolute;
   top: 0; left: 0; right: 0;
   display: flex; align-items: center; gap: 8px;
   padding: 10px 12px;
-  pointer-events: auto;
+  pointer-events: none;
 }
 .stage-top .spacer { flex: 1; }
 .fold-handle {
@@ -796,7 +803,9 @@ body[data-theme="light"] .sheet-card { background: rgba(253, 246, 245, 0.97); bo
   z-index: 30;
   pointer-events: none;
 }
-.studio-rail, .studio-stage, .studio-inspector { pointer-events: auto; }
+.studio-rail, .studio-inspector { pointer-events: auto; }
+/* the stage is the viewport — see the same rule above */
+.studio-stage, .stage-top { pointer-events: none; }
 .studio-rail {
   display: flex; flex-direction: column; gap: 8px;
   padding: 8px; border-radius: 18px;

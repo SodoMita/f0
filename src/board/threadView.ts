@@ -8,9 +8,12 @@ import { Color3, Color4 } from '@babylonjs/core/Maths/math.color'
 import '@babylonjs/core/Culling/ray'
 import type { Mesh } from '@babylonjs/core/Meshes/mesh'
 import type { LinesMesh } from '@babylonjs/core/Meshes/linesMesh'
+import type { RenderTargetTexture } from '@babylonjs/core/Materials/Textures/renderTargetTexture'
+import type { Texture as TextureT } from '@babylonjs/core/Materials/Textures/texture'
 import type { FormEngine } from '../core/engine'
 import type { AssetCache } from '../core/assets'
 import type { ThreadIndex, ThreadMeta } from '../protocol/thread-index'
+import { PreviewPool } from './previewPool'
 import {
   makeCardMaterial, setCardTexture, setCardTint, setCardWhite, setCardFlip, setCardOpacity,
 } from './cardMaterial'
@@ -29,11 +32,21 @@ interface TNode {
   // reply button (bottom-right pill): tap -> studio compose for THIS node
   reply: Mesh
   replyMat: ShaderMaterial
+  // poster texture (reapplied when the live preview is released)
+  poster: TextureT | null
+  // live animated preview (same pipeline as the board's cards)
+  live: RenderTargetTexture | null
   x: number
   y: number
   w: number
   h: number
   depth: number
+  // 120ms crossfade plate -> poster -> live (SPEC CARD "Crossfade 120ms"):
+  // hard swaps made loading nodes FLASH black while the map built.
+  opacity: number
+  fadeFrom: number
+  fadeTo: number
+  fadeStart: number
 }
 
 interface TEdge { parent: string; child: string }
@@ -96,6 +109,7 @@ export class ThreadView {
   private canvas: HTMLCanvasElement | null = null
   private attached = false
   private form: FormEngine
+  readonly previewPool: PreviewPool
 
   constructor(engine: FormEngine) {
     this.form = engine
@@ -103,6 +117,37 @@ export class ThreadView {
     this.scene.clearColor = Color4.FromHexString(this.background + 'FF')
     this.scene.skipPointerMovePicking = true
     this.camera = flatCamera(this.scene, 'thread-cam', 30)
+
+    // Animated nodes get live previews, same bounded pool as the board.
+    // (Before, the thread map only ever showed static posters — animated
+    // models were frozen in the tree.)
+    this.previewPool = new PreviewPool(
+      engine.engine,
+      (postId) => this.assets?.getModelBytesByPostId(postId) ?? Promise.resolve(undefined),
+      { maxSlots: 3, rttWidth: 384, rttHeight: 240, slotsPerFrame: 1, targetFps: 15 },
+    )
+    this.previewPool.onLive = (postId, rtt) => {
+      const n = this.nodes.get(postId)
+      if (!n || n.mesh.isDisposed()) return
+      n.live = rtt
+      n.spinner.setEnabled(false)
+      setCardTexture(n.mat, rtt)
+      setCardWhite(n.mat)
+      this.fadeTo(n, 1)
+      setCardFlip(n.mat, 'rtt')
+      this.form.kick()
+    }
+    this.previewPool.onRelease = (postId) => {
+      const n = this.nodes.get(postId)
+      if (!n || !n.live) return
+      n.live = null
+      this.showNodePoster(n)
+      this.form.kick()
+    }
+    this.previewPool.onLoadDone = () => {
+      this.syncPreviews()
+      this.form.kick()
+    }
 
     this.backdrop = MeshBuilder.CreatePlane('thread-bg', { width: 4, height: 4 }, this.scene)
     this.backdrop.isPickable = false
@@ -127,11 +172,92 @@ export class ThreadView {
     engine.addAnimationSource(() => engine.activeScene === this.scene && this.isAnimating())
   }
 
-  /** Render-on-demand probe: pointers down, or a node still waiting on its poster. */
+  /** The hidden stage where live node previews render (graphics settings apply). */
+  get previewScene(): Scene { return this.previewPool.scene }
+
+  /** Settings → Memory: how many thread nodes may animate at once. */
+  setLivePreviewSlots(n: number): void {
+    this.previewPool.setMaxSlots(n)
+    this.syncPreviews()
+  }
+
+  /** Render-on-demand probe: pointers down, a crossfade, a spinner, or a live node. */
   isAnimating(): boolean {
     if (this.pointers.size > 0) return true
-    for (const n of this.nodes.values()) if (n.spinner.isEnabled()) return true
-    return false
+    for (const n of this.nodes.values()) {
+      if (n.spinner.isEnabled() || n.fadeStart > 0) return true
+    }
+    return this.previewPool.hasWork(this.visibleNodeIds())
+  }
+
+  /** Node ids whose card rect intersects the current viewport. */
+  private visibleNodeIds(): Set<string> {
+    const halfH = 20 * this.zoom
+    const halfW = halfH * this.aspect
+    const out = new Set<string>()
+    for (const n of this.nodes.values()) {
+      if (n.x + n.w / 2 < this.panX - halfW || n.x - n.w / 2 > this.panX + halfW) continue
+      if (n.y + n.h / 2 < this.panY - halfH || n.y - n.h / 2 > this.panY + halfH) continue
+      out.add(n.meta.eventId)
+    }
+    return out
+  }
+
+  /**
+   * Live previews follow the viewport: visible nodes with a poster and an
+   * (possibly) animated model request a slot; nodes panned out of view are
+   * released. Same preflight gate as the board — the pool rejects STATIC
+   * models itself and remembers them.
+   */
+  private syncPreviews(): void {
+    if (!this.assets) return
+    const visible = this.visibleNodeIds()
+    for (const n of this.nodes.values()) {
+      const id = n.meta.eventId
+      if (n.live && !visible.has(id)) {
+        this.previewPool.release(id)
+        n.live = null
+        this.showNodePoster(n)
+        continue
+      }
+      if (n.live || !n.poster) continue
+      if (!visible.has(id) || this.previewPool.isRejected(id)) continue
+      // same gate as the board: poster-render knowledge or v3 hints
+      const animated = this.assets.isAnimated(n.meta)
+      if (!(animated ?? (n.meta.animHint || n.meta.cameraCount > 0))) continue
+      this.previewPool.request(id)
+    }
+  }
+
+  /** Set node card opacity right now (rebinding/teardown paths). */
+  private setNodeOpacityNow(n: TNode, v: number): void {
+    n.opacity = v
+    n.fadeStart = 0
+    setCardOpacity(n.mat, v)
+  }
+
+  /** Ramp node card opacity to v over 120ms (content arriving — never flash). */
+  private fadeTo(n: TNode, v: number): void {
+    if (n.fadeStart === 0 && n.opacity === v) return
+    n.fadeFrom = n.opacity
+    n.fadeTo = v
+    n.fadeStart = performance.now()
+    this.form.kick()
+  }
+
+  /** Show the node's poster texture (fallback after its live preview is released). */
+  private showNodePoster(n: TNode): void {
+    if (n.poster) {
+      setCardTexture(n.mat, n.poster)
+      setCardWhite(n.mat)
+      this.fadeTo(n, 1)
+      setCardFlip(n.mat, 'raw')
+    } else {
+      setCardTexture(n.mat, null)
+      setCardTint(n.mat, n.meta.tint || theme.panel)
+      this.fadeTo(n, 0.16)
+      setCardFlip(n.mat, 'raw')
+    }
   }
 
   setBackground(hex: string): void {
@@ -237,10 +363,22 @@ export class ThreadView {
     this.clear()
     this.generation++
     if (!this.spinObserver) {
-      // stepped rotation of every visible loading ring
+      // stepped rotation of every visible loading ring + per-frame upkeep of
+      // live node previews and the 120ms crossfades (see SPEC CARD).
       this.scene.onBeforeRenderObservable.add(() => {
-        const phase = Math.floor(performance.now() / 85) * ((Math.PI * 2) / 12)
-        for (const n of this.nodes.values()) if (n.spinner.isEnabled()) n.spinner.rotation.z = -phase
+        const now = performance.now()
+        const phase = Math.floor(now / 85) * ((Math.PI * 2) / 12)
+        for (const n of this.nodes.values()) {
+          if (n.spinner.isEnabled()) n.spinner.rotation.z = -phase
+          if (n.fadeStart) {
+            const t = Math.min(1, (now - n.fadeStart) / 120)
+            n.opacity = n.fadeFrom + (n.fadeTo - n.fadeFrom) * t
+            setCardOpacity(n.mat, n.opacity)
+            if (t >= 1) { n.opacity = n.fadeTo; n.fadeStart = 0 }
+          }
+        }
+        this.syncPreviews()
+        this.previewPool.tick(this.visibleNodeIds())
       })
       this.spinObserver = true
     }
@@ -302,19 +440,26 @@ export class ThreadView {
       reply.metadata = { treply: meta }
 
       setCardTint(mat, meta.tint || theme.panel)
-      setCardOpacity(mat, 0.16)
+      const node: TNode = {
+        meta, mesh, mat, frame, frameMat, spinner, spinnerMat, reply, replyMat,
+        poster: null, live: null, x: p.x, y: p.y, w, h, depth: p.depth,
+        opacity: 0.16, fadeFrom: 0.16, fadeTo: 0.16, fadeStart: 0,
+      }
+      this.setNodeOpacityNow(node, 0.16)
       const gen = this.generation
       void this.assets.getPoster(meta).then((tex) => {
         // the map may have been cleared/reopened while the poster rendered
         if (!tex || gen !== this.generation || mesh.isDisposed()) return
+        node.poster = tex
         setCardTexture(mat, tex)
         setCardWhite(mat)
-        setCardOpacity(mat, 1)
+        this.fadeTo(node, 1)
         spinner.setEnabled(false)
+        this.syncPreviews()
         this.form.kick()
       })
 
-      this.nodes.set(meta.eventId, { meta, mesh, mat, frame, frameMat, spinner, spinnerMat, reply, replyMat, x: p.x, y: p.y, w, h, depth: p.depth })
+      this.nodes.set(meta.eventId, node)
     }
 
     for (const meta of metas) {
@@ -420,6 +565,8 @@ export class ThreadView {
     const halfW = 20 * z * this.aspect
     this.backdrop.scaling.set((halfW * 2 + 2) / 4, (20 * z * 2 + 2) / 4, 1)
     this.backdrop.position.set(this.panX, this.panY, 4)
+    // viewport changed -> live previews must follow what is now on screen
+    this.syncPreviews()
   }
 
   /** Frame the whole map with a margin. */
@@ -611,6 +758,7 @@ export class ThreadView {
 
   clear(): void {
     this.generation++
+    this.previewPool.releaseAll()
     for (const n of this.nodes.values()) {
       n.mesh.dispose(); n.mat.dispose(); n.frame.dispose(); n.frameMat.dispose()
       n.spinner.dispose(); n.spinnerMat.dispose()
@@ -630,6 +778,7 @@ export class ThreadView {
   dispose(): void {
     this.detach()
     this.clear()
+    this.previewPool.dispose()
     this.scene.dispose()
   }
 }

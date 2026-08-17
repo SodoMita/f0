@@ -60,10 +60,13 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
    the thread map and the studio (scene.clearColor). The engine must NOT
    overwrite scene.clearColor on setActiveScene (scenes own their clearColor).
 
-6. Poster camera = ALWAYS auto-fit. The thumbnail never uses the model's
-   authored camera (it may point anywhere and yields blank posters); authored
-   cameras belong in the viewer (camera dots / C key). Auto-fit frames
-   worldBounds (union AABB) + dominant facing + fitDistance.
+6. Poster camera = the model's authored camera when it has one. The poster
+   shows the view the author framed, not a synthetic auto-fit (auto-fit is
+   only the fallback for models without a camera: worldBounds union AABB +
+   dominant facing + fitDistance). A camera that frames nothing still yields
+   a blank poster -> publish falls back to a placeholder. Live previews use
+   the same policy: preview-camera index -> first imported camera ->
+   auto-fit. Authored cameras also belong in the viewer (camera dots / C).
 
 7. Offscreen renders use scene.render(). Babylon's manual
    RenderTargetTexture.render()/renderList path does NOT compile materials on
@@ -398,3 +401,25 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     data images, oversized sides and aggregate decoded-memory excess fail
     closed.
 
+
+48. BUGFIX ROUND (feed/tree/studio, 2026-08-18):
+    - Posters + live previews render from the model's authored camera when
+      one exists (AMENDMENT 6 rewritten — the old "ALWAYS auto-fit" wording
+      was wrong in practice; users want the camera view).
+    - The live-preview pool REUSES released slots and evicts offscreen ones.
+      Previously every request allocated a slot up to maxSlots and then the
+      pool refused every later post — only the first N cards of a feed could
+      ever animate. STATIC rejection also leaked the container (release()
+      looked the post up in byPost, which it never entered).
+    - The thread map now runs live previews for animated nodes (small share
+      of the same slot budget, viewport-gated, same pipeline as the board).
+      Before, the tree only ever showed static posters.
+    - Card/nodes crossfade between plate -> poster -> live over 120ms (the
+      SPEC CARD "Crossfade 120ms" that was never implemented): loading cards
+      no longer flash black while scrolling the feed or building the tree.
+    - Studio: importing a model no longer snaps the camera to the object —
+      the composed view stays. New camera buttons: look at average origin of
+      selected, look at bounding-box centre of selected, fit selected in view.
+    - Studio: `.studio-stage`/`.stage-top` no longer intercept pointer
+      events, so gizmo handles, orbit drags and mesh taps anywhere above the
+      W/E/R toolbar finally reach the canvas (only the real controls grab).

@@ -5,6 +5,23 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 
+- [x] **Feed/tree/studio bugfix round** (agent arena, 2026-08-18, SPEC
+      AMENDMENT 48):
+      - Posters and live previews render from the model's authored camera
+        when it has one (auto-fit only as fallback); AMENDMENT 6's
+        "ALWAYS auto-fit" wording corrected.
+      - Live-preview pool reuses released slots + evicts offscreen ones
+        (before: only the first N cards of a feed could ever animate, and
+        STATIC rejection leaked the container).
+      - Thread map animates its nodes via the same pool (was static posters
+        only).
+      - 120ms plate→poster→live crossfade in feed + tree (SPEC CARD
+        crossfade had never been implemented; loading cards flashed black).
+      - Studio no longer auto-frames the camera on import; added look-at
+        average origin / look-at bounding-box center / fit-selected buttons.
+      - Studio stage/topbar no longer intercept pointer events — gizmos
+        above the W/E/R toolbar are pressable again.
+
 - [x] **Branch integration + remaining security hardening** (agent arena,
       2026-08-17). Merged the sidecar-import work and then synced main's
       integrated studio-tools PR. Closed the audit's two open findings:

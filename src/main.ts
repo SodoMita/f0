@@ -396,6 +396,9 @@ async function boot(): Promise<void> {
       else if (m === 'front') studio.setCameraState({ rotationDeg: [0, 0, 0] })
       else if (m === 'top') studio.setCameraState({ rotationDeg: [0, 0, 89.9] })
       else if (m === 'side') studio.setCameraState({ rotationDeg: [0, 90, 0] })
+      else if (m === 'origin') studio.lookAtSelectedOrigin()
+      else if (m === 'center') studio.lookAtSelectedCenter()
+      else if (m === 'fit-sel') studio.fitSelected()
       refreshCameraControls()
     }))
 
@@ -561,6 +564,7 @@ async function boot(): Promise<void> {
   graphics.register(studio.scene, 'studio', () => studio.scene.activeCamera)
   for (const offscreen of assets.offscreenScenes()) graphics.register(offscreen, 'offscreen')
   graphics.register(board.previewScene, 'offscreen')
+  graphics.register(threadView.previewScene, 'offscreen')
 
   let settingsPanel: SettingsPanel | undefined
   settingsPanel = new SettingsPanel(settings, caps, {

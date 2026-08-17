@@ -14,7 +14,7 @@ import { GLTF2Export } from '@babylonjs/serializers/glTF/2.0/glTFSerializer'
 import type { FormEngine } from '../core/engine'
 import { toFile } from '../model/poster'
 import { validateGLB, type LimitReport } from '../model/limits'
-import { worldCenter, worldRadius } from '../model/facing'
+import { worldCenter, worldRadius, frameDistance } from '../model/facing'
 
 import { theme } from '../theme'
 
@@ -43,6 +43,7 @@ import { importModelFiles } from '../model/importSidecar'
 import { UtilityLayerRenderer } from '@babylonjs/core/Rendering/utilityLayerRenderer'
 import { GizmoManager } from '@babylonjs/core/Gizmos/gizmoManager'
 import type { AbstractMesh } from '@babylonjs/core/Meshes/abstractMesh'
+import { Mesh } from '@babylonjs/core/Meshes/mesh'
 import { PointerEventTypes } from '@babylonjs/core/Events/pointerEvents'
 import { FreeCamera } from '@babylonjs/core/Cameras/freeCamera'
 import { Vector3 as V3 } from '@babylonjs/core/Maths/math.vector'
@@ -367,6 +368,88 @@ export class Studio {
     this.form?.kick(500)
   }
 
+  // ---- view helpers: the camera does NOT auto-look at content any more.
+  // Importing a model keeps the composed view; these buttons frame it.
+
+  /**
+   * The meshes the view helpers operate on: the current selection (with its
+   * descendants), else the whole imported model, else the typed text.
+   */
+  private selectedSet(): AbstractMesh[] {
+    if (this.selection) {
+      const out = [this.selection]
+      for (const d of this.selection.getDescendants(true)) {
+        if (d instanceof Mesh) out.push(d)
+      }
+      return out
+    }
+    if (this.container) return this.container.meshes.filter((m) => m.name !== '__root__')
+    if (this.textMesh) return [this.textMesh.mesh]
+    return []
+  }
+
+  /** Average of the world origins (pivots) of the selected meshes. */
+  private selectionOrigin(): Vector3 | null {
+    const set = this.selectedSet()
+    if (!set.length) return null
+    const acc = new Vector3()
+    for (const m of set) {
+      m.computeWorldMatrix(true)
+      acc.addInPlace(m.getAbsolutePosition())
+    }
+    return acc.scaleInPlace(1 / set.length)
+  }
+
+  /** World AABB of the selection (union over the selected meshes). */
+  private selectionBounds(): { min: Vector3; max: Vector3; center: Vector3; radius: number } | null {
+    const set = this.selectedSet()
+    if (!set.length) return null
+    const min = new Vector3(Infinity, Infinity, Infinity)
+    const max = new Vector3(-Infinity, -Infinity, -Infinity)
+    for (const m of set) {
+      m.computeWorldMatrix(true)
+      const bb = m.getBoundingInfo().boundingBox
+      min.minimizeInPlace(bb.minimumWorld)
+      max.maximizeInPlace(bb.maximumWorld)
+    }
+    const center = min.add(max).scaleInPlace(0.5)
+    const radius = Math.max(0.001, Vector3.Distance(min, max) / 2)
+    return { min, max, center, radius }
+  }
+
+  /** Point the camera at the average origin of the selected meshes. */
+  lookAtSelectedOrigin(): void {
+    const origin = this.selectionOrigin()
+    if (!origin) return
+    this.setCameraState({ target: [origin.x, origin.y, origin.z] })
+  }
+
+  /** Point the camera at the bounding-box centre of the selected meshes. */
+  lookAtSelectedCenter(): void {
+    const b = this.selectionBounds()
+    if (!b) return
+    this.setCameraState({ target: [b.center.x, b.center.y, b.center.z] })
+  }
+
+  /** Fit the selected meshes in view (keeps the current view direction). */
+  fitSelected(): void {
+    const b = this.selectionBounds()
+    if (!b) return
+    const eng = this.form.engine
+    const aspect = eng.getRenderWidth() / Math.max(1, eng.getRenderHeight())
+    const target: [number, number, number] = [b.center.x, b.center.y, b.center.z]
+    if (this.camera.mode === 1) {
+      // ortho: size the frustum to the bounds (half-height drives left/right
+      // via aspect; radius keeps the state panel's "dist" consistent).
+      const h = Math.max(0.1, Math.max(b.max.y - b.min.y, (b.max.x - b.min.x) / Math.max(0.2, aspect)) * 0.55)
+      this.setCameraState({ target, radius: h / 0.55 })
+    } else {
+      const dir = this.camera.getDirection(Vector3.Forward())
+      const dist = frameDistance(b.min, b.max, b.center, dir, this.camera.fov || 0.7, aspect, 0.86)
+      this.setCameraState({ target, radius: Math.max(0.05, dist) })
+    }
+  }
+
   // ---- user cameras: add / select / edit / remove ----
   private makeCameraNode(state: CameraState, name: string): ArcRotateCamera {
     const target = new Vector3(state.target[0], state.target[1], state.target[2])
@@ -481,10 +564,8 @@ export class Studio {
       throw new Error(report.reason)
     }
     const file = toFile(result.glb, result.filename)
-    const center = worldCenter(result.container)
-    const radius = worldRadius(result.container)
-    this.camera.setTarget(center)
-    this.camera.radius = Math.max(0.6, radius * 2.6)
+    // The camera keeps the composed view: importing must NOT snap it to the
+    // model. Framing is explicit (frame / fit-selected / look-at buttons).
     const imported: ImportedModel = { file, bytes, report, sourceFormat: result.sourceFormat }
     this.imported = imported
     const first = result.container.meshes.find((m) => m.name !== '__root__') ?? null

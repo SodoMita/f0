@@ -1,6 +1,8 @@
 import { AbstractEngine } from '@babylonjs/core/Engines/abstractEngine'
 import { Scene } from '@babylonjs/core/scene'
 import { FreeCamera } from '@babylonjs/core/Cameras/freeCamera'
+import { Camera } from '@babylonjs/core/Cameras/camera'
+import { Quaternion } from '@babylonjs/core/Maths/math.vector'
 import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight'
 import { DirectionalLight } from '@babylonjs/core/Lights/directionalLight'
 import { RenderTargetTexture } from '@babylonjs/core/Materials/Textures/renderTargetTexture'
@@ -17,6 +19,13 @@ import { dominantFacing, worldBox, frameDistance } from '../model/facing'
 import { validateGLBCached } from '../model/limits'
 import { graphics } from '../render/graphics'
 
+/** Model bytes + the preferred authored camera (v3 `preview-camera` index). */
+export interface PreviewModel {
+  bytes: Uint8Array
+  sha256: string
+  cameraIndex?: number
+}
+
 interface Slot {
   index: number
   rtt: RenderTargetTexture
@@ -24,7 +33,10 @@ interface Slot {
   container: AssetContainer | null
   anims: AnimationGroup[]
   postId: string | null
-  phase: number
+  /** a load is in flight for this slot (the slot may not be live yet) */
+  pending: boolean
+  /** whether the post was in the last visible set handed to tick() */
+  visible: boolean
   facing: Vector3
   lastRenderAt: number
 }
@@ -44,8 +56,16 @@ export interface PreviewPoolOptions {
 
 /**
  * Bounded RenderTargetTexture pool (step 6 / 03 §5). One hidden stage scene;
- * each slot gets its own camera + RTT with an isolated renderList. Refresh is
- * interleaved (00 §3.12). Static/failed posts are remembered (00 §3.5).
+ * each slot gets its own camera + RTT. Refresh is interleaved (00 §3.12).
+ * Static/failed posts are remembered (00 §3.5).
+ *
+ * Slots are REUSED, not spent: a released slot goes back into the free list
+ * and the next request reuses it (previously every request allocated a new
+ * slot up to maxSlots and the pool then silently refused every later post —
+ * only the first N cards of a feed could ever animate). At capacity the pool
+ * evicts a live slot — preferring one that scrolled out of view, then the
+ * least recently rendered — and notifies via onRelease so the card can fall
+ * back to its poster.
  */
 export class PreviewPool {
   readonly stage: Scene
@@ -54,13 +74,16 @@ export class PreviewPool {
   private byPost = new Map<string, Slot>()
   private rejected = new Map<string, 'STATIC' | 'FAILED'>()
   private loading = new Set<string>()
-  private frame = 0
   opts: PreviewPoolOptions
   onLive: ((postId: string, rtt: RenderTargetTexture) => void) | null = null
+  /** A live slot was evicted (or scrolled away) — drop the card back to its poster. */
+  onRelease: ((postId: string) => void) | null = null
+  /** A load finished (success or not) — callers may retry queued requests. */
+  onLoadDone: (() => void) | null = null
 
   constructor(
     engine: AbstractEngine,
-    private getModel: (postId: string) => Promise<{ bytes: Uint8Array; sha256: string } | undefined>,
+    private getModel: (postId: string) => Promise<PreviewModel | undefined>,
     opts?: Partial<PreviewPoolOptions>,
   ) {
     this.opts = { maxSlots: 6, rttWidth: 448, rttHeight: 280, slotsPerFrame: 2, targetFps: PREVIEW_FPS, ...opts }
@@ -119,7 +142,7 @@ export class PreviewPool {
     return false
   }
 
-  /** Free every live slot (used when the board goes off screen). */
+  /** Free every live slot (used when the board/thread goes off screen). */
   releaseAll(): void {
     for (const id of [...this.byPost.keys()]) this.release(id)
   }
@@ -130,8 +153,19 @@ export class PreviewPool {
   request(postId: string): boolean {
     if (this.byPost.has(postId) || this.loading.has(postId)) return true
     if (this.rejected.has(postId)) return false
-    if (this.slots.length >= this.opts.maxSlots) return false
-    const slot = this.makeSlot()
+    // Reuse a released slot first — the old code counted spent slots against
+    // the budget forever, so past the first screenful NOTHING could animate.
+    let slot: Slot | null | undefined = this.slots.find((s) => !s.postId && !s.pending)
+    if (!slot && this.slots.length < this.opts.maxSlots) {
+      slot = this.makeSlot()
+      this.slots.push(slot)
+    }
+    if (!slot) slot = this.pickEvictable()
+    if (!slot) return false // every slot mid-load; retry on onLoadDone
+    // An evicted slot still holds its previous model: free it first (also
+    // fires onRelease so its card falls back to its poster).
+    if (slot.postId) this.release(slot.postId)
+    slot.pending = true
     this.loading.add(postId)
     void this.load(slot, postId)
     return true
@@ -140,12 +174,14 @@ export class PreviewPool {
   release(postId: string): void {
     const slot = this.byPost.get(postId)
     if (!slot) return
-    this.byPost.delete(postId)
+    const had = this.byPost.delete(postId)
     for (const a of slot.anims) a.stop()
     slot.anims = []
     if (slot.container) { slot.container.removeAllFromScene(); slot.container.dispose() }
     slot.container = null
     slot.postId = null
+    slot.visible = false
+    if (had) this.onRelease?.(postId)
   }
 
   /** Advance one frame; render only the slots whose turn it is.
@@ -156,7 +192,6 @@ export class PreviewPool {
    * frustum (maxZ) excludes the others.
    */
   tick(visible?: ReadonlySet<string>): void {
-    this.frame++
     // Two throttles: a per-slot frame budget (targetFps) and a cap on how
     // many slots may be drawn in one frame. A live preview is a full offscreen
     // model render at 512x320 — running every slot at display rate was the
@@ -166,13 +201,27 @@ export class PreviewPool {
     let budget = Math.max(1, this.opts.slotsPerFrame)
     for (const slot of this.slots) {
       if (!slot.postId) continue
+      slot.visible = !visible || visible.has(slot.postId)
       // offscreen cards keep their model but stop drawing
-      if (visible && !visible.has(slot.postId)) continue
+      if (!slot.visible) continue
       if (now - slot.lastRenderAt < minGap) continue
       this.renderSlot(slot)
       slot.lastRenderAt = now
       if (--budget <= 0) break
     }
+  }
+
+  /**
+   * Choose a live slot to recycle for a new request. Only slots that scrolled
+   * out of view are eligible: evicting a VISIBLE card would make the caller
+   * re-request it immediately (its request gate only clears when the post
+   * goes offscreen), ping-ponging cards between poster and live preview.
+   */
+  private pickEvictable(): Slot | null {
+    const offscreen = this.slots.filter((s) => s.postId && !s.pending && !s.visible)
+    if (!offscreen.length) return null
+    offscreen.sort((a, b) => a.lastRenderAt - b.lastRenderAt)
+    return offscreen[0]
   }
 
   private renderSlot(slot: Slot): void {
@@ -204,44 +253,71 @@ export class PreviewPool {
     rtt.clearColor = new Color4(0, 0, 0, 0)
     const camera = new FreeCamera(`slot-cam-${index}`, Vector3.Zero(), this.stage)
     const slot: Slot = {
-      index, rtt, camera, container: null, anims: [], postId: null, phase: index,
+      index, rtt, camera, container: null, anims: [], postId: null, pending: false, visible: false,
       facing: new Vector3(0, 0, 1), lastRenderAt: 0,
     }
-    this.slots.push(slot)
     return slot
   }
 
   private async load(slot: Slot, postId: string): Promise<void> {
     let container: AssetContainer | null = null
+    // setMaxSlots() may dispose this slot while the download/parse is in
+    // flight — bail out before touching its dead rtt/camera.
+    const alive = (): boolean => this.slots.includes(slot) && !slot.camera.isDisposed()
     try {
       const model = await this.getModel(postId)
-      if (!model) throw new Error('download failed')
+      if (!model || !alive()) throw new Error('download failed')
       const report = validateGLBCached(model.bytes, model.sha256)
       if (!report.ok) throw new Error(report.reason)
 
       container = await LoadAssetContainerAsync(model.bytes, this.stage, { pluginExtension: '.glb' })
+      if (!alive()) { container.dispose(); throw new Error('slot recycled') }
       graphics.applyToContainer(container)
       for (const m of container.meshes) {
         if (m.material) m.material.backFaceCulling = false
       }
 
       const { min, max, center, radius } = worldBox(container)
-      const facing = dominantFacing(container)
-
       const offset = new Vector3(slot.index * 800, 0, 0)
       const root = new TransformNode(`stage-${slot.index}`, this.stage)
       for (const node of container.rootNodes) node.parent = root
       root.position = offset
       const wc = center.add(offset)
 
-      slot.facing = facing.clone()
-      const fov = 0.7
-      const dist = frameDistance(min, max, center, facing.scale(-1), fov, this.opts.rttWidth / this.opts.rttHeight, 0.86)
-      slot.camera.position = wc.add(facing.scale(dist))
-      slot.camera.setTarget(wc)
-      slot.camera.fov = fov
-      slot.camera.minZ = Math.max(0.001, (dist - radius) * 0.2)
-      slot.camera.maxZ = dist + radius * 6
+      // Camera policy matches the poster: the model's own camera when it has
+      // one (v3 preview-camera index → first imported), auto-fit as fallback.
+      const cameraIndex = model.cameraIndex ?? 0
+      const authored = cameraIndex >= 0 && cameraIndex < container.cameras.length ? container.cameras[cameraIndex] : null
+      if (authored) {
+        authored.computeWorldMatrix()
+        const quat = new Quaternion()
+        authored.getWorldMatrix().decompose(undefined, quat, slot.camera.position)
+        slot.camera.rotationQuaternion.copyFrom(quat)
+        slot.camera.fov = authored.fov || 0.7
+        if (authored.mode === Camera.ORTHOGRAPHIC_CAMERA) {
+          slot.camera.mode = Camera.ORTHOGRAPHIC_CAMERA
+          slot.camera.orthoTop = authored.orthoTop ?? 1
+          slot.camera.orthoBottom = authored.orthoBottom ?? -1
+          slot.camera.orthoLeft = authored.orthoLeft ?? -1
+          slot.camera.orthoRight = authored.orthoRight ?? 1
+        } else {
+          slot.camera.mode = Camera.PERSPECTIVE_CAMERA
+        }
+        slot.facing = authored.getDirection(Vector3.Forward())
+      } else {
+        const facing = dominantFacing(container)
+        const fov = 0.7
+        const dist = frameDistance(min, max, center, facing.scale(-1), fov, this.opts.rttWidth / this.opts.rttHeight, 0.86)
+        slot.camera.mode = Camera.PERSPECTIVE_CAMERA
+        slot.camera.position = wc.add(facing.scale(dist))
+        slot.camera.setTarget(wc)
+        slot.camera.fov = fov
+        slot.facing = facing.clone()
+      }
+      // Display-only clips: authored near/far often cuts tiny/offset models.
+      const dist = Vector3.Distance(slot.camera.position, wc)
+      slot.camera.minZ = Math.max(0.0001, Math.min(slot.camera.minZ, (dist - radius) * 0.2))
+      slot.camera.maxZ = Math.max(slot.camera.maxZ, dist + radius * 6)
 
       slot.container = container
       slot.anims = container.animationGroups.filter((g) => g.targetedAnimations.length > 0)
@@ -252,7 +328,13 @@ export class PreviewPool {
       this.renderSlot(slot)
 
       if (slot.anims.length === 0) {
-        this.release(postId)
+        // Static model: free the slot for the next request. (The old code
+        // called release() here, which looks the post up in byPost — but a
+        // slot only enters byPost AFTER this check, so the container leaked
+        // and the slot stayed spent forever.)
+        slot.postId = null
+        if (slot.container) { slot.container.removeAllFromScene(); slot.container.dispose() }
+        slot.container = null
         this.rejected.set(postId, 'STATIC')
         return
       }
@@ -263,7 +345,9 @@ export class PreviewPool {
       slot.postId = null
       this.rejected.set(postId, 'FAILED')
     } finally {
+      slot.pending = false
       this.loading.delete(postId)
+      this.onLoadDone?.()
     }
   }
 }

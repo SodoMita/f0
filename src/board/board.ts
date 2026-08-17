@@ -63,6 +63,13 @@ interface CardSlot {
   replyCount: number
   /** last count painted into badgeTex (avoids needless canvas + upload) */
   badgeDrawn: number
+  // 120ms crossfade between card states (plate -> poster -> live, SPEC CARD:
+  // "Crossfade 120ms"). Hard texture swaps made loading cards FLASH black as
+  // the feed scrolled; the fade is driven by tick() below.
+  opacity: number
+  fadeFrom: number
+  fadeTo: number
+  fadeStart: number
 }
 
 interface Row {
@@ -180,8 +187,23 @@ export class Board {
       this.invalidate()
       setCardTexture(slot.mat, rtt)
       setCardWhite(slot.mat)
-      setCardOpacity(slot.mat, 1)
+      this.fadeTo(slot, 1)
       setCardFlip(slot.mat, 'rtt')
+    }
+    // The pool evicts a live slot when a newer visible card needs it: the
+    // evicted card must fall back to its poster instead of sampling a
+    // recycled render target.
+    this.previewPool.onRelease = (postId) => {
+      const slot = this.cards.find((c) => c.meta?.eventId === postId)
+      if (!slot || !slot.live) return
+      slot.live = null
+      this.showPoster(slot)
+      this.invalidate()
+    }
+    // A finished load frees a slot; re-run the request pass so queued cards
+    // (request() returned false while every slot was mid-load) get their turn.
+    this.previewPool.onLoadDone = () => {
+      this.refreshVisibility()
     }
     this.scene.onBeforeRenderObservable.add(() => this.tick())
 
@@ -205,6 +227,8 @@ export class Board {
   isAnimating(): boolean {
     if (this.dragging || Math.abs(this.velocity) > 0.0005) return true
     if (this.pendingSettle) return true   // waiting to start deferred loads
+    // A card crossfade is 120ms of continuous opacity change.
+    if (this.cards.some((s) => s.fadeStart > 0 && s.mesh.isEnabled())) return true
     // Loading rings advance in 12 discrete steps; only ask for a frame when
     // the next step is actually due (a spinning ring is not a reason to draw
     // the whole board 60x a second).
@@ -381,6 +405,7 @@ export class Board {
         mesh, mat, poster: null, live: null, requested: false, row: null, failed: false, spinSince: 0,
         shadow, shadowMat, spinner, spinnerMat,
         badge, badgeMat, badgeTex, replyCount: 0, badgeDrawn: -1, footprint: null,
+        opacity: 0, fadeFrom: 0, fadeTo: 0, fadeStart: 0,
       }
       this.cards.push(slot)
       mesh.metadata = { card: slot }
@@ -552,7 +577,7 @@ export class Board {
       slot.requested = true // nothing to download; skip the drive() round trip
       setCardTexture(slot.mat, cached)
       setCardWhite(slot.mat)
-      setCardOpacity(slot.mat, 1)
+      this.setOpacityNow(slot, 1)
       setCardFlip(slot.mat, 'raw')
       slot.footprint = this.assets?.getFootprint(row.meta) ?? null
       slot.shadow.setEnabled(!!slot.footprint && this.contactStrength > 0)
@@ -562,7 +587,7 @@ export class Board {
       // Placeholder: a barely-there plate, not an opaque slab.
       setCardTexture(slot.mat, null)
       setCardTint(slot.mat, row.meta.tint || theme.panel)
-      setCardOpacity(slot.mat, 0.14)
+      this.setOpacityNow(slot, 0.14)
       setCardFlip(slot.mat, 'raw')
       slot.shadow.setEnabled(false)
     }
@@ -621,18 +646,16 @@ export class Board {
       if (settled && inRange) {
         if (!slot.requested) { slot.requested = true; this.drive(slot) }
         if (slot.poster && !slot.live) {
+          // same gate as drive() — hints or poster-render knowledge
           const animated = this.assets?.isAnimated(row.meta)
-          if (animated ?? (row.meta.animHint || row.meta.cameraCount > 0)) {
+          if ((animated ?? (row.meta.animHint || row.meta.cameraCount > 0)) && !this.previewPool.isRejected(row.meta.eventId)) {
             this.previewPool.request(row.meta.eventId)
           }
         }
       } else if (slot.live && Math.abs(y) >= near) {
         this.previewPool.release(row.meta.eventId)
         slot.live = null
-        if (slot.poster) {
-          setCardTexture(slot.mat, slot.poster); setCardWhite(slot.mat)
-          setCardOpacity(slot.mat, 1); setCardFlip(slot.mat, 'raw')
-        }
+        this.showPoster(slot)
       }
     }
   }
@@ -755,6 +778,15 @@ export class Board {
       this.invalidate(2)
     }
     this.previewPool.tick(this.visiblePosts)
+    // Drive the 120ms card crossfades (SPEC CARD "Crossfade 120ms").
+    const now = performance.now()
+    for (const slot of this.cards) {
+      if (!slot.fadeStart) continue
+      const t = Math.min(1, (now - slot.fadeStart) / 120)
+      slot.opacity = slot.fadeFrom + (slot.fadeTo - slot.fadeFrom) * t
+      setCardOpacity(slot.mat, slot.opacity)
+      if (t >= 1) { slot.opacity = slot.fadeTo; slot.fadeStart = 0 }
+    }
     // spin the loading rings (stepped, like the HTML one)
     const step = (Math.PI * 2) / 12
     const phase = Math.floor(performance.now() / SPIN_STEP_MS) * step
@@ -814,7 +846,7 @@ export class Board {
         // can never stop rendering.
         slot.failed = true
         slot.spinner.setEnabled(false)
-        setCardOpacity(slot.mat, 0.09)
+        this.fadeTo(slot, 0.09)
         this.invalidate(2)
         return
       }
@@ -822,7 +854,7 @@ export class Board {
       slot.poster = tex
       setCardTexture(slot.mat, tex)
       setCardWhite(slot.mat)
-      setCardOpacity(slot.mat, 1)
+      this.fadeTo(slot, 1)
       setCardFlip(slot.mat, 'raw')
       slot.footprint = assets.getFootprint(meta) ?? null
       slot.spinSince = 0
@@ -830,11 +862,45 @@ export class Board {
       slot.shadow.setEnabled(!!slot.footprint && this.contactStrength > 0)
       this.positionExtras(slot)
       this.invalidate(2)
+      // Animated? v3 hints else preflight (SPEC FEED). Locally rendered
+      // posters already parsed the GLB, so isAnimated is known; thumb-tagged
+      // posts carry anim/cameras hints. The pool itself rejects STATIC.
       const animated = assets.isAnimated(meta)
-      if ((animated ?? (meta.animHint || meta.cameraCount > 0)) && this.visiblePosts.has(meta.eventId)) {
+      if ((animated ?? (meta.animHint || meta.cameraCount > 0)) && !this.previewPool.isRejected(meta.eventId) && this.visiblePosts.has(meta.eventId)) {
         this.previewPool.request(meta.eventId)
       }
     })
+  }
+
+  /** Set the card opacity right now (slot (re)binding, teardown). */
+  private setOpacityNow(slot: CardSlot, v: number): void {
+    slot.opacity = v
+    slot.fadeStart = 0
+    setCardOpacity(slot.mat, v)
+  }
+
+  /** Ramp the card opacity to v over 120ms (content arriving — never flash). */
+  private fadeTo(slot: CardSlot, v: number): void {
+    if (slot.fadeStart === 0 && slot.opacity === v) return
+    slot.fadeFrom = slot.opacity
+    slot.fadeTo = v
+    slot.fadeStart = performance.now()
+    this.invalidate()
+  }
+
+  /** Show the card's poster texture (fallback after a live preview is released). */
+  private showPoster(slot: CardSlot): void {
+    if (slot.poster) {
+      setCardTexture(slot.mat, slot.poster)
+      setCardWhite(slot.mat)
+      this.fadeTo(slot, 1)
+      setCardFlip(slot.mat, 'raw')
+    } else {
+      setCardTexture(slot.mat, null)
+      setCardTint(slot.mat, slot.meta?.tint || theme.panel)
+      this.fadeTo(slot, 0.14)
+      setCardFlip(slot.mat, 'raw')
+    }
   }
 
   private release(slot: CardSlot): void {
@@ -845,11 +911,7 @@ export class Board {
     }
     if (slot.live) {
       slot.live = null
-      if (slot.poster) {
-        setCardTexture(slot.mat, slot.poster); setCardWhite(slot.mat); setCardOpacity(slot.mat, 1); setCardFlip(slot.mat, 'raw')
-      } else {
-        setCardTexture(slot.mat, null); setCardTint(slot.mat, slot.meta?.tint || theme.panel); setCardOpacity(slot.mat, 0.14); setCardFlip(slot.mat, 'raw')
-      }
+      this.showPoster(slot)
     }
   }
 

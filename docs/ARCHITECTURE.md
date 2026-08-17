@@ -32,14 +32,19 @@ src/
     board.ts         responsive 1–3 col grid, scroll+inertia, tap→viewer, reply badges
     cardMaterial.ts  unlit quad ShaderMaterial (tex.rgb*tint, tex.a*opacity),
                      needAlphaBlending OPTION, deterministic zero flips
-    previewPool.ts   bounded live-preview RTT slots; scene.render() per slot
+    previewPool.ts   bounded live-preview RTT slots (REUSED, evicted when
+                     offscreen); scene.render() per slot; authored-camera aware
     threadView.ts    2D reply-tree map: tidy tree + elbow edges, native-pointer
-                     pan / pinch / wheel-zoom-about-cursor, fit-to-content
+                     pan / pinch / wheel-zoom-about-cursor, fit-to-content;
+                     live previews for animated nodes
   viewer/
     viewer.ts        detail viewer: orbit + authored cameras, lights, camera-
                      parented spotlight backdrop, contact shadow, stats
   studio/
-    studio.ts        import-only stub (publish/audio TBD)
+    studio.ts        import → edit → publish: gizmos, free-fly camera, stored
+                     cameras, text tool; camera stays where the user composed
+                     it (explicit look-at-origin / look-at-center / fit-selected
+                     buttons instead of auto-framing on import)
   core/gfx.ts        flatCamera (THE orientation contract), backdrop/spotlight/
                      contact-shadow textures, colour helpers (shade/luminance)
   theme.ts           colors, LIMITS, DEFAULTS (relays/blossoms), kind numbers
@@ -113,7 +118,12 @@ card shader. It fails if a probe corner lands in the wrong place.
   rendering through `camera.outputRenderTarget` the **scene** owns the clear;
   `rtt.clearColor` alone never runs.
 
-## Auto-fit contract
+## Camera-policy contract
+
+Posters and live previews render from the model's OWN camera when the GLB
+ships one (first imported camera, or the v3 `preview-camera` index for live
+previews) — the card must show the view the author framed. Auto-fit is the
+fallback for models without a camera.
 
 `frameDistance(min, max, center, forward, fovY, aspect, fill)` projects all 8
 AABB corners into the camera basis and solves both frustum planes, so a wide
