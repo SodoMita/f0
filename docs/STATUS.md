@@ -13,8 +13,10 @@ move it to **Done** with a commit reference. One agent per area.
       Image-generation studies are collected in `generated.html`. The latest
       Aero Wire pass first generated a dedicated style reference, then supplied
       it with the primary-page edit: one uninterrupted vertical thread of
-      different-sized, frameless 3D models with minimal transparent controls
-      (`mockups/generated/round-04/`). Production Babylon scenes are
+      different-sized, frameless 3D models with minimal transparent controls.
+      Round 05 extends Aero Wire to viewer, branch map, and studio, with
+      purpose-built portrait concepts for all four views
+      (`mockups/generated/round-05/`). Production Babylon scenes are
       intentionally untouched. `npm run build` remains green.
 
 - [x] **Security audit fixes — external-URI GLB fetch, kind-5 author
