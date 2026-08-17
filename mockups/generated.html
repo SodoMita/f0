@@ -4,125 +4,86 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#dff8ff" />
-  <meta name="description" content="FORM/0 responsive Aero Wire concepts: frameless 3D world, viewer, branch map, and studio." />
-  <title>FORM/0 — Responsive Aero Wire system</title>
+  <meta name="description" content="Wordless FORM/0 Aero Wire interface concepts." />
+  <title>FORM/0 — Wordless Aero Wire concepts</title>
   <link rel="stylesheet" href="./mockup.css" />
 </head>
-<body class="generated-page aero-gallery">
+<body class="generated-page aero-gallery wordless-gallery">
   <div class="app-shell">
-    <aside class="app-rail" aria-label="Primary navigation">
-      <a class="logo" href="./index.html" aria-label="FORM/0 home">F<i>/</i>0</a>
+    <aside class="app-rail" aria-label="Concept navigation">
+      <a class="logo icon-only" href="#primary" data-icon="orbit" aria-label="Primary view"></a>
       <nav class="rail-nav">
-        <a class="rail-link icon-only" href="./index.html" data-icon="world" aria-label="world"></a>
-        <a class="rail-link icon-only" href="./thread.html" data-icon="thread" aria-label="threads"></a>
-        <a class="rail-link create icon-only" href="./studio.html" data-icon="plus" aria-label="create"></a>
-        <a class="rail-link icon-only" href="./viewer.html" data-icon="cube" aria-label="viewer"></a>
-        <a class="rail-link active icon-only" href="./generated.html" data-icon="spark" aria-label="generated concepts" aria-current="page"></a>
+        <a class="rail-link icon-only" href="#primary" data-icon="world" aria-label="Primary view"></a>
+        <a class="rail-link icon-only" href="#viewer" data-icon="cube" aria-label="Viewer"></a>
+        <a class="rail-link icon-only" href="#thread" data-icon="thread" aria-label="Branch map"></a>
+        <a class="rail-link icon-only" href="#studio" data-icon="shapes" aria-label="Studio"></a>
+        <a class="rail-link icon-only" href="#mobile" data-icon="phone" aria-label="Mobile views"></a>
       </nav>
-      <div class="rail-foot"><span class="signal" title="concept generation complete"></span><span class="player-mark">AI</span></div>
+      <div class="rail-foot"><span class="signal" title="Complete"></span><span class="player-mark icon-only" data-icon="spark"></span></div>
     </aside>
 
-    <main class="concept-page">
-      <header class="concept-head">
-        <a class="icon-button icon-only" href="./index.html" data-icon="back" aria-label="Back to interactive mockups"></a>
-        <span class="micro-label">visual research / round 05</span>
+    <main class="concept-page" id="primary">
+      <header class="concept-head wordless-head">
+        <span class="wordless-mark icon-only" data-icon="orbit" aria-hidden="true"></span>
         <span class="topbar-spacer"></span>
-        <span class="concept-status micro-label"><i></i>desktop + mobile system</span>
+        <a class="icon-button icon-only" href="./generated/round-04/style-reference-aero.jpg" target="_blank" rel="noopener" data-icon="sliders" aria-label="Style reference"></a>
+        <span class="signal" aria-hidden="true"></span>
       </header>
 
-      <section class="concept-intro">
-        <div>
-          <span class="micro-label">FORM/0 × Aero Wire / responsive</span>
-          <h1>OBJECTS FIRST.<br><em>EVERY VIEW.</em></h1>
-        </div>
-        <p>The frameless Aero Wire system now extends across the viewer, branch map, and studio. Each page has a purpose-built portrait composition—not a desktop layout squeezed onto a phone.</p>
-      </section>
-
-      <section class="concept-grid aero-concepts" aria-label="Frameless vertical thread concept">
+      <section class="concept-grid wordless-latest" aria-label="Primary concept">
         <article class="concept-card concept-wide">
-          <a href="./generated/round-04/primary-vertical-thread.jpg" target="_blank" rel="noopener">
-            <img src="./generated/round-04/primary-vertical-thread.jpg" alt="Frameless FORM/0 primary view with different-sized 3D models on one vertical thread" />
+          <a href="./generated/round-06/primary-desktop.jpg" target="_blank" rel="noopener">
+            <img src="./generated/round-06/primary-desktop.jpg" alt="Wordless frameless primary view on a single vertical thread" />
           </a>
-          <footer><span><b>01</b> PRIMARY / SINGLE VERTICAL THREAD</span><a href="./index.html">current HTML mockup ↗</a></footer>
-        </article>
-
-        <article class="concept-card concept-wide style-reference-card">
-          <a href="./generated/round-04/style-reference-aero.jpg" target="_blank" rel="noopener">
-            <img src="./generated/round-04/style-reference-aero.jpg" alt="Aero Wire style reference for transparent controls, frameless objects, and a vertical thread" />
-          </a>
-          <footer><span><b>02</b> STYLE REFERENCE / AERO WIRE</span><span>reference supplied with page edit</span></footer>
+          <footer class="icon-footer"><span class="icon-only" data-icon="world" aria-hidden="true"></span><span class="icon-only" data-icon="desktop" aria-hidden="true"></span><a class="icon-only" href="./generated/round-06/primary-desktop.jpg" target="_blank" rel="noopener" data-icon="expand" aria-label="Open primary concept"></a></footer>
         </article>
       </section>
 
-      <div class="archive-title">
-        <span class="micro-label">desktop system / frameless model views</span>
-        <span></span>
-      </div>
-
-      <section class="concept-grid round-five-desktop" aria-label="Desktop Aero Wire concepts">
+      <div class="wordless-divider" id="viewer"><span class="icon-only" data-icon="cube" aria-hidden="true"></span><i></i></div>
+      <section class="concept-grid" aria-label="Wordless desktop viewer">
         <article class="concept-card concept-wide">
-          <a href="./generated/round-05/viewer-desktop.jpg" target="_blank" rel="noopener"><img src="./generated/round-05/viewer-desktop.jpg" alt="Desktop Aero Wire model viewer with a frameless coral creation and transparent controls" /></a>
-          <footer><span><b>D1</b> VIEWER / DESKTOP</span><a href="./viewer.html">current HTML mockup ↗</a></footer>
-        </article>
-        <article class="concept-card concept-wide">
-          <a href="./generated/round-05/thread-desktop.jpg" target="_blank" rel="noopener"><img src="./generated/round-05/thread-desktop.jpg" alt="Desktop Aero Wire branch map made from frameless 3D models" /></a>
-          <footer><span><b>D2</b> BRANCH MAP / DESKTOP</span><a href="./thread.html">current HTML mockup ↗</a></footer>
-        </article>
-        <article class="concept-card concept-wide">
-          <a href="./generated/round-05/studio-desktop.jpg" target="_blank" rel="noopener"><img src="./generated/round-05/studio-desktop.jpg" alt="Desktop Aero Wire studio with transparent tools around a frameless blue creation" /></a>
-          <footer><span><b>D3</b> STUDIO / DESKTOP</span><a href="./studio.html">current HTML mockup ↗</a></footer>
+          <a href="./generated/round-06/viewer-desktop.jpg" target="_blank" rel="noopener"><img src="./generated/round-06/viewer-desktop.jpg" alt="Wordless frameless desktop model viewer" /></a>
+          <footer class="icon-footer"><span class="icon-only" data-icon="cube" aria-hidden="true"></span><span class="icon-only" data-icon="desktop" aria-hidden="true"></span><a class="icon-only" href="./generated/round-06/viewer-desktop.jpg" target="_blank" rel="noopener" data-icon="expand" aria-label="Open viewer concept"></a></footer>
         </article>
       </section>
 
-      <div class="archive-title mobile-title">
-        <span class="micro-label">mobile portrait / purpose-built compositions</span>
-        <span></span>
-      </div>
-
-      <section class="mobile-concept-grid" aria-label="Mobile portrait Aero Wire concepts">
-        <article class="concept-card mobile-concept-card">
-          <a href="./generated/round-05/primary-mobile.jpg" target="_blank" rel="noopener"><img src="./generated/round-05/primary-mobile.jpg" alt="Portrait mobile single vertical thread with frameless 3D models" /></a>
-          <footer><span><b>M1</b> PRIMARY</span></footer>
-        </article>
-        <article class="concept-card mobile-concept-card">
-          <a href="./generated/round-05/viewer-mobile.jpg" target="_blank" rel="noopener"><img src="./generated/round-05/viewer-mobile.jpg" alt="Portrait mobile frameless model viewer" /></a>
-          <footer><span><b>M2</b> VIEWER</span></footer>
-        </article>
-        <article class="concept-card mobile-concept-card">
-          <a href="./generated/round-05/thread-mobile.jpg" target="_blank" rel="noopener"><img src="./generated/round-05/thread-mobile.jpg" alt="Portrait mobile spatial branch map with real frameless 3D models" /></a>
-          <footer><span><b>M3</b> BRANCH MAP</span></footer>
-        </article>
-        <article class="concept-card mobile-concept-card">
-          <a href="./generated/round-05/studio-mobile.jpg" target="_blank" rel="noopener"><img src="./generated/round-05/studio-mobile.jpg" alt="Portrait mobile Aero Wire creation studio" /></a>
-          <footer><span><b>M4</b> STUDIO</span></footer>
+      <div class="wordless-divider" id="thread"><span class="icon-only" data-icon="thread" aria-hidden="true"></span><i></i></div>
+      <section class="concept-grid" aria-label="Wordless desktop branch map">
+        <article class="concept-card concept-wide">
+          <a href="./generated/round-06/thread-desktop.jpg" target="_blank" rel="noopener"><img src="./generated/round-06/thread-desktop.jpg" alt="Wordless desktop branch map with frameless 3D models" /></a>
+          <footer class="icon-footer"><span class="icon-only" data-icon="thread" aria-hidden="true"></span><span class="icon-only" data-icon="desktop" aria-hidden="true"></span><a class="icon-only" href="./generated/round-06/thread-desktop.jpg" target="_blank" rel="noopener" data-icon="expand" aria-label="Open branch-map concept"></a></footer>
         </article>
       </section>
 
-      <div class="archive-title">
-        <span class="micro-label">previous exploration / round 02</span>
-        <span></span>
-      </div>
-
-      <section class="concept-grid archived-concepts" aria-label="Previous generated FORM/0 concepts">
+      <div class="wordless-divider" id="studio"><span class="icon-only" data-icon="shapes" aria-hidden="true"></span><i></i></div>
+      <section class="concept-grid" aria-label="Wordless desktop studio">
         <article class="concept-card concept-wide">
-          <a href="./generated/world-concept.jpg" target="_blank" rel="noopener"><img src="./generated/world-concept.jpg" alt="Earlier generated FORM/0 world interface" /></a>
-          <footer><span><b>A1</b> WORLD / FRAMED STUDY</span><a href="./index.html">interactive mockup ↗</a></footer>
-        </article>
-        <article class="concept-card">
-          <a href="./generated/viewer-concept.jpg" target="_blank" rel="noopener"><img src="./generated/viewer-concept.jpg" alt="Earlier generated FORM/0 viewer" /></a>
-          <footer><span><b>A2</b> VIEWER</span><a href="./viewer.html">interactive mockup ↗</a></footer>
-        </article>
-        <article class="concept-card">
-          <a href="./generated/thread-concept.jpg" target="_blank" rel="noopener"><img src="./generated/thread-concept.jpg" alt="Earlier generated FORM/0 branch map" /></a>
-          <footer><span><b>A3</b> BRANCH MAP</span><a href="./thread.html">interactive mockup ↗</a></footer>
-        </article>
-        <article class="concept-card concept-wide">
-          <a href="./generated/studio-concept.jpg" target="_blank" rel="noopener"><img src="./generated/studio-concept.jpg" alt="Earlier generated FORM/0 studio" /></a>
-          <footer><span><b>A4</b> STUDIO</span><a href="./studio.html">interactive mockup ↗</a></footer>
+          <a href="./generated/round-06/studio-desktop-final.jpg" target="_blank" rel="noopener"><img src="./generated/round-06/studio-desktop-final.jpg" alt="Wordless desktop creation studio" /></a>
+          <footer class="icon-footer"><span class="icon-only" data-icon="shapes" aria-hidden="true"></span><span class="icon-only" data-icon="desktop" aria-hidden="true"></span><a class="icon-only" href="./generated/round-06/studio-desktop-final.jpg" target="_blank" rel="noopener" data-icon="expand" aria-label="Open studio concept"></a></footer>
         </article>
       </section>
 
-      <footer class="concept-end"><span class="micro-label">image-generated exploration / not production UI</span><span class="orbit-mark" aria-hidden="true"></span></footer>
+      <div class="wordless-divider" id="mobile"><span class="icon-only" data-icon="phone" aria-hidden="true"></span><i></i></div>
+      <section class="mobile-concept-grid" aria-label="Wordless portrait mobile concepts">
+        <article class="concept-card mobile-concept-card">
+          <a href="./generated/round-06/primary-mobile.jpg" target="_blank" rel="noopener"><img src="./generated/round-06/primary-mobile.jpg" alt="Wordless portrait primary view" /></a>
+          <footer class="icon-footer"><span class="icon-only" data-icon="world" aria-hidden="true"></span><a class="icon-only" href="./generated/round-06/primary-mobile.jpg" target="_blank" rel="noopener" data-icon="expand" aria-label="Open mobile primary concept"></a></footer>
+        </article>
+        <article class="concept-card mobile-concept-card">
+          <a href="./generated/round-06/viewer-mobile.jpg" target="_blank" rel="noopener"><img src="./generated/round-06/viewer-mobile.jpg" alt="Wordless portrait viewer" /></a>
+          <footer class="icon-footer"><span class="icon-only" data-icon="cube" aria-hidden="true"></span><a class="icon-only" href="./generated/round-06/viewer-mobile.jpg" target="_blank" rel="noopener" data-icon="expand" aria-label="Open mobile viewer concept"></a></footer>
+        </article>
+        <article class="concept-card mobile-concept-card">
+          <a href="./generated/round-06/thread-mobile.jpg" target="_blank" rel="noopener"><img src="./generated/round-06/thread-mobile.jpg" alt="Wordless portrait branch map" /></a>
+          <footer class="icon-footer"><span class="icon-only" data-icon="thread" aria-hidden="true"></span><a class="icon-only" href="./generated/round-06/thread-mobile.jpg" target="_blank" rel="noopener" data-icon="expand" aria-label="Open mobile branch-map concept"></a></footer>
+        </article>
+        <article class="concept-card mobile-concept-card">
+          <a href="./generated/round-06/studio-mobile-final.jpg" target="_blank" rel="noopener"><img src="./generated/round-06/studio-mobile-final.jpg" alt="Wordless portrait creation studio" /></a>
+          <footer class="icon-footer"><span class="icon-only" data-icon="shapes" aria-hidden="true"></span><a class="icon-only" href="./generated/round-06/studio-mobile-final.jpg" target="_blank" rel="noopener" data-icon="expand" aria-label="Open mobile studio concept"></a></footer>
+        </article>
+      </section>
+
+      <footer class="concept-end wordless-end"><span class="orbit-mark" aria-hidden="true"></span></footer>
     </main>
   </div>
   <script type="module" src="./mockup.js"></script>

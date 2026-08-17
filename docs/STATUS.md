@@ -15,8 +15,10 @@ move it to **Done** with a commit reference. One agent per area.
       it with the primary-page edit: one uninterrupted vertical thread of
       different-sized, frameless 3D models with minimal transparent controls.
       Round 05 extends Aero Wire to viewer, branch map, and studio, with
-      purpose-built portrait concepts for all four views
-      (`mockups/generated/round-05/`). Production Babylon scenes are
+      purpose-built portrait concepts for all four views. Round 06 removes all
+      visible language from the desktop/mobile application concepts and their
+      gallery, using consistent wire icons for every state and action
+      (`mockups/generated/round-06/`). Production Babylon scenes are
       intentionally untouched. `npm run build` remains green.
 
 - [x] **Security audit fixes — external-URI GLB fetch, kind-5 author

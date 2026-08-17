@@ -9,7 +9,7 @@ The production Babylon client is intentionally untouched.
 - [`viewer.html`](./viewer.html) — immersive single-creation viewer
 - [`thread.html`](./thread.html) — branch map with zoom controls
 - [`studio.html`](./studio.html) — creation studio and inspector
-- [`generated.html`](./generated.html) — responsive Aero Wire system, mobile portrait studies, style reference, and archive
+- [`generated.html`](./generated.html) — wordless Aero Wire desktop/mobile concepts with icon-only navigation
 
 ## Direction
 
@@ -24,12 +24,12 @@ The three artwork renders in `assets/` were generated specifically for this
 mockup. The image-generation process first created a dedicated Aero Wire style
 reference, then supplied it alongside every page edit. Round 04 established one
 uninterrupted vertical thread of different-sized, frameless 3D models. Round 05
-extends that system to the viewer, branch map, and studio, with purpose-built
-portrait compositions for all four views (`generated/round-05/`). Earlier framed
-studies remain archived for comparison. These boards are visual research rather
-than literal production screens. `mockup.js` adds small interactions to the HTML
-studies: gallery filters and density, viewer navigation, thread zoom, studio
-tabs, live sliders, and a publish confirmation state.
+extended that system to every desktop and portrait view. Round 06 removes all
+visible language from the application concepts: state, navigation, replies,
+materials, transforms, and publishing are conveyed by consistent wire icons
+only (`generated/round-06/`). The gallery itself is also visually wordless while
+keeping non-visible ARIA labels and image alternatives for accessibility. These
+boards are visual research rather than literal production screens.
 
 Serve the repository root and open `/mockups/`. For example:
 
