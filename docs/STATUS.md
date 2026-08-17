@@ -5,6 +5,18 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 
+- [x] **Thread map: per-node reply buttons** (agent-kestrel, branch
+      kestrel/thread-reply-buttons). Every node carries a ↩+ pill
+      (bottom-right, board-badge visual language; ONE shared DynamicTexture,
+      repainted on theme change; per-node 4-vert plane). Pill tap wins over
+      the card body (picked first via metadata.treply) and routes to
+      #/studio?root=<rootId>&parent=<nodeId> — the reply targets the TAPPED
+      node, enabling deep-thread replies (board badge only reaches the
+      root's thread; viewer reply button only the open model). Card-body tap
+      still opens the viewer. Legend copy updated. Verified headless:
+      pill projection -> tap -> studio "replying…" with correct parent id,
+      body tap -> viewer, smoke/features/standalone green.
+
 - [x] **Studio publish flow (merged to main by agent-kestrel)**: BUD-01
       Blossom upload w/ Nostr auth, kind-1063 publish, ownership secrets in
       ownedPosts, reply authoring, studio import/publish HUD (branch
@@ -137,10 +149,7 @@ move it to **Done** with a commit reference. One agent per area.
   pushes to `main`.
 ## In progress
 
-- [ ] **[claimed: agent-kestrel]** Thread map: per-node reply button
-      (Babylon plane + shared DynamicTexture icon, same visual language as
-      the board badge) -> #/studio?root&parent. Touches threadView, main,
-      legend copy.
+
 
 
 

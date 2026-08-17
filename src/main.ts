@@ -63,7 +63,15 @@ async function boot(): Promise<void> {
   const viewer = new Viewer(engine)
   const studio = new Studio(engine)
   const threadView = new ThreadView(engine)
-  threadView.setup(assets, index, (meta) => router.go({ name: 'viewer', id: meta.eventId }))
+  threadView.setup(
+    assets, index,
+    (meta) => router.go({ name: 'viewer', id: meta.eventId }),
+    // reply pill on a thread node -> studio compose, replying to THAT node
+    (meta) => {
+      const rootId = meta.refs.rootId ?? meta.eventId
+      router.go({ name: 'studio', rootId, parentId: meta.eventId })
+    },
+  )
 
   // ---------- HUD modules (legend / network / errors) ----------
   const legend = new Legend()
