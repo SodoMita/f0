@@ -137,6 +137,12 @@ export class AssetCache {
     } catch { return undefined }
   }
 
+  /** Render a poster for an arbitrary (not-yet-published) model blob. */
+  async renderPosterFor(model: Blob): Promise<Blob> {
+    const result = await this.poster.render(model)
+    return result.blob
+  }
+
   dispose(): void {
     for (const t of this.posterTex.values()) t.dispose()
     this.posterTex.clear()
