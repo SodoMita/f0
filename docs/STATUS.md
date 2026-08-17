@@ -5,6 +5,19 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 
+- [x] **Instant scroll-return + animations survive reloads** (agent-kestrel,
+      branch kestrel/instant-rebind). (1) bind() re-applies a RAM-cached
+      poster texture synchronously (assets.peekPoster) instead of resetting
+      the slot to placeholder+spinner and re-queueing an async job —
+      scroll-back re-show measured 0.8ms (was ~500ms+: settle-gate 150ms +
+      queue + IDB decode). Footprint/shadow restored in the same frame.
+      (2) The 'animated' flag is persisted in the poster cache
+      (:anim key) and restored by cachedPoster() — after a reload the app
+      knew a cached poster but forgot the post animates (events carry no
+      hint), so live previews were never requested again. Verified: warm
+      reload spins the live slot up again. (3) isSettled(): a slow inertia
+      glide counts as settled — the glide tail no longer delays loads ~1s.
+
 - [x] **Thread map: per-node reply buttons** (agent-kestrel, branch
       kestrel/thread-reply-buttons). Every node carries a ↩+ pill
       (bottom-right, board-badge visual language; ONE shared DynamicTexture,
@@ -149,10 +162,7 @@ move it to **Done** with a commit reference. One agent per area.
   pushes to `main`.
 ## In progress
 
-- [ ] **[claimed: agent-kestrel]** Board fixes: instant card re-show on
-      scroll-return (sync rebind from the RAM poster cache) + animated flag
-      persisted with the poster cache so live previews survive reloads.
-      Touches core/assets, board/board.
+
 
 
 
