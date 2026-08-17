@@ -163,7 +163,7 @@ async function boot(): Promise<void> {
     const prevAccept = fileInput.accept
     const prevMultiple = fileInput.multiple
     // glB, glTF + sidecars (.bin + images), or OBJ + .mtl + images.
-    fileInput.accept = '.glb,.gltf,.obj,.mtl,.bin,.png,.jpg,.jpeg,.webp,.ktx2,.basis'
+    fileInput.accept = '.glb,.gltf,.obj,.mtl,.bin,.png,.jpg,.jpeg,.webp,.gif,.bmp,.tga,.ktx2'
     fileInput.multiple = true
     fileInput.addEventListener('change', async () => {
       const picked = fileInput.files ? Array.from(fileInput.files) : []

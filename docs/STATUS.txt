@@ -10,7 +10,10 @@ tidy tree, per-node reply pills) · HTML HUD · demand-driven render loop
 + deletion UI · studio publish flow (BUD-01 + kind-1063 + ownership; merged) ·
 first-run legend · network panel · error sheets · local Draco + GLB limits ·
 standalone + GitHub Pages + mirrors (site branch / jsDelivr / githack) ·
-perf passes (workers, PBO, curated loader) · design passes + mirror/flip fixes.
+perf passes (workers, PBO, curated loader) · design passes + mirror/flip fixes ·
+sidecar import branch merged and hardened (local-only, bounded, validate-first) ·
+AES-GCM deletion-key envelopes · schema-validated persisted settings · data-URI
+texture decoded-memory guards.
 
 INCIDENT LOG: Pages had a 503 outage (artifact fine, re-run); main was once
 force-pushed away and restored — unlanded work kept on salvage/dev-rewrite

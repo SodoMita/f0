@@ -18,6 +18,8 @@ export interface SettingDef {
   step?: number
   unit?: string
   options?: { value: string; label: string }[]
+  /** Device-backed selects (audio input/output) may persist an option that is discovered at runtime. */
+  allowCustomOption?: boolean
   hint?: string
   /** greyed out with this reason when the platform can't do it */
   unavailable?: (caps: Capabilities) => string | null
@@ -287,12 +289,12 @@ export const SETTINGS: SettingDef[] = [
   // -------------------------------------------------------------- audio
   {
     id: 'audioOutput', label: 'Output device', group: 'audio', kind: 'select', default: 'default',
-    options: [{ value: 'default', label: 'System default' }],
+    options: [{ value: 'default', label: 'System default' }], allowCustomOption: true,
     unavailable: (c) => (c.audioOutputSelection ? null : 'This browser does not support choosing an audio output device (setSinkId).'),
   },
   {
     id: 'audioInput', label: 'Input device', group: 'audio', kind: 'select', default: 'default',
-    options: [{ value: 'default', label: 'System default' }],
+    options: [{ value: 'default', label: 'System default' }], allowCustomOption: true,
     unavailable: (c) => (c.audioInputSelection ? null : 'No media device enumeration in this browser.'),
     hint: 'Used by in-app recording (spec 05b) once it lands.',
   },
@@ -322,9 +324,64 @@ export const SETTINGS: SettingDef[] = [
 
 export const BY_ID: Record<string, SettingDef> = Object.fromEntries(SETTINGS.map((s) => [s.id, s]))
 
+const HEX_COLOR = /^#[0-9a-f]{6}$/i
+const SAFE_OPTION = /^[^\u0000-\u001f\u007f]{1,512}$/
+
+/**
+ * Accept a persisted/UI value only when it matches its schema entry. Keeping
+ * this next to SETTINGS makes the schema the source of truth for both the UI
+ * and the trust boundary at IndexedDB.
+ */
+export function normalizeSettingValue(def: SettingDef, value: unknown): string | number | boolean | undefined {
+  switch (def.kind) {
+    case 'toggle':
+      return typeof value === 'boolean' ? value : undefined
+    case 'slider':
+    case 'number': {
+      if (typeof value !== 'number' || !Number.isFinite(value)) return undefined
+      if (def.min !== undefined && value < def.min) return undefined
+      if (def.max !== undefined && value > def.max) return undefined
+      return value
+    }
+    case 'select': {
+      if (typeof value !== 'string') return undefined
+      if (def.options?.some((o) => o.value === value)) return value
+      return def.allowCustomOption && SAFE_OPTION.test(value) ? value : undefined
+    }
+    case 'color':
+    case 'swatches':
+      return typeof value === 'string' && HEX_COLOR.test(value) ? value : undefined
+    // Actions and capability readouts are not state and must never be loaded
+    // from persistence, even if a tampered record contains matching keys.
+    case 'action':
+    case 'info':
+      return undefined
+  }
+}
+
 export function defaults(): SettingsValues {
   const out: SettingsValues = {}
   for (const s of SETTINGS) if (s.default !== undefined) out[s.id] = s.default as string | number | boolean
+  return out
+}
+
+/** Drop unknown, mistyped, non-finite and out-of-range persisted values. */
+export function sanitizeSettingsRecord(saved: unknown): SettingsValues {
+  const out = defaults()
+  if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return out
+  const record = saved as Record<string, unknown>
+  for (const def of SETTINGS) {
+    if (!Object.prototype.hasOwnProperty.call(record, def.id)) continue
+    const normalized = normalizeSettingValue(def, record[def.id])
+    if (normalized !== undefined) out[def.id] = normalized
+  }
+
+  // These values are individually legal at the schema edges (10), but an
+  // equal/inverted clip range makes Babylon's projection matrix unusable.
+  if (Number(out.nearClip) >= Number(out.farClip)) {
+    out.nearClip = BY_ID.nearClip.default as number
+    out.farClip = BY_ID.farClip.default as number
+  }
   return out
 }
 

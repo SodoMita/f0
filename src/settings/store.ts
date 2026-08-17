@@ -1,5 +1,8 @@
 import { get, put } from '../protocol/storage'
-import { defaults, PRESETS, PRESET_KEYS, type SettingsValues } from './schema'
+import {
+  BY_ID, defaults, normalizeSettingValue, sanitizeSettingsRecord,
+  PRESETS, PRESET_KEYS, type SettingsValues,
+} from './schema'
 
 const KEY = 'default'
 const STORE = 'settings' as const
@@ -27,15 +30,17 @@ export class SettingsStore {
       this.values = { ...defaults(), ...PRESETS.medium, preset: 'medium' }
       return this.values
     }
-    if (saved && typeof saved === 'object') {
-      const merged = { ...defaults() }
-      for (const [k, v] of Object.entries(saved)) {
-        if (v === null || v === undefined) continue
-        if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') merged[k] = v
+    if (saved && typeof saved === 'object' && !Array.isArray(saved)) {
+      // Legacy: inertia used to be stored 0..1. Migrate before applying the
+      // current schema validator so an old 0.7 remains 70%, not 0.7%.
+      const candidate: Record<string, unknown> = { ...saved }
+      if (typeof saved.inertia === 'number' && saved.inertia >= 0 && saved.inertia <= 1) {
+        candidate.inertia = Math.round(saved.inertia * 100)
       }
-      // legacy: inertia used to be stored 0..1
-      if (typeof saved.inertia === 'number' && saved.inertia <= 1) merged.inertia = Math.round(saved.inertia * 100)
-      this.values = merged
+      this.values = sanitizeSettingsRecord(candidate)
+      // Repair the record once; otherwise the same poisoned values would be
+      // re-read and discarded at every boot.
+      await put(STORE, KEY, this.values)
     }
     return this.values
   }
@@ -47,13 +52,20 @@ export class SettingsStore {
 
   /** Apply a patch. `fromPreset` keeps the preset selector from flipping to Custom. */
   set(patch: SettingsValues, fromPreset = false): void {
-    const changed: string[] = []
-    for (const [k, v] of Object.entries(patch)) {
-      if (this.values[k] === v) continue
-      this.values[k] = v
-      changed.push(k)
+    const accepted: SettingsValues = {}
+    for (const [id, value] of Object.entries(patch)) {
+      const def = BY_ID[id]
+      if (!def) continue
+      const normalized = normalizeSettingValue(def, value)
+      if (normalized !== undefined) accepted[id] = normalized
     }
+
+    // Re-run record-level invariants (notably nearClip < farClip) after the
+    // individually valid patch has been applied.
+    const next = sanitizeSettingsRecord({ ...this.values, ...accepted })
+    const changed = Object.keys(next).filter((id) => this.values[id] !== next[id])
     if (!changed.length) return
+    this.values = next
     if (!fromPreset && changed.some((k) => PRESET_KEYS.includes(k)) && this.values.preset !== 'custom') {
       this.values.preset = 'custom'
       changed.push('preset')

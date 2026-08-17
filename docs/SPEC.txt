@@ -49,3 +49,9 @@ shows its real model through the model's MAIN camera applied as the MODEL
 transform vs a static camera (model rotated by inverse of main-cam rotation, at
 the node's camera position; thread camera is only a position) — when centered,
 thread view == model's main-camera view. Fall back to auto-fit when no camera.
+44-47 SECURITY: owned-post deletion secrets are AES-256-GCM envelopes under a
+non-extractable IndexedDB key (event-id AAD; plaintext migration); persisted
+settings/network shapes are schema/type/range validated; sidecar imports are
+local-only and preflighted (128 files/20 MiB, GLB validate-before-load,
+glTF/OBJ complexity caps); embedded and data-URI image dimensions/MIME/decoded
+memory are checked before decode, with SVG/unknown formats failing closed.

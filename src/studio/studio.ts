@@ -38,7 +38,7 @@ export interface ImportedModel {
   file: File
   bytes: Uint8Array
   report: LimitReport
-  sourceFormat: 'glb' | 'gltf' | 'generated'
+  sourceFormat: 'glb' | 'gltf' | 'obj' | 'generated'
 }
 
 /**
@@ -236,7 +236,7 @@ export class Studio {
     const radius = worldRadius(result.container)
     this.camera.setTarget(center)
     this.camera.radius = Math.max(0.6, radius * 2.6)
-    const imported: ImportedModel = { file, bytes, report, sourceFormat: result.filename.endsWith('.glb') ? 'glb' : 'gltf' }
+    const imported: ImportedModel = { file, bytes, report, sourceFormat: result.sourceFormat }
     this.imported = imported
     this.form.kick(1000)
     return imported
@@ -252,8 +252,12 @@ export class Studio {
    * returns those original bytes pass-through (no re-export). Otherwise
    * (typed text) exports the studio scene to GLB.
    */
-  async getContentForPublish(): Promise<{ blob: Blob; filename: string; sourceFormat: 'glb' | 'generated' }> {
-    if (this.imported) return { blob: this.imported.file, filename: this.imported.file.name, sourceFormat: 'glb' }
+  async getContentForPublish(): Promise<{ blob: Blob; filename: string; sourceFormat: 'glb' | 'gltf' | 'obj' | 'generated' }> {
+    if (this.imported) return {
+      blob: this.imported.file,
+      filename: this.imported.file.name,
+      sourceFormat: this.imported.sourceFormat,
+    }
     // Text mode: make sure the geometry exists.
     if (!this.textMesh) this.rebuildText()
     const res = await GLTF2Export.GLBAsync(this.scene, 'text', {

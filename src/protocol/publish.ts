@@ -52,7 +52,7 @@ function sha256Hex(bytes: Uint8Array): Promise<string> {
  *  1. hash model + poster
  *  2. upload both to every configured Blossom server (BUD-01, kind-24242 auth)
  *  3. build the signed kind-1063 event with v2 + v3 tags
- *  4. broadcast to relays, persist the per-post secret for later deletion
+ *  4. persist the encrypted deletion capability, then broadcast to relays
  *
  * Partial relay failure is reported (amber), not thrown. Blossom failure on
  * every replica is thrown — there is no point publishing an event with no
@@ -81,69 +81,76 @@ export async function publishModel(
   const [modelSha, posterSha] = await Promise.all([sha256Hex(modelBytes), sha256Hex(posterBytes)])
 
   const secret = generateSecretKey()
-  const blossom = new BlossomClient(deps.blossoms)
+  try {
+    const blossom = new BlossomClient(deps.blossoms)
 
-  deps.onProgress?.({ stage: 'poster' })
-  const posterUploads = await blossom.upload(poster, secret)
-  if (!posterUploads.length) throw new Error('Poster upload failed on every Blossom server.')
+    deps.onProgress?.({ stage: 'poster' })
+    const posterUploads = await blossom.upload(poster, secret)
+    if (!posterUploads.length) throw new Error('Poster upload failed on every Blossom server.')
 
-  deps.onProgress?.({ stage: 'blossom' })
-  const modelUploads = await blossom.upload(model, secret)
-  if (!modelUploads.length) throw new Error('Model upload failed on every Blossom server.')
+    deps.onProgress?.({ stage: 'blossom' })
+    const modelUploads = await blossom.upload(model, secret)
+    if (!modelUploads.length) throw new Error('Model upload failed on every Blossom server.')
 
-  const now = Math.floor(Date.now() / 1000)
-  const role = input.role ?? 'root'
-  const tags: string[][] = [
-    ['t', FORM_ZERO_TAG],
-    ['t', role === 'reply' ? REPLY_TAG : ROOT_TAG],
-    ['m', 'model/gltf-binary'],
-    ['x', modelSha],
-    ['ox', modelSha],
-    ['size', String(model.size)],
-    ['color', tint],
-    ['v', 'form-zero:3'],
-  ]
-  for (const u of modelUploads) tags.push(['url', u.url])
-  for (const s of new Set(modelUploads.map((u) => new URL(u.url).origin))) tags.push(['server', s])
-  tags.push(['thumb', posterUploads[0].url])
-  tags.push(['thumb-x', posterSha])
-  tags.push(['thumb-size', String(poster.size)])
-  tags.push(['thumb-dim', '512x320'])
-  if (input.filename) tags.push(['filename', input.filename.slice(0, 120)])
-  if (input.sourceFormat) tags.push(['source-format', input.sourceFormat])
-  if (typeof input.previewCamera === 'number') tags.push(['preview-camera', String(input.previewCamera)])
-  if (typeof input.previewAnimation === 'number') tags.push(['preview-animation', String(input.previewAnimation)])
-  if (input.cameraCount) tags.push(['cameras', String(input.cameraCount)])
-  if (input.hasAnimation) tags.push(['anim', '1'])
-  if (input.hasAudio) tags.push(['audio', '1'])
-  if (role === 'reply' && input.rootId && input.parentId) {
-    tags.push(['e', input.rootId, input.relayHint ?? '', 'root'])
-    tags.push(['e', input.parentId, input.relayHint ?? '', 'reply'])
+    const now = Math.floor(Date.now() / 1000)
+    const role = input.role ?? 'root'
+    const tags: string[][] = [
+      ['t', FORM_ZERO_TAG],
+      ['t', role === 'reply' ? REPLY_TAG : ROOT_TAG],
+      ['m', 'model/gltf-binary'],
+      ['x', modelSha],
+      ['ox', modelSha],
+      ['size', String(model.size)],
+      ['color', tint],
+      ['v', 'form-zero:3'],
+    ]
+    for (const u of modelUploads) tags.push(['url', u.url])
+    for (const s of new Set(modelUploads.map((u) => new URL(u.url).origin))) tags.push(['server', s])
+    tags.push(['thumb', posterUploads[0].url])
+    tags.push(['thumb-x', posterSha])
+    tags.push(['thumb-size', String(poster.size)])
+    tags.push(['thumb-dim', '512x320'])
+    if (input.filename) tags.push(['filename', input.filename.slice(0, 120)])
+    if (input.sourceFormat) tags.push(['source-format', input.sourceFormat])
+    if (typeof input.previewCamera === 'number') tags.push(['preview-camera', String(input.previewCamera)])
+    if (typeof input.previewAnimation === 'number') tags.push(['preview-animation', String(input.previewAnimation)])
+    if (input.cameraCount) tags.push(['cameras', String(input.cameraCount)])
+    if (input.hasAnimation) tags.push(['anim', '1'])
+    if (input.hasAudio) tags.push(['audio', '1'])
+    if (role === 'reply' && input.rootId && input.parentId) {
+      tags.push(['e', input.rootId, input.relayHint ?? '', 'root'])
+      tags.push(['e', input.parentId, input.relayHint ?? '', 'reply'])
+    }
+
+    const template: EventTemplate = { kind: MODEL_KIND, created_at: now, tags, content: '' }
+
+    // Compute the event id now (RelayPool.publish re-finalizes the same
+    // template+secret, so it yields the identical id).
+    const signed = finalizeEvent(template, secret)
+    const eventId = signed.id
+
+    // Persist the deletion capability before broadcasting. If the encrypted
+    // record cannot be stored (quota/CryptoKey clone failure), fail closed: do
+    // not publish a post this browser can no longer sign a deletion for.
+    await saveOwnedPost({
+      eventId,
+      secretKey: bytesToHex(secret),
+      modelSha256: modelSha,
+      modelUrls: modelUploads.map((u) => u.url),
+      posterUrl: posterUploads[0].url,
+      posterSha256: posterSha,
+      relays: deps.relays,
+      createdAt: now,
+      rootId: role === 'reply' ? input.rootId : eventId,
+      parentId: role === 'reply' ? input.parentId : undefined,
+    })
+
+    deps.onProgress?.({ stage: 'relay' })
+    const { ok, failed } = await deps.pool.publish(template, secret)
+    deps.onProgress?.({ stage: 'done', ok: ok.length, failed: failed.length })
+    return { eventId, ok, failed }
+  } finally {
+    secret.fill(0)
   }
-
-  const template: EventTemplate = { kind: MODEL_KIND, created_at: now, tags, content: '' }
-
-  // Compute the event id now (RelayPool.publish re-finalizes the same
-  // template+secret, so it yields the identical id).
-  const signed = finalizeEvent(template, secret)
-  const eventId = signed.id
-
-  deps.onProgress?.({ stage: 'relay' })
-  const { ok, failed } = await deps.pool.publish(template, secret)
-  await saveOwnedPost({
-    eventId,
-    secretKey: bytesToHex(secret),
-    modelSha256: modelSha,
-    modelUrls: modelUploads.map((u) => u.url),
-    posterUrl: posterUploads[0].url,
-    posterSha256: posterSha,
-    relays: deps.relays,
-    createdAt: now,
-    rootId: role === 'reply' ? input.rootId : eventId,
-    parentId: role === 'reply' ? input.parentId : undefined,
-  })
-
-  deps.onProgress?.({ stage: 'done', ok: ok.length, failed: failed.length })
-  return { eventId, ok, failed }
 }
 

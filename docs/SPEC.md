@@ -309,8 +309,10 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     could point at an arbitrary host for an unbounded download (tab crash)
     or a tracking request (viewer IP leak to a third party). The 20 MiB /
     2 MiB caps cover the container only, never external fetches. `data:`
-    URIs stay allowed (bounded by the JSON chunk cap). Vertex positions
-    with non-finite values (NaN/±Infinity) also fail validation — they
+    URIs stay allowed, but image data URIs are safe-MIME allowlisted and
+    dimension-scanned against texture-side + decoded-memory limits before
+    decode (compressed bytes are not a VRAM bound). Vertex positions with
+    non-finite values (NaN/±Infinity) also fail validation — they
     poison worldBox/frameDistance and render blank/invisible models.
 
 38. SECURITY: incoming kind-5 events tombstone ONLY the signer's own posts
@@ -364,4 +366,34 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     the view, the thread camera and the model's main camera show the same view.
     (Fall back to auto-fit when a model has no camera.) Nodes load models only
     near the viewport, same pipeline as the board.
+
+44. SECURITY: deletion ownership records are AES-256-GCM envelopes, never
+    plaintext secrets at rest. IndexedDB v4 stores one non-extractable
+    WebCrypto wrapping key in `keyring`; each `ownedPosts` ciphertext has a
+    random 96-bit IV and authenticates its event id as AAD. Legacy plaintext
+    records migrate one-way before use. Decryption/migration failures do not
+    reach the signing path. This is same-origin at-rest protection, not a
+    claim to defeat arbitrary same-origin script execution.
+
+45. SECURITY: persistence is a trust boundary. `SettingsStore` accepts only
+    known schema keys with exact types, finite in-range numbers, select
+    allowlists and valid colours; invalid values reset to defaults and the
+    repaired record is saved. Runtime patches use the same validator.
+    Cross-field projection invariants (`nearClip < farClip`) and persisted
+    network-config shapes are validated too.
+
+46. SECURITY: studio sidecar imports are fully local and bounded before
+    Babylon parses them. Exactly one `.glb`/`.gltf`/`.obj`, at most 128 files
+    and 20 MiB total; GLBs pass `validateGLB` before load; glTF structure,
+    buffers/accessors/depth/images and OBJ geometry/materials are preflighted.
+    Every glTF/OBJ/MTL dependency must resolve to an unambiguous selected
+    basename (safe glTF `data:` is the only exception); remote, absolute,
+    missing and ambiguous URIs fail closed. The exported GLB is validated
+    again before preview/publish.
+
+47. SECURITY: all embedded image paths—including `data:` image URIs—count
+    decoded RGBA bytes before decode. PNG, JPEG, WebP, GIF, BMP, TGA and KTX2
+    dimensions are read from bounded headers; unknown headers, unsafe SVG
+    data images, oversized sides and aggregate decoded-memory excess fail
+    closed.
 
