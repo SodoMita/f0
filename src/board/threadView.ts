@@ -72,6 +72,7 @@ export class ThreadView {
   private backdropTex: DynamicTexture
   private frameTex: DynamicTexture
   private spinnerTex: DynamicTexture
+  private form: FormEngine
   private rootFrameTex: DynamicTexture
   private background: string = theme.background
   private isDark = true
@@ -89,9 +90,16 @@ export class ThreadView {
   private attached = false
 
   constructor(engine: FormEngine) {
+    this.form = engine
     this.scene = new Scene(engine.engine)
     this.scene.clearColor = Color4.FromHexString(this.background + 'FF')
     this.scene.skipPointerMovePicking = true
+
+    // PERF: thread map animates only while node spinners are visible;
+    // pan/zoom redraws come from input kicks.
+    engine.addAnimationSource(() =>
+      engine.activeScene === this.scene &&
+      [...this.nodes.values()].some((n) => n.spinner.isEnabled()))
     this.camera = flatCamera(this.scene, 'thread-cam', 30)
 
     this.backdrop = MeshBuilder.CreatePlane('thread-bg', { width: 4, height: 4 }, this.scene)
@@ -111,6 +119,7 @@ export class ThreadView {
   }
 
   setBackground(hex: string): void {
+    this.form?.kick()
     this.background = hex
     this.isDark = luminance(hex) < 0.5
     this.scene.clearColor = Color4.FromHexString(hex + 'FF')
@@ -151,6 +160,7 @@ export class ThreadView {
   }
 
   async open(rootId: string): Promise<void> {
+    this.form.kick(1000)
     this.clear()
     this.generation++
     if (!this.spinObserver) {
@@ -215,6 +225,7 @@ export class ThreadView {
         setCardWhite(mat)
         setCardOpacity(mat, 1)
         spinner.setEnabled(false)
+        this.form.kick() // poster arrived; redraw the (possibly static) map
       })
 
       this.nodes.set(meta.eventId, { meta, mesh, mat, frame, frameMat, spinner, spinnerMat, x: p.x, y: p.y, w, h, depth: p.depth })
@@ -326,6 +337,7 @@ export class ThreadView {
 
   /** Frame the whole map with a margin. */
   fit(): void {
+    this.form?.kick()
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
     for (const n of this.nodes.values()) {
       minX = Math.min(minX, n.x - n.w / 2); maxX = Math.max(maxX, n.x + n.w / 2)

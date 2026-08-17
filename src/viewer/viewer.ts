@@ -44,6 +44,7 @@ export class Viewer {
   private glowMat: ShaderMaterial
   private background: string = theme.background
   private backdropDistance = 120
+  private form: FormEngine
   // Guards against overlapping models: every load takes a ticket, and a load
   // whose ticket is stale by the time its GLB finishes parsing throws its
   // container away instead of adding it to the scene.
@@ -51,6 +52,7 @@ export class Viewer {
   private pending = false
 
   constructor(engine: FormEngine) {
+    this.form = engine
     this.scene = new Scene(engine.engine)
     this.scene.clearColor = Color4.FromHexString(this.background + 'FF')
     this.orbit = new ArcRotateCamera('viewer-orbit', -Math.PI / 2, Math.PI / 2.2, 6, Vector3.Zero(), this.scene)
@@ -103,6 +105,19 @@ export class Viewer {
     setCardFlip(gm, 'dyn')
 
     this.scene.onBeforeRenderObservable.add(() => this.frameBackdrop())
+
+    // PERF: the viewer animates while a model animation plays OR while the
+    // orbit camera still glides on inertia after a released drag (input
+    // kicks cover the drag itself but not the glide tail).
+    engine.addAnimationSource(() =>
+      engine.activeScene === this.scene && (
+        !!this.active?.isPlaying ||
+        Math.abs(this.orbit.inertialAlphaOffset) > 1e-5 ||
+        Math.abs(this.orbit.inertialBetaOffset) > 1e-5 ||
+        Math.abs(this.orbit.inertialRadiusOffset) > 1e-4 ||
+        Math.abs(this.orbit.inertialPanningX) > 1e-4 ||
+        Math.abs(this.orbit.inertialPanningY) > 1e-4
+      ))
   }
 
   /** Keep the backdrop glued to the active camera and filling its frustum. */
@@ -124,6 +139,7 @@ export class Viewer {
   }
 
   setBackground(hex: string): void {
+    this.form.kick()
     this.background = hex
     this.scene.clearColor = Color4.FromHexString(hex + 'FF')
     paintSpotlight(this.backdropTex, hex)
@@ -140,6 +156,7 @@ export class Viewer {
   detach(): void { this.orbit.detachControl() }
 
   async load(blob: Blob, meta: ThreadMeta): Promise<void> {
+    this.form.kick(1000) // new model: render while textures/shaders warm up
     this.clear()
     const token = ++this.loadToken
     this.pending = true
@@ -202,6 +219,7 @@ export class Viewer {
   }
 
   applyCamera(idx: number): void {
+    this.form.kick()
     this.camIdx = idx
     if (idx >= 0 && this.imported[idx]) {
       this.orbit.detachControl()
@@ -252,6 +270,7 @@ export class Viewer {
   isPlaying(): boolean { return !!this.active?.isPlaying }
 
   toggleAnimation(): void {
+    this.form.kick()
     if (!this.active && this.anims[0]) this.active = this.anims[0]
     if (!this.active) return
     if (this.active.isPlaying) this.active.pause()

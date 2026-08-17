@@ -102,6 +102,7 @@ export class Board {
   private velocity = 0
   private inertia = 0.7
   private activePointers = new Set<number>()
+  private form!: FormEngine
 
   constructor(engine: FormEngine, cb: BoardCallbacks) {
     const isMobile = /Mobi|Android/i.test(navigator.userAgent)
@@ -141,6 +142,7 @@ export class Board {
       if (!slot) return
       slot.live = rtt
       slot.spinner.setEnabled(false)
+      this.form?.kick()
       setCardTexture(slot.mat, rtt)
       setCardWhite(slot.mat)
       setCardOpacity(slot.mat, 1)
@@ -151,10 +153,20 @@ export class Board {
     this.buildPool()
     this.resize()
     this.bindInput()
+
+    // PERF: tell the engine when the board actually animates. A static
+    // board (posters only, no motion) renders zero frames.
+    this.form = engine
+    engine.addAnimationSource(() =>
+      engine.activeScene === this.scene && (
+        Math.abs(this.velocity) > 0.0005 ||
+        this.cards.some((c) => c.mesh.isEnabled() && (c.live !== null || c.spinner.isEnabled()))
+      ))
   }
 
   /** Background colour follows the settings panel (viewer/thread/board). */
   setBackground(hex: string): void {
+    this.form?.kick()
     this.background = hex
     this.isDark = luminance(hex) < 0.5
     this.scene.clearColor = Color4.FromHexString(hex + 'FF')
@@ -176,6 +188,7 @@ export class Board {
   }
 
   setMetas(metas: ThreadMeta[]): void {
+    this.form?.kick()
     this.rows = metas.slice(0, LIMITS.boardRoots).map((meta, i) => ({
       meta,
       slot: this.cards[i],
@@ -186,6 +199,7 @@ export class Board {
   }
 
   setReplyCount(eventId: string, count: number): void {
+    this.form?.kick()
     const slot = this.cards.find((c) => c.meta?.eventId === eventId)
     if (!slot) return
     slot.replyCount = count
@@ -548,6 +562,7 @@ export class Board {
       this.positionExtras(slot)
       const animated = assets.isAnimated(meta)
       if (animated ?? (meta.animHint || meta.cameraCount > 0)) this.previewPool.request(meta.eventId)
+      this.form?.kick()
     })
   }
 
