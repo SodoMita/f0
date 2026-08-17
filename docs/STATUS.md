@@ -5,6 +5,14 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 
+- [x] **Object-first UI concept mockups** (Arena, 2026-08-17). Four standalone,
+      responsive HTML explorations in `mockups/`: world, viewer, thread map,
+      and studio. The direction combines warm museum-catalogue surfaces with
+      an ink navigation rail, coral/acid action signals, generated 3D artwork,
+      shared SVG iconography, mobile layouts, and small interactive states.
+      Production Babylon scenes are intentionally untouched. `npm run build`
+      remains green.
+
 - [x] **Security audit fixes — external-URI GLB fetch, kind-5 author
       check, Blossom redirect/URL hardening, standalone CSP** (agent arena).
       See docs/SPEC.md AMENDMENTS 37–40. (1) validateGLB now rejects ANY

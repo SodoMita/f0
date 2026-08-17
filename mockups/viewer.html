@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0d0d0b" />
+  <meta name="description" content="FORM/0 single-creation viewer interface mockup." />
+  <title>FORM/0 — Viewer UI mockup</title>
+  <link rel="stylesheet" href="./mockup.css" />
+</head>
+<body class="viewer-page" data-scene="paper">
+  <div class="app-shell viewer-shell">
+    <aside class="app-rail" aria-label="Primary navigation">
+      <a class="logo" href="./index.html" aria-label="FORM/0 home">F<i>/</i>0</a>
+      <nav class="rail-nav">
+        <a class="rail-link icon-only" href="./index.html" data-icon="world" aria-label="world"></a>
+        <a class="rail-link icon-only" href="./thread.html" data-icon="thread" aria-label="threads"></a>
+        <a class="rail-link create icon-only" href="./studio.html" data-icon="plus" aria-label="create"></a>
+        <a class="rail-link active icon-only" href="./viewer.html" data-icon="cube" aria-label="viewer" aria-current="page"></a>
+        <button class="rail-link icon-only" type="button" data-icon="sliders" aria-label="settings"></button>
+      </nav>
+      <div class="rail-foot"><span class="signal" title="relays connected"></span><span class="player-mark">0x</span></div>
+    </aside>
+
+    <main class="viewer-main">
+      <div class="viewer-stage">
+        <section class="object-stage" aria-label="Interactive 3D creation preview">
+          <div class="stage-topline">
+            <span class="micro-label">form / <span data-object-index>07</span></span>
+            <span class="stage-rule"></span>
+            <span class="micro-label" data-object-code>ORBIT/BLOOM</span>
+          </div>
+          <div class="viewer-object-wrap">
+            <img class="viewer-object" data-viewer-image src="./assets/orbit-bloom.jpg" alt="ORBIT/BLOOM digital sculpture" />
+          </div>
+          <div class="object-sequence"><strong data-object-index>07</strong><span>/ 28</span></div>
+          <div class="drag-cue">drag to orbit</div>
+        </section>
+
+        <aside class="object-panel" aria-label="Creation information">
+          <div class="object-panel-head">
+            <a class="logo" href="./index.html" aria-label="Back to world">F<i>/</i>0</a>
+            <button class="icon-button icon-only panel-dismiss" type="button" data-icon="close" data-info-toggle aria-label="Close information"></button>
+          </div>
+          <h1 class="object-title" data-object-code>ORBIT/BLOOM</h1>
+          <span class="object-id micro-label">object / <span data-object-index>07</span></span>
+          <div class="player-row"><span class="player-mark">7f</span><span>7f20…b81c</span><span class="signal"></span></div>
+
+          <div class="object-stats">
+            <div class="stat-row"><span>mesh</span><strong>18.4k tris</strong></div>
+            <div class="stat-row"><span>motion</span><strong>00:18</strong></div>
+            <div class="stat-row"><span>cameras</span><strong>03</strong></div>
+            <div class="stat-row"><span>born</span><strong>now</strong></div>
+          </div>
+
+          <div class="object-actions">
+            <a class="action-row" href="./thread.html" data-icon="thread"><span>branches</span><em>12</em></a>
+            <a class="action-row" href="./studio.html" data-icon="reply"><span>respond</span><em>R</em></a>
+            <button class="action-row" type="button" data-icon="heart" data-press aria-pressed="false"><span>keep</span><em>K</em></button>
+            <button class="action-row" type="button" data-icon="download"><span>save GLB</span><em>↓</em></button>
+          </div>
+        </aside>
+      </div>
+
+      <div class="viewer-controls" aria-label="Previous and next creation">
+        <button class="icon-button icon-only" type="button" data-icon="prev" data-viewer-prev aria-label="Previous creation"></button>
+        <button class="icon-button icon-only" type="button" data-icon="next" data-viewer-next aria-label="Next creation"></button>
+      </div>
+
+      <div class="viewer-dock" aria-label="Viewer controls">
+        <a class="icon-button icon-only" href="./index.html" data-icon="close" aria-label="Close viewer"></a>
+        <span class="dock-separator"></span>
+        <button class="icon-button icon-only" type="button" data-icon="play" data-viewer-play aria-label="Play motion" aria-pressed="false"></button>
+        <button class="icon-button icon-only" type="button" data-icon="camera" aria-label="Cycle camera"></button>
+        <div class="camera-steps" aria-label="Authored cameras">
+          <button class="camera-step" type="button" data-camera="-3" aria-label="Camera one"></button>
+          <button class="camera-step active" type="button" data-camera="0" aria-label="Camera two"></button>
+          <button class="camera-step" type="button" data-camera="3" aria-label="Camera three"></button>
+        </div>
+        <span class="dock-separator"></span>
+        <a class="icon-button icon-only" href="./thread.html" data-icon="thread" aria-label="Open branches"></a>
+        <button class="icon-button icon-only mobile-info-button" type="button" data-icon="info" data-info-toggle aria-label="Show information" aria-pressed="false"></button>
+        <button class="icon-button icon-only" type="button" data-icon="expand" aria-label="Enter immersive view"></button>
+      </div>
+    </main>
+  </div>
+  <script type="module" src="./mockup.js"></script>
+</body>
+</html>
