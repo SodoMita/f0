@@ -24,6 +24,42 @@ export class RelayPool {
     for (const url of this.urls) { this.setState(url, 'connecting'); void this.open(url) }
   }
 
+  /**
+   * Live re-configuration (network panel): tear down every connection and
+   * subscription, then reconnect with the new list. Stale URLs must not
+   * resurrect via the retry loop — open()/scheduleRetry() check membership.
+   */
+  applyRelays(urls: string[]): void {
+    this.setRelays(urls)
+    for (const s of this.subs) s.close()
+    this.subs = []
+    // Detach onclose BEFORE closing: the deliberate teardown must not report
+    // 'offline' for every relay (websocket close events fire async, so a
+    // temporal flag would race) — that false-triggered the E201 error sheet.
+    for (const r of this.relays.values()) { r.onclose = null; try { r.close() } catch { /* already closed */ } }
+    this.relays.clear()
+    this.attempts.clear()
+    for (const url of [...this.state.keys()]) {
+      if (!this.urls.includes(url)) { this.state.delete(url); this.onState?.(url, 'offline') }
+    }
+    this.connect()
+  }
+
+  /** One-shot reachability probe (network panel). Does not join the pool. */
+  static probe(url: string, timeoutMs = 5000): Promise<boolean> {
+    return new Promise((resolve) => {
+      const normalized = normalizeRelay(url)
+      if (!normalized) { resolve(false); return }
+      let settled = false
+      const done = (ok: boolean) => { if (!settled) { settled = true; try { ws.close() } catch { /* noop */ } resolve(ok) } }
+      let ws: WebSocket
+      try { ws = new WebSocket(normalized) } catch { resolve(false); return }
+      const timer = setTimeout(() => done(false), timeoutMs)
+      ws.onopen = () => { clearTimeout(timer); done(true) }
+      ws.onerror = () => { clearTimeout(timer); done(false) }
+    })
+  }
+
   private setState(url: string, state: RelayState): void {
     if (this.state.get(url) === state) return
     this.state.set(url, state)
@@ -31,6 +67,7 @@ export class RelayPool {
   }
 
   private async open(url: string): Promise<void> {
+    if (!this.urls.includes(url)) return // removed via applyRelays; don't resurrect
     const relay = new Relay(url)
     this.relays.set(url, relay)
     relay.onclose = () => {

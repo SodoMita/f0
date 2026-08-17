@@ -15,6 +15,9 @@ import { enforceOffline } from './model/offline'
 import { DEFAULTS, theme } from './theme'
 import { luminance } from './core/gfx'
 import { loadNetworkConfig, loadSettings, saveSettings } from './protocol/storage'
+import { Legend } from './hud/legend'
+import { NetworkPanel } from './hud/networkPanel'
+import { ErrorSheet, ERRORS } from './hud/errorSheet'
 
 type Mode = 'boot' | 'board' | 'viewer' | 'studio' | 'thread'
 
@@ -61,6 +64,12 @@ async function boot(): Promise<void> {
   const threadView = new ThreadView(engine)
   threadView.setup(assets, index, (meta) => router.go({ name: 'viewer', id: meta.eventId }))
 
+  // ---------- HUD modules (legend / network / errors) ----------
+  const legend = new Legend()
+  const networkPanel = new NetworkPanel(pool, blossoms)
+  const errorSheet = new ErrorSheet()
+  void legend.maybeShowFirstRun()
+
   // ---------- HTML HUD ----------
   const topbar = $('topbar')
   const viewerBar = $('viewer-bar')
@@ -103,6 +112,7 @@ async function boot(): Promise<void> {
       .sort((a, b) => b.createdAt - a.createdAt) // newest post on top
 
   $('btn-home').addEventListener('click', () => router.go({ name: 'board' }))
+  netDot.addEventListener('click', () => router.go({ name: 'network' }))
   $('btn-add').addEventListener('click', () => router.go({ name: 'studio' }))
   $('btn-shuffle').addEventListener('click', () => board.shuffle(orderedRoots()))
   $('btn-close').addEventListener('click', () => router.go({ name: 'board' }))
@@ -282,13 +292,14 @@ async function boot(): Promise<void> {
     try {
       const blob = await assets.getModel(meta)
       if (nav !== viewerNav) return
-      if (!blob) { showToast('model download failed'); return }
+      // error sheet, not a toast: code + cause + concrete action (spec)
+      if (!blob) { errorSheet.show(ERRORS.MODEL_DOWNLOAD(() => void openViewer(id))); return }
       await viewer.load(blob, meta)
       if (nav !== viewerNav) return
       renderCamDots()
       syncPlay()
     } catch {
-      if (nav === viewerNav) showToast('model failed to load')
+      if (nav === viewerNav) errorSheet.show(ERRORS.MODEL_PARSE(() => router.go({ name: 'board' })))
     } finally {
       if (nav === viewerNav) setLoading('model', false)
     }
@@ -303,7 +314,11 @@ async function boot(): Promise<void> {
     }
     else if (route.name === 'viewer') void openViewer(route.id)
     else if (route.name === 'studio') setMode('studio')
-    else if (route.name === 'network') setMode('board')
+    else if (route.name === 'network') {
+      setMode('board')
+      networkPanel.open(() => { if (router.current.name === 'network') router.go({ name: 'board' }) })
+    }
+    if (route.name !== 'network' && networkPanel.isOpen) networkPanel.close()
   }
   router.subscribe(applyRoute)
   applyRoute()
@@ -322,6 +337,7 @@ async function boot(): Promise<void> {
     board.setMetas(orderedRoots())
     for (const m of orderedRoots()) board.setReplyCount(m.eventId, index.childCount(m.eventId))
   }
+  let warnedOffline = false
   pool.onState = () => {
     const states = [...pool.state.values()]
     const online = states.filter((s) => s === 'online').length
@@ -329,12 +345,21 @@ async function boot(): Promise<void> {
     const color = { none: theme.muted, partial: theme.warning, online: theme.success }[state]
     netDot.style.background = color
     netDot.title = `${online}/${pool.relayUrls.length} relays`
+    // E201 once ALL relays report offline (not during initial connecting)
+    const allOffline = states.length >= pool.relayUrls.length && states.every((s) => s === 'offline')
+    if (allOffline && !warnedOffline) {
+      warnedOffline = true
+      errorSheet.show(ERRORS.RELAYS_OFFLINE(() => router.go({ name: 'network' })))
+    }
+    if (online > 0) warnedOffline = false
   }
 
   pool.connect()
 
   // ---------- keyboard (viewer) ----------
   window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && errorSheet.isOpen) { errorSheet.hide(); return }
+    if (e.key === 'Escape' && networkPanel.isOpen) { networkPanel.close(); return }
     if (mode === 'thread') {
       if (e.key === 'Escape') router.go({ name: 'board' })
       if (e.key === '0') threadView.fit()
@@ -356,7 +381,7 @@ async function boot(): Promise<void> {
 
   window.addEventListener('resize', () => { engine.resize(); board.resize(); threadView.resize() })
 
-  ;(window as any).__form0 = { engine, pool, blossoms, index, board, viewer, studio, threadView, router, assets }
+  ;(window as any).__form0 = { engine, pool, blossoms, index, board, viewer, studio, threadView, router, assets, legend, networkPanel, errorSheet }
 }
 
 boot().catch((err) => console.error(err))

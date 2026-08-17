@@ -7,6 +7,9 @@ page.on('request', (r) => { if (/cdn\.babylonjs\.com|unpkg|jsdelivr/.test(r.url(
 page.on('pageerror', (e) => console.log('[pageerror]', e.message.slice(0, 160)))
 await page.goto(URL, { waitUntil: 'domcontentloaded', timeout: 45000 })
 await page.waitForFunction(() => window.__form0 && window.__form0.board, null, { timeout: 20000 }).catch(() => {})
+
+// first-run legend is modal by design; dismiss it like a user would
+await page.evaluate(() => window.__form0?.legend?.close()).catch(() => {})
 await page.waitForTimeout(30000)
 const state = await page.evaluate(() => {
   const f = window.__form0
