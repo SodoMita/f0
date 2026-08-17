@@ -680,7 +680,16 @@ async function boot(): Promise<void> {
 
   pool.onEvent = (event) => {
     if (event.kind === 5) {
-      for (const t of event.tags) if (t[0] === 'e') index.tombstone(t[1])
+      // NIP-09 author check: only the ORIGINAL author's kind-5 may hide a
+      // post. Relays are not required to enforce pubkey matching, so a
+      // verified-but-foreign kind-5 must not tombstone someone else's
+      // creation for every viewer (anyone could otherwise unpublish any
+      // post by signing a kind-5 for its id with their own key).
+      for (const t of event.tags) {
+        if (t[0] !== 'e') continue
+        const target = index.byId.get(t[1])
+        if (target && target.pubkey === event.pubkey) index.tombstone(t[1])
+      }
       refreshBoard()
       return
     }

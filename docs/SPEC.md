@@ -299,3 +299,35 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     model's textures after decode, so pretending otherwise would just hide
     posts. GLB image dimensions are now really parsed (PNG/JPEG/WebP headers)
     so the spec's decoded-pixel budget is enforced instead of stubbed.
+
+37. SECURITY: GLBs are self-contained, enforced at validation
+    (`validateGLB`, src/model/limits.ts). Any non-empty `uri` that is not a
+    `data:` URI — `buffers[].uri`, `images[].uri`, or any extension uri —
+    now FAILS validation: Babylon's glTF loader would otherwise fetch it
+    verbatim (rootUrl ''), uncapped and un-hashed, so a tiny signed post
+    could point at an arbitrary host for an unbounded download (tab crash)
+    or a tracking request (viewer IP leak to a third party). The 20 MiB /
+    2 MiB caps cover the container only, never external fetches. `data:`
+    URIs stay allowed (bounded by the JSON chunk cap). Vertex positions
+    with non-finite values (NaN/±Infinity) also fail validation — they
+    poison worldBox/frameDistance and render blank/invisible models.
+
+38. SECURITY: incoming kind-5 events tombstone ONLY the signer's own posts
+    (NIP-09 author check in main.ts). Relays are not required to enforce
+    pubkey matching, so a verified kind-5 signed by anyone else must not
+    hide a post from every viewer. Deletions from the in-app delete button
+    are unaffected: posts are signed with the per-post key, and the
+    kind-5 uses the same key, so `target.pubkey === event.pubkey` holds.
+
+39. SECURITY: Blossom downloads refuse redirects (`redirect: 'error'`,
+    enforcing the SECURITY line's "no cross-origin redirects") and upload
+    responses are URL-parse-validated (an "https://" with no host used to
+    crash publish.ts's `new URL(u.url)` server-tag loop after the bytes
+    were already uploaded).
+
+40. SECURITY: the standalone build ships a CSP too (csp.ts STANDALONE_CSP).
+    It previously had none because the file:// single-file build cannot use
+    `script-src 'self'` (inline script + data: Draco assets), but even the
+    weaker header (`script-src 'unsafe-inline' data:`) locks base-uri,
+    object-src, frame-src and every connect/img/media/worker scheme to what
+    the app actually uses.

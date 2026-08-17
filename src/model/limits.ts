@@ -116,6 +116,29 @@ export function validateGLB(bytes: Uint8Array): LimitReport {
     gltf = JSON.parse(new TextDecoder().decode(jsonBytes))
   } catch { return fail('GLB JSON chunk is not valid JSON.') }
 
+  // External resources are FORBIDDEN (spec PIPELINE "external URIs
+  // forbidden", 06 §3.2). A hostile post can put a tiny, valid GLB here and
+  // point `buffers[].uri` / `images[].uri` (or any extension uri) at an
+  // arbitrary host: Babylon fetches it verbatim with rootUrl '' — no size
+  // cap (the 20 MiB cap covers only the container), no hash check — turning
+  // a signed post into an unbounded download (tab crash) or a tracking
+  // request that leaks the viewer's IP to a third party. Only empty or
+  // data: URIs pass (data: URIs are bounded by the 2 MiB JSON chunk cap).
+  {
+    const bad: string[] = []
+    const walk = (v: unknown): void => {
+      if (Array.isArray(v)) { for (const x of v) walk(x); return }
+      if (v && typeof v === 'object') {
+        for (const [k, x] of Object.entries(v)) {
+          if (k === 'uri' && typeof x === 'string' && x !== '' && !/^data:/i.test(x)) bad.push(x.slice(0, 120))
+          else walk(x)
+        }
+      }
+    }
+    walk(gltf)
+    if (bad.length) return fail(`External resource URI is not allowed (self-contained GLBs only): ${bad[0]}`)
+  }
+
   const nodes = (gltf.nodes ?? []) as any[]
   const meshes = (gltf.meshes ?? []) as any[]
   const materials = (gltf.materials ?? []) as any[]
@@ -172,6 +195,36 @@ export function validateGLB(bytes: Uint8Array): LimitReport {
 
   for (const skin of skins) {
     if ((skin.joints ?? []).length > LIMITS.jointsPerSkin) return fail(`joints per skin > ${LIMITS.jointsPerSkin}`)
+  }
+
+  // Non-finite vertex positions poison the auto-fit cameras (NaN propagates
+  // out of worldBox/frameDistance → blank poster / invisible model) and can
+  // produce garbage bounding boxes. Reject them up front. Draco/meshopt
+  // primitives are opaque here (their buffers are compressed); they stay
+  // covered by the container-level caps.
+  const FLOAT = 5126
+  for (const mesh of meshes) {
+    for (const prim of (mesh.primitives ?? []) as any[]) {
+      const acc = accessors[prim.attributes?.POSITION]
+      if (!acc || acc.componentType !== FLOAT || acc.type !== 'VEC3') continue
+      if (prim.extensions?.KHR_draco_mesh_compression || prim.extensions?.EXT_meshopt_compression) continue
+      const bv = bufferViews[acc.bufferView]
+      if (!bv || typeof bv.byteLength !== 'number' || bv.byteLength < 12) continue
+      const bStart = bv.byteOffset ?? 0
+      if (bStart + bv.byteLength > binLength) return fail('Position bufferView out of BIN range.')
+      const stride = acc.byteStride ?? 12
+      if (stride < 12) return fail('Position accessor stride too small.')
+      const dv = new DataView(bytes.buffer, bytes.byteOffset + binOffset + bStart, bv.byteLength)
+      const rows = Math.min(acc.count ?? 0, Math.floor((bv.byteLength - 12) / stride) + 1)
+      for (let i = 0; i < rows; i++) {
+        const o = i * stride
+        if (!Number.isFinite(dv.getFloat32(o, true)) ||
+            !Number.isFinite(dv.getFloat32(o + 4, true)) ||
+            !Number.isFinite(dv.getFloat32(o + 8, true))) {
+          return fail('Non-finite vertex position in mesh.')
+        }
+      }
+    }
   }
 
   // Decoded-pixel budget from embedded images. The image DIMENSIONS live in
