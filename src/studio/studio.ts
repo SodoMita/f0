@@ -30,11 +30,13 @@ const deg2rad = (d: number): number => (d * Math.PI) / 180
 const rad2deg = (r: number): number => (r * 180) / Math.PI
 
 import { buildTextMesh, type TextMeshResult } from './textTool'
+import { importModelFiles } from '../model/importSidecar'
 
 export interface ImportedModel {
   file: File
   bytes: Uint8Array
   report: LimitReport
+  sourceFormat: 'glb' | 'gltf' | 'generated'
 }
 
 /**
@@ -211,29 +213,36 @@ export class Studio {
   }
 
   /**
-   * Import a self-contained GLB. The bytes are validated before Babylon
-   * touches them (validateGLB is the crash guard, SPEC/AGENTS rule 3).
-   * Original bytes are retained for byte-for-byte pass-through publishing.
+   * Import one or more files: a self-contained GLB, a .gltf with .bin/
+   * texture sidecars, or an .obj (+.mtl/textures). Sidecars are repacked
+   * into a self-contained GLB so publishing is always a single BLOB.
+   * The resulting GLB bytes are validated (the crash guard, rule 3).
    */
-  async importGLB(file: File): Promise<ImportedModel> {
+  async importFiles(files: File[]): Promise<ImportedModel> {
     this.clearModel()
-    const bytes = new Uint8Array(await file.arrayBuffer())
+    const result = await importModelFiles(this.scene, files)
+    this.container = result.container
+    const bytes = new Uint8Array(await result.glb.arrayBuffer())
     const report = validateGLB(bytes)
-    if (!report.ok) throw new Error(report.reason)
-    const container = await LoadAssetContainerAsync(toFile(file, file.name || 'model.glb'), this.scene)
-    container.addAllToScene()
-    this.container = container
-    const center = worldCenter(container)
-    const radius = worldRadius(container)
+    if (!report.ok) {
+      result.container.removeAllFromScene()
+      result.container.dispose()
+      throw new Error(report.reason)
+    }
+    const file = toFile(result.glb, result.filename)
+    const center = worldCenter(result.container)
+    const radius = worldRadius(result.container)
     this.camera.setTarget(center)
     this.camera.radius = Math.max(0.6, radius * 2.6)
-    const imported: ImportedModel = { file, bytes, report }
+    const imported: ImportedModel = { file, bytes, report, sourceFormat: result.filename.endsWith('.glb') ? 'glb' : 'gltf' }
     this.imported = imported
-    // demand rendering (SPEC 17): a new model + camera retarget changes the
-    // picture outside the input path — without this kick the studio stays
-    // black until the user wiggles the mouse.
     this.form.kick(1000)
     return imported
+  }
+
+  /** Backwards-compatible single-file import. */
+  importGLB(file: File): Promise<ImportedModel> {
+    return this.importFiles([file])
   }
 
   /**
