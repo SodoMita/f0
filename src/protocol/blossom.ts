@@ -20,7 +20,15 @@ function normalizeBlossom(value: string): string | null {
   } catch { return null }
 }
 
-const GLB_MAGIC = [0x67, 0x6c, 0x54, 0x46]
+const GLB_MAGIC = [0x67, 0x6c, 0x54, 0x46] // 'glTF'
+const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47] // '\x89PNG'
+
+export type BlobKind = 'glb' | 'png'
+
+function magicOk(bytes: Uint8Array, kind: BlobKind): boolean {
+  const magic = kind === 'png' ? PNG_MAGIC : GLB_MAGIC
+  return bytes[0] === magic[0] && bytes[1] === magic[1] && bytes[2] === magic[2] && bytes[3] === magic[3]
+}
 
 export class BlossomClient {
   servers: string[]
@@ -46,8 +54,13 @@ export class BlossomClient {
     } catch { return false }
   }
 
-  /** Download + verify: replicas in order, stream cap, SHA-256, GLB magic (06 §3.2). */
-  async download(urls: string[], hash: string, expectedSize: number, maxBytes = LIMITS.modelBytesHard): Promise<Blob> {
+  /**
+   * Download + verify: replicas in order, stream cap, SHA-256, magic bytes
+   * (06 §3.2). `kind` selects WHICH magic: this used to hardcode GLB, which
+   * silently rejected every poster PNG after a successful download — thumbs
+   * for published posts never rendered.
+   */
+  async download(urls: string[], hash: string, expectedSize: number, maxBytes = LIMITS.modelBytesHard, kind: BlobKind = 'glb'): Promise<Blob> {
     for (const url of urls) {
       try {
         const res = await fetch(url, { credentials: 'omit', signal: AbortSignal.timeout(30000) })
@@ -67,8 +80,8 @@ export class BlossomClient {
         let off = 0
         for (const c of chunks) { bytes.set(c, off); off += c.length }
         if (hash && (await sha256Hex(bytes)) !== hash) continue
-        if (!(bytes[0] === GLB_MAGIC[0] && bytes[1] === GLB_MAGIC[1] && bytes[2] === GLB_MAGIC[2] && bytes[3] === GLB_MAGIC[3])) continue
-        return new Blob([bytes.buffer as ArrayBuffer], { type: 'model/gltf-binary' })
+        if (!magicOk(bytes, kind)) continue
+        return new Blob([bytes.buffer as ArrayBuffer], { type: kind === 'png' ? 'image/png' : 'model/gltf-binary' })
       } catch { /* next replica */ }
     }
     throw new Error('No verified replica available.')

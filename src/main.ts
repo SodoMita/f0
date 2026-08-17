@@ -97,6 +97,12 @@ async function boot(): Promise<void> {
   const studioStatus = $('studio-status')
   const btnStudioImport = $('btn-studio-import') as HTMLButtonElement
   const btnStudioPublish = $('btn-studio-publish') as HTMLButtonElement
+  const studioEditor = $('studio-editor')
+  const studioText = $('studio-text') as HTMLInputElement
+  const studioAlign = $('studio-align') as HTMLButtonElement
+  const camAlpha = $('cam-alpha') as HTMLInputElement
+  const camBeta = $('cam-beta') as HTMLInputElement
+  const camRadius = $('cam-radius') as HTMLInputElement
   const fileInput = $('file-input') as HTMLInputElement
   let publishing = false
   const netDot = $('net-dot')
@@ -178,13 +184,14 @@ async function boot(): Promise<void> {
 
   async function publishStudio(): Promise<void> {
     if (publishing) return
-    const imported = studio.currentModel
-    if (!imported) return
+    if (!studio.hasContent()) return
     publishing = true
     btnStudioPublish.disabled = true
     try {
+      setStudioStatus('export…', 'busy')
+      const content = await studio.getContentForPublish()
       setStudioStatus('poster…', 'busy')
-      const { blob: poster, blank } = await assets.renderPosterFor(imported.file, studio.tintColor)
+      const { blob: poster, blank } = await assets.renderPosterFor(content.blob, studio.tintColor)
       if (blank) setStudioStatus('poster placeholder', 'busy')
       const onProgress = (p: PublishProgress) => {
         if (p.stage === 'blossom') setStudioStatus('upload…', 'busy')
@@ -194,13 +201,11 @@ async function boot(): Promise<void> {
       }
       const result = await publishModel(
         {
-          model: imported.file,
+          model: content.blob,
           poster,
           tint: studio.tintColor,
-          filename: imported.file.name,
-          sourceFormat: 'glb',
-          cameraCount: imported.report.stats.cameras,
-          hasAnimation: imported.report.stats.animations > 0,
+          filename: content.filename,
+          sourceFormat: content.sourceFormat,
           role: studioReply ? 'reply' : 'root',
           rootId: studioReply?.rootId,
           parentId: studioReply?.parentId,
@@ -225,6 +230,35 @@ async function boot(): Promise<void> {
 
   btnStudioImport.addEventListener('click', () => void pickStudioFile())
   btnStudioPublish.addEventListener('click', () => void publishStudio())
+
+  // ---- Studio text + camera settings ----
+  const ALIGN_CYCLE: Array<'left' | 'center' | 'right'> = ['left', 'center', 'right']
+  let alignIdx = 1
+  function refreshCameraSliders(): void {
+    const c = studio.getCameraState()
+    camAlpha.value = String(c.alpha)
+    camBeta.value = String(c.beta)
+    camRadius.value = String(c.radius)
+  }
+  let textTimer = 0
+  studioText.addEventListener('input', () => {
+    studio.setText(studioText.value)
+    btnStudioPublish.disabled = !studio.hasContent()
+    clearTimeout(textTimer)
+    textTimer = window.setTimeout(() => { studio.rebuildText(); refreshCameraSliders() }, 120)
+  })
+  studioAlign.addEventListener('click', () => {
+    alignIdx = (alignIdx + 1) % ALIGN_CYCLE.length
+    studio.setTextAlign(ALIGN_CYCLE[alignIdx])
+    studioAlign.textContent = ALIGN_CYCLE[alignIdx][0].toUpperCase()
+    studio.rebuildText()
+  })
+  for (const [el, key] of [[camAlpha, 'alpha'], [camBeta, 'beta'], [camRadius, 'radius']] as const) {
+    el.addEventListener('input', () => studio.setCameraState({ [key]: Number(el.value) }))
+  }
+  document.querySelector<HTMLButtonElement>('[data-cam=frame]')?.addEventListener('click', () => {
+    studio.frameCamera(); refreshCameraSliders()
+  })
   $('btn-close').addEventListener('click', () => router.go({ name: 'board' }))
   $('btn-prev').addEventListener('click', () => void stepViewer(-1))
   $('btn-next').addEventListener('click', () => void stepViewer(1))
@@ -501,6 +535,7 @@ async function boot(): Promise<void> {
       viewer.clear()
     }
     studioBar.hidden = next !== 'studio'
+    studioEditor.hidden = next !== 'studio'
     if (next === 'board') {
       engine.setActiveScene(board.scene)
       topbar.hidden = false
@@ -570,10 +605,17 @@ async function boot(): Promise<void> {
     else if (route.name === 'studio') {
       studioReply = route.rootId && route.parentId ? { rootId: route.rootId, parentId: route.parentId } : null
       setMode('studio')
-      // Fresh composer each time (drop the previous import preview).
+      // Fresh composer each time (drop the previous import/text).
+      studio.clearModel()
       studioFilename.textContent = ''
-      btnStudioPublish.disabled = true
+      studioText.value = '/0'
+      studio.setText('/0')
+      studio.setTextAlign('center')
+      studioAlign.textContent = 'C'
+      studio.rebuildText()
+      btnStudioPublish.disabled = false
       setStudioStatus(studioReply ? 'replying…' : '')
+      refreshCameraSliders()
     }
     else if (route.name === 'network') {
       setMode('board')

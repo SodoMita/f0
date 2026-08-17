@@ -1,8 +1,9 @@
 # FORM/0
 
-Anonymous, wordless 3D imageboard — browser-only client, direct to Nostr
-relays + Blossom servers, one `<canvas>` drawn entirely by Babylon.js.
-Posts are animated GLB models with their own cameras, optional embedded audio.
+A wordless multiplayer game of 3D shapes — sculpt, share, explore. Browser-only
+client, direct to Nostr relays + Blossom servers, one `<canvas>` drawn entirely
+by Babylon.js. Player creations are animated GLB models with their own cameras
+and optional embedded audio.
 
 ## Layout & interaction
 - **Board**: responsive 1–3 column grid of 16:10 model cards. Cards are fully

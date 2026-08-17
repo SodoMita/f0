@@ -197,7 +197,23 @@ export class AssetCache {
           return tex
         }
       }
-      const blob = meta.thumbUrl ? await this.fetchThumb(meta) : await this.cachedPoster(meta)
+      let blob = meta.thumbUrl ? await this.fetchThumb(meta) : await this.cachedPoster(meta)
+      if (!blob && meta.thumbUrl) {
+        // Thumb advertised but unfetchable (server purged it / offline):
+        // fall back to rendering the model locally instead of a blank card.
+        const direct = await this.renderLocalPixels(meta)
+        if (direct) {
+          const tex = RawTexture.CreateRGBATexture(
+            direct.pixels, direct.width, direct.height, this.scene, false, false, Texture.BILINEAR_SAMPLINGMODE,
+          )
+          tex.name = 'poster-' + meta.eventId.slice(0, 8)
+          tex.wrapU = Texture.CLAMP_ADDRESSMODE
+          tex.wrapV = Texture.CLAMP_ADDRESSMODE
+          this.posterTex.set(meta.eventId, tex)
+          return tex
+        }
+        blob = await this.cachedPoster(meta)
+      }
       if (!blob) return undefined
       // Decode the PNG to raw RGBA and upload directly (RawTexture). This
       // sidesteps both the async blob-URL Texture load and DynamicTexture's
@@ -265,7 +281,8 @@ export class AssetCache {
     if (!meta.thumbUrl) return undefined
     const cached = meta.thumbSha256 ? await get<Blob>('posterCache', POSTER_CACHE_V + meta.thumbSha256) : undefined
     if (cached) return cached
-    const blob = await this.blossoms.download([meta.thumbUrl], meta.thumbSha256 ?? '', meta.thumbSize ?? 0)
+    // kind 'png': posters are images; the GLB magic check must not apply
+    const blob = await this.blossoms.download([meta.thumbUrl], meta.thumbSha256 ?? '', meta.thumbSize ?? 0, 2 * 1024 * 1024, 'png')
     if (meta.thumbSha256) void put('posterCache', POSTER_CACHE_V + meta.thumbSha256, blob)
     return blob
   }
