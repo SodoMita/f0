@@ -5,6 +5,24 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 
+- [x] **Security audit fixes — external-URI GLB fetch, kind-5 author
+      check, Blossom redirect/URL hardening, standalone CSP** (agent arena).
+      See docs/SPEC.md AMENDMENTS 37–40. (1) validateGLB now rejects ANY
+      non-data: `uri` (buffers/images/extensions) — Babylon fetches external
+      URIs verbatim with no size cap or hash check, so a tiny signed post
+      could crash tabs (unbounded download) or leak viewer IPs to a third
+      party; also rejects non-finite vertex positions (they poison the
+      auto-fit cameras). Verified with a 7-case Node test of validateGLB.
+      (2) Incoming kind-5 events only tombstone posts whose pubkey matches
+      the signer (NIP-09 author check — relays don't enforce it). (3) Blossom
+      download uses redirect:'error' (spec "no cross-origin redirects") and
+      upload URL responses are parse-validated. (4) csp.ts: the standalone
+      build now ships STANDALONE_CSP (previously NONE — that is the GitHub
+      Pages artifact); web build unchanged (WEB_CSP). `npm run build` +
+      `build:standalone` green. Browser-level smoke (scripts/smoke.mjs) needs
+      a Playwright browser download, blocked in this sandbox — re-run before
+      shipping to confirm the standalone CSP does not break file:// boot.
+
 - [x] **Deletion made discoverable + mirrors** (agent-kestrel). Deletion
       logic extracted to `src/protocol/deletion.ts` (DeletionService) with a
       file-header map of every piece (button, ownership store, tombstone) —

@@ -59,11 +59,17 @@ export class BlossomClient {
    * (06 §3.2). `kind` selects WHICH magic: this used to hardcode GLB, which
    * silently rejected every poster PNG after a successful download — thumbs
    * for published posts never rendered.
+   *
+   * redirect: 'error' enforces the spec's "no cross-origin redirects" (06
+   * §3.2): a replica URL that redirects (e.g. to a tracking endpoint) is
+   * skipped and the next replica is tried. Content is SHA-256-verified
+   * either way, but a redirect would still hand the viewer's IP to the
+   * redirect target, and the event author controls the URL already.
    */
   async download(urls: string[], hash: string, expectedSize: number, maxBytes = LIMITS.modelBytesHard, kind: BlobKind = 'glb'): Promise<Blob> {
     for (const url of urls) {
       try {
-        const res = await fetch(url, { credentials: 'omit', signal: AbortSignal.timeout(30000) })
+        const res = await fetch(url, { credentials: 'omit', redirect: 'error', signal: AbortSignal.timeout(30000) })
         if (!res.ok || !res.body) continue
         const reader = res.body.getReader()
         const chunks: Uint8Array[] = []
@@ -113,7 +119,13 @@ export class BlossomClient {
         })
         if (!res.ok) throw new Error(`${server} upload failed (${res.status})`)
         const json = (await res.json()) as { url?: string }
-        if (!json.url || !/^https:\/\//i.test(json.url)) throw new Error(`${server} returned invalid URL`)
+        // A regex check alone lets through parseable-garbage like "https://"
+        // (no host), which would later crash publish.ts's `new URL(u.url)`
+        // while building the server tags. Parse and require a real host.
+        if (!json.url) throw new Error(`${server} returned invalid URL`)
+        let parsedUrl: URL
+        try { parsedUrl = new URL(json.url) } catch { throw new Error(`${server} returned invalid URL`) }
+        if (parsedUrl.protocol !== 'https:' || !parsedUrl.hostname) throw new Error(`${server} returned invalid URL`)
         return { url: json.url, sha256: hash }
       }),
     )
