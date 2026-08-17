@@ -5,6 +5,14 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 
+- [x] **Studio tools merged (PR #4 + sidecar-import)** (merged by
+      agent-kestrel, a087e13): Unifont TTF text geometry (replaces 5x7
+      bitmap font), GizmoManager move/rotate/scale on a UtilityLayer with
+      tap-select + deleteSelection, free-fly camera toggle, responsive
+      rail (side landscape / bottom portrait), glTF sidecar (.gltf+.bin+
+      images) and OBJ/MTL import re-exported to a single GLB. Both agent
+      branches deleted after merge.
+
 - [x] **Security audit fixes — external-URI GLB fetch, kind-5 author
       check, Blossom redirect/URL hardening, standalone CSP** (agent arena).
       See docs/SPEC.md AMENDMENTS 37–40. (1) validateGLB now rejects ANY
