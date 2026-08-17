@@ -28,6 +28,12 @@ move it to **Done** with a commit reference. One agent per area.
       (`vite.standalone.config.ts`, `make-standalone.py`, `.github/workflows/`)
 - [x] Visual pass + texture-flip root-cause (`test/orient2.ts`,
       `scripts/visual_critique.py`).
+- [x] Mirror fix round 2: per-kind (raw/dyn/rtt) per-axis boot calibration of
+      card orientation, measured through the real board framebuffer
+      (`board/cardMaterial.ts`, commit 9dfda25).
+- [x] Mockup pass: frameless transparent cards, separator lines between rows,
+      reply tree constrained to a <90° cone (measured ~84°), ghost badges +
+      glassy HUD. (commit 9dfda25)
 
 ## In progress
 
