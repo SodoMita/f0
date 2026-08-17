@@ -892,8 +892,84 @@ body[data-theme="light"] .sheet-card { background: rgba(253, 246, 245, 0.97); bo
   #studio-bar { bottom: 70px; }
 }
 
+/* ---- draggable numbers (Blender-like) ---- */
+.drag-num {
+  position: relative;
+  cursor: ew-resize;
+  user-select: none;
+}
+.drag-num input {
+  cursor: ew-resize;
+}
+.drag-num.dragging {
+  background: rgba(255,92,53,0.08);
+  border-color: var(--accent) !important;
+}
+.drag-num::after {
+  content: '↔';
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 8px;
+  color: var(--muted);
+  opacity: 0.5;
+  pointer-events: none;
+}
+.drag-num.dragging::after { opacity: 0.9; color: var(--accent); }
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+input[type=number] { -moz-appearance: textfield; }
+
+/* text panel improvements */
+#studio-text {
+  min-height: 72px;
+  max-height: 160px;
+  resize: vertical;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+textarea#studio-text {
+  background: #0b0b0c;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--ink);
+  padding: 10px 11px;
+  font: 13px/1.35 ui-monospace, monospace;
+  width: 100%;
+  box-sizing: border-box;
+}
+textarea#studio-text:focus { outline: none; border-color: var(--accent); }
+
+.text-controls {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+.text-controls .full { grid-column: 1 / -1; }
+.text-controls label {
+  display: flex; flex-direction: column; gap: 3px;
+  font: 9px/1 ui-monospace, monospace; color: var(--muted);
+}
+.text-controls input[type=number],
+.text-controls input[type=text] {
+  background: #0b0b0c;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--ink);
+  padding: 7px 8px;
+  font: 12px ui-monospace, monospace;
+  width: 100%;
+  box-sizing: border-box;
+}
+.text-controls input:focus { outline: none; border-color: var(--accent); }
+.align-row { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.align-row .hbtn.small { width: 32px; height: 32px; }
+
 @media (max-width: 720px) {
   .studio { inset: 58px 8px 8px; }
   .num-grid { grid-template-columns: repeat(2,1fr); }
+  .text-controls { grid-template-columns: 1fr 1fr; }
 }
 

@@ -26,6 +26,7 @@ import { mixer } from './audio/mixer'
 import { Legend } from './hud/legend'
 import { NetworkPanel } from './hud/networkPanel'
 import { ErrorSheet, ERRORS } from './hud/errorSheet'
+import { attachAllDragNumbers } from './studio/dragNumber'
 
 type Mode = 'boot' | 'board' | 'viewer' | 'studio' | 'thread'
 
@@ -64,8 +65,6 @@ async function boot(): Promise<void> {
     onOpenModel: (meta) => router.go({ name: 'viewer', id: meta.eventId }),
     onOpenThread: (meta) => router.go({ name: 'thread', rootId: meta.refs.rootId ?? meta.eventId }),
   })
-  // Card orientation is deterministic now (flat cameras sit at -Z, see
-  // core/gfx.flatCamera) — no boot-time GPU probing, no guessing.
   const assets = new AssetCache(blossoms, board.scene)
   board.setAssets(assets)
   const viewer = new Viewer(engine)
@@ -74,14 +73,12 @@ async function boot(): Promise<void> {
   threadView.setup(
     assets, index,
     (meta) => router.go({ name: 'viewer', id: meta.eventId }),
-    // reply pill on a thread node -> studio compose, replying to THAT node
     (meta) => {
       const rootId = meta.refs.rootId ?? meta.eventId
       router.go({ name: 'studio', rootId, parentId: meta.eventId })
     },
   )
 
-  // ---------- HUD modules (legend / network / errors) ----------
   const legend = new Legend()
   const networkPanel = new NetworkPanel(pool, blossoms)
   const errorSheet = new ErrorSheet()
@@ -96,9 +93,13 @@ async function boot(): Promise<void> {
   const studioStatus = $('studio-status')
   const btnStudioImport = $('btn-studio-import') as HTMLButtonElement
   const btnStudioPublish = $('btn-studio-publish') as HTMLButtonElement
-  const studioText = $('studio-text') as HTMLInputElement
+  const studioText = $('studio-text') as HTMLTextAreaElement
   const studioAlign = $('studio-align') as HTMLButtonElement
   const studioColor = $('studio-color') as HTMLInputElement
+  const textScale = $('text-scale') as HTMLInputElement
+  const textTracking = $('text-tracking') as HTMLInputElement
+  const textLeading = $('text-leading') as HTMLInputElement
+  const textExtrude = $('text-extrude') as HTMLInputElement
   const textBudget = $('text-budget')
   const symbolGrid = $('symbol-grid')
   const camTarget = (['cam-tx','cam-ty','cam-tz'] as const).map((id) => $(id) as HTMLInputElement)
@@ -136,15 +137,12 @@ async function boot(): Promise<void> {
 
   let currentMeta: ThreadMeta | null = null
   let studioReply: { rootId: string; parentId: string } | null = null
-  // Every viewer navigation takes a ticket. A download/parse that finishes
-  // after the user has moved on must not paint into the current view (that is
-  // how two models ended up stacked in the single-model viewer).
   let viewerNav = 0
 
   const orderedRoots = (): ThreadMeta[] =>
     [...index.byId.values()]
       .filter((m) => m.role === 'root' && !m.tombstoned)
-      .sort((a, b) => b.createdAt - a.createdAt) // newest post on top
+      .sort((a, b) => b.createdAt - a.createdAt)
 
   $('btn-home').addEventListener('click', () => router.go({ name: 'board' }))
   netDot.addEventListener('click', () => router.go({ name: 'network' }))
@@ -161,7 +159,6 @@ async function boot(): Promise<void> {
     fileInput.value = ''
     const prevAccept = fileInput.accept
     const prevMultiple = fileInput.multiple
-    // glB, glTF + sidecars (.bin + images), or OBJ + .mtl + images.
     fileInput.accept = '.glb,.gltf,.obj,.mtl,.bin,.png,.jpg,.jpeg,.webp,.gif,.bmp,.tga,.ktx2'
     fileInput.multiple = true
     fileInput.addEventListener('change', async () => {
@@ -213,9 +210,7 @@ async function boot(): Promise<void> {
         },
         { relays: pool.relayUrls, blossoms: blossoms.servers, pool, onProgress: onProgress },
       )
-      // registered as owned immediately (publishModel saved the record)
       void deletion.refresh().then(syncDeleteButton)
-      // Open the freshly published model.
       if (studioReply) router.go({ name: 'thread', rootId: studioReply.rootId, focusId: result.eventId })
       else router.go({ name: 'viewer', id: result.eventId })
       studioReply = null
@@ -230,7 +225,7 @@ async function boot(): Promise<void> {
   btnStudioImport.addEventListener('click', () => void pickStudioFile())
   btnStudioPublish.addEventListener('click', () => void publishStudio())
 
-  // ---- Studio transform toolbar (move/rotate/scale/delete/free-cam) ----
+  // ---- Studio transform toolbar ----
   let freeCamOn = false
   document.querySelectorAll<HTMLButtonElement>('[data-xform]').forEach((b) =>
     b.addEventListener('click', () => {
@@ -250,9 +245,7 @@ async function boot(): Promise<void> {
 
   // ---- Studio tabs ----
   type StudioTab = 'upload' | 'type' | 'paint' | 'symbols'
-  let studioTab: StudioTab = 'upload'
   function setStudioTab(tab: StudioTab): void {
-    studioTab = tab
     document.querySelectorAll<HTMLButtonElement>('.rail-btn').forEach((b) => {
       b.classList.toggle('active', b.dataset.tab === tab)
     })
@@ -267,13 +260,12 @@ async function boot(): Promise<void> {
   document.querySelectorAll<HTMLButtonElement>('.rail-btn').forEach((b) =>
     b.addEventListener('click', () => setStudioTab(b.dataset.tab as StudioTab)),
   )
-  // Built-in symbols (single built-in primitives; paint tab is the placeholder).
   const SYMBOLS = ['■','●','▲','◆','★','♥','♦','♣']
   if (symbolGrid) SYMBOLS.forEach((g, i) => {
     const b = document.createElement('button')
     b.textContent = g
     b.title = `symbol ${i}`
-    b.addEventListener('click', () => { studioText.value = g; studio.setText(g); studio.rebuildText() })
+    b.addEventListener('click', () => { studioText.value = g; studio.setText(g); studio.rebuildText(); updateTextBudget() })
     symbolGrid.appendChild(b)
   })
 
@@ -284,8 +276,10 @@ async function boot(): Promise<void> {
     if (!textBudget) return
     const m = studio.scene.meshes.find((x) => x.name === 'studio-text')
     const tris = m ? m.getTotalIndices() / 2 : 0
-    textBudget.textContent = `${studioText.value} · ${tris} tris`
+    const lines = studioText.value.split('\n').length
+    textBudget.textContent = `${studioText.value.length} chars · ${lines} lines · ${tris} tris`
   }
+
   function refreshCameraControls(): void {
     const c = studio.getCameraState()
     c.target.forEach((v, i) => { camTarget[i].value = v.toFixed(2) })
@@ -294,6 +288,7 @@ async function boot(): Promise<void> {
     document.querySelector<HTMLButtonElement>('#tool-freecam')?.classList.toggle('active', c.projection === 'free')
     refreshCameraList()
   }
+
   function refreshCameraList(): void {
     const list = document.getElementById('cam-list') as HTMLElement | null
     if (!list) return
@@ -323,31 +318,61 @@ async function boot(): Promise<void> {
       list.append(empty)
     }
   }
+
   let textTimer = 0
+  const scheduleRebuild = () => {
+    clearTimeout(textTimer)
+    textTimer = window.setTimeout(() => { studio.rebuildText(); refreshCameraControls(); updateTextBudget() }, 90)
+  }
+
   studioText.addEventListener('input', () => {
     studio.setText(studioText.value)
     btnStudioPublish.disabled = !studio.hasContent()
-    clearTimeout(textTimer)
-    textTimer = window.setTimeout(() => { studio.rebuildText(); refreshCameraControls(); updateTextBudget() }, 120)
+    scheduleRebuild()
   })
+
   studioColor.addEventListener('input', () => {
     studio.setTintColor(studioColor.value)
     if (studio.currentModel === null) studio.rebuildText()
   })
+
   studioAlign.addEventListener('click', () => {
     alignIdx = (alignIdx + 1) % ALIGN_CYCLE.length
     studio.setTextAlign(ALIGN_CYCLE[alignIdx])
     studioAlign.textContent = ALIGN_CYCLE[alignIdx][0].toUpperCase()
     studio.rebuildText()
   })
-  // Numeric camera inputs — arbitrary editable values, no sliders.
-  const num = (el: HTMLInputElement) => Number.isFinite(Number(el.value)) ? Number(el.value) : 0
-  camTarget.forEach((el, i) => el.addEventListener('change', () => {
-    const t = studio.getCameraState().target.slice() as [number, number, number]
-    t[i] = num(el); studio.setCameraState({ target: t }); refreshCameraControls()
-  }))
-  camFov.addEventListener('change', () => studio.setCameraState({ fovDeg: num(camFov) }))
-  camRadius.addEventListener('change', () => studio.setCameraState({ radius: num(camRadius) }))
+
+  const num = (el: HTMLInputElement) => {
+    const v = parseFloat(el.value)
+    return Number.isFinite(v) ? v : 0
+  }
+
+  // text numeric settings: draggable numbers
+  textScale.addEventListener('input', () => { studio.setTextScale(num(textScale)); scheduleRebuild() })
+  textTracking.addEventListener('input', () => { studio.setTextLetterSpacing(num(textTracking)); scheduleRebuild() })
+  textLeading.addEventListener('input', () => { studio.setTextLineSpacing(num(textLeading)); scheduleRebuild() })
+  textExtrude.addEventListener('input', () => { studio.setTextDepth(num(textExtrude)); scheduleRebuild() })
+
+  textScale.addEventListener('change', () => { studio.setTextScale(num(textScale)); scheduleRebuild() })
+  textTracking.addEventListener('change', () => { studio.setTextLetterSpacing(num(textTracking)); scheduleRebuild() })
+  textLeading.addEventListener('change', () => { studio.setTextLineSpacing(num(textLeading)); scheduleRebuild() })
+  textExtrude.addEventListener('change', () => { studio.setTextDepth(num(textExtrude)); scheduleRebuild() })
+
+  // camera numeric inputs - no limits, draggable
+  camTarget.forEach((el, i) => {
+    const handler = () => {
+      const t = studio.getCameraState().target.slice() as [number, number, number]
+      t[i] = num(el); studio.setCameraState({ target: t }); refreshCameraControls()
+    }
+    el.addEventListener('input', handler)
+    el.addEventListener('change', handler)
+  })
+  camFov.addEventListener('input', () => studio.setCameraState({ fovDeg: num(camFov) }))
+  camFov.addEventListener('change', () => { studio.setCameraState({ fovDeg: num(camFov) }); refreshCameraControls() })
+  camRadius.addEventListener('input', () => studio.setCameraState({ radius: num(camRadius) }))
+  camRadius.addEventListener('change', () => { studio.setCameraState({ radius: num(camRadius) }); refreshCameraControls() })
+
   document.querySelectorAll<HTMLButtonElement>('[data-cam]').forEach((b) =>
     b.addEventListener('click', () => {
       const m = b.dataset.cam
@@ -355,14 +380,14 @@ async function boot(): Promise<void> {
       else studio.setCameraState({ projection: m as 'perspective' | 'ortho' })
       refreshCameraControls()
     }))
-  // add camera button (creates a publishable camera from current view)
+
   $('cam-add')?.addEventListener('click', () => {
     const idx = studio.addCamera()
     studio.selectCamera(idx)
     refreshCameraControls()
     setStudioStatus(`cam ${idx + 1} added`, 'ok')
   })
-  // fold button – collapses inspector for portrait space saving
+
   const foldBtn = $('btn-studio-fold') as HTMLButtonElement | null
   const inspector = document.querySelector('.studio-inspector') as HTMLElement | null
   const toggleFold = () => {
@@ -375,6 +400,9 @@ async function boot(): Promise<void> {
   }
   foldBtn?.addEventListener('click', toggleFold)
   $('studio-fold-handle')?.addEventListener('click', toggleFold)
+
+  // make all number inputs draggable (Blender-like)
+  attachAllDragNumbers(document.body)
 
   $('btn-close').addEventListener('click', () => router.go({ name: 'board' }))
   $('btn-prev').addEventListener('click', () => void stepViewer(-1))
@@ -391,10 +419,6 @@ async function boot(): Promise<void> {
   })
   $('btn-download').addEventListener('click', () => void downloadCurrent())
 
-  // ---------- deletion (owned posts only) ----------
-  // Implementation lives in protocol/deletion.ts (DeletionService); this is
-  // just the HUD wiring. The button stays hidden for non-owned posts —
-  // wordless UI shows no dead controls.
   const deletion = new DeletionService(pool)
   void deletion.refresh().then(syncDeleteButton)
   const vbtnDelete = $('vbtn-delete')
@@ -416,7 +440,6 @@ async function boot(): Promise<void> {
     deleting = true
     try {
       const { ok, failed } = await deletion.delete(id)
-      // local tombstone immediately — the feed must not wait for the relays
       index.tombstone(id)
       board.setMetas(orderedRoots())
       showToast(ok.length ? `deleted · ${ok.length}/${ok.length + failed.length} relays` : 'delete failed on all relays')
@@ -433,10 +456,8 @@ async function boot(): Promise<void> {
     document.body.classList.remove('drawer-open')
   })
 
-  // ---------- settings ----------
   const caps = detectCapabilities(engine.engine._gl as WebGL2RenderingContext | null)
   function applyBackground(hex: string): void {
-    // HUD ink follows the backdrop so a light board is still readable
     document.body.dataset.theme = luminance(hex) < 0.5 ? 'dark' : 'light'
     board.setBackground(hex)
     viewer.setBackground(hex)
@@ -474,7 +495,6 @@ async function boot(): Promise<void> {
     }
   }
 
-  // Brightness calibration overlay: greyscale ramp + near-black/near-white bars.
   let calibrationEl: HTMLElement | null = null
   function toggleCalibration(): void {
     if (calibrationEl) { calibrationEl.remove(); calibrationEl = null; return }
@@ -514,7 +534,6 @@ async function boot(): Promise<void> {
     calibrationEl = wrap
   }
 
-  // performance overlay (settings → Interface)
   const perfOverlay = document.createElement('div')
   perfOverlay.id = 'perf-overlay'
   perfOverlay.className = 'hud'
@@ -539,7 +558,6 @@ async function boot(): Promise<void> {
   })
   applySettings(wiring, settings.all, null)
 
-  // audio devices need a permission-free enumerate first; labels fill in later
   mixer.onDevices = () => {
     settingsPanel.setOptions('audioOutput', [
       { value: 'default', label: 'System default' },
@@ -557,7 +575,6 @@ async function boot(): Promise<void> {
   $('btn-settings').addEventListener('click', () => settingsPanel.toggle())
 
   function syncPlay(): void {
-    // the button holds both icons; CSS swaps them (no glyph swapping)
     btnPlay.classList.toggle('playing', viewer.isPlaying())
   }
 
@@ -570,7 +587,7 @@ async function boot(): Promise<void> {
       b.addEventListener('click', () => { viewer.applyCamera(idx); renderCamDots() })
       camDots.appendChild(b)
     }
-    mk('A', -1) // auto / orbit
+    mk('A', -1)
     for (let i = 0; i < viewer.cameraCount; i++) mk(String(i + 1), i)
   }
 
@@ -628,14 +645,13 @@ async function boot(): Promise<void> {
     metaText.textContent = lines.filter((l): l is string => l !== null).join('\n')
   }
 
-  // ---------- modes ----------
   let mode: Mode = 'boot'
   function setMode(next: Exclude<Mode, 'boot'>): void {
     if (mode === next) return
     mode = next
     if (next !== 'thread') threadView.detach()
     if (next !== 'viewer') {
-      viewerNav++            // abandon any in-flight model load
+      viewerNav++
       setLoading('model', false)
       viewer.clear()
     }
@@ -685,7 +701,6 @@ async function boot(): Promise<void> {
     try {
       const bytes = await assets.getModelBytes(meta)
       if (nav !== viewerNav) return
-      // error sheet, not a toast: code + cause + concrete action (spec)
       if (!bytes) { errorSheet.show(ERRORS.MODEL_DOWNLOAD(() => void openViewer(id))); return }
       await viewer.load(bytes, meta)
       if (nav !== viewerNav) return
@@ -714,9 +729,16 @@ async function boot(): Promise<void> {
       setStudioTab('type')
       studioText.value = '/0'
       studio.setText('/0')
+      // reset text settings UI to defaults
+      const opts = studio.textOptions
+      ;(document.getElementById('text-scale') as HTMLInputElement).value = String(opts.scale)
+      ;(document.getElementById('text-tracking') as HTMLInputElement).value = String(opts.letterSpacing)
+      ;(document.getElementById('text-leading') as HTMLInputElement).value = String(opts.lineSpacing)
+      ;(document.getElementById('text-extrude') as HTMLInputElement).value = String(opts.depth)
       void studio.rebuildText()
       setStudioStatus(studioReply ? 'replying…' : '')
       refreshCameraControls()
+      updateTextBudget()
     }
     else if (route.name === 'network') {
       setMode('board')
@@ -727,12 +749,8 @@ async function boot(): Promise<void> {
   router.subscribe(applyRoute)
   applyRoute()
 
-  // ---------- network ----------
   setLoading('feed', true, 'connecting')
 
-  // Relay bursts arrive dozens of events at a time. Coalesce them into one
-  // board refresh per frame instead of one full re-sort + re-layout +
-  // badge-repaint-per-root per event.
   let refreshQueued = false
   function refreshBoard(): void {
     if (refreshQueued) return
@@ -747,11 +765,6 @@ async function boot(): Promise<void> {
 
   pool.onEvent = (event) => {
     if (event.kind === 5) {
-      // NIP-09 author check: only the ORIGINAL author's kind-5 may hide a
-      // post. Relays are not required to enforce pubkey matching, so a
-      // verified-but-foreign kind-5 must not tombstone someone else's
-      // creation for every viewer (anyone could otherwise unpublish any
-      // post by signing a kind-5 for its id with their own key).
       for (const t of event.tags) {
         if (t[0] !== 'e') continue
         const target = index.byId.get(t[1])
@@ -774,7 +787,6 @@ async function boot(): Promise<void> {
     const color = { none: theme.muted, partial: theme.warning, online: theme.success }[state]
     netDot.style.background = color
     netDot.title = `${online}/${pool.relayUrls.length} relays`
-    // E201 once ALL relays report offline (not during initial connecting)
     const allOffline = states.length >= pool.relayUrls.length && states.every((s) => s === 'offline')
     if (allOffline && !warnedOffline) {
       warnedOffline = true
@@ -785,7 +797,6 @@ async function boot(): Promise<void> {
 
   pool.connect()
 
-  // ---------- keyboard (viewer) ----------
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && errorSheet.isOpen) { errorSheet.hide(); return }
     if (e.key === 'Escape' && networkPanel.isOpen) { networkPanel.close(); return }

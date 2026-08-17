@@ -85,8 +85,8 @@ export class Studio {
     this.camera = new ArcRotateCamera('studio-cam', -Math.PI / 2, Math.PI / 2.2, 8, Vector3.Zero(), this.scene)
     this.camera.attachControl(true)
     this.camera.wheelPrecision = 50
-    this.camera.lowerRadiusLimit = 0.3
-    this.camera.upperRadiusLimit = 40
+    this.camera.lowerRadiusLimit = 0.001
+    this.camera.upperRadiusLimit = 1e6
     this.scene.activeCamera = this.camera
     // Lights-only rig (no IBL — see SPEC AMENDMENT 8).
     new HemisphericLight('sl-hemi', new Vector3(0, 1, 0), this.scene)
@@ -222,6 +222,11 @@ export class Studio {
   }
 
   // ---- typed text tool (SPEC TEXT+ANIM: flat low-poly geometry) ----
+  private textScale = 1
+  private textLetterSpacing = 0
+  private textLineSpacing = 1
+  private textDepth = 0
+
   setText(text: string): void {
     this.textValue = text
     this.form?.kick()
@@ -234,7 +239,22 @@ export class Studio {
     this.textAlign = align
     this.form?.kick()
   }
+  setTextScale(v: number): void { if (!Number.isFinite(v)) return; this.textScale = v; this.form?.kick() }
+  setTextLetterSpacing(v: number): void { if (!Number.isFinite(v)) return; this.textLetterSpacing = v; this.form?.kick() }
+  setTextLineSpacing(v: number): void { if (!Number.isFinite(v)) return; this.textLineSpacing = v; this.form?.kick() }
+  setTextDepth(v: number): void { if (!Number.isFinite(v)) return; this.textDepth = v; this.form?.kick() }
+
   get text(): string { return this.textValue }
+  get textOptions(): { scale: number; letterSpacing: number; lineSpacing: number; depth: number; align: 'left'|'center'|'right'; color: string } {
+    return {
+      scale: this.textScale,
+      letterSpacing: this.textLetterSpacing,
+      lineSpacing: this.textLineSpacing,
+      depth: this.textDepth,
+      align: this.textAlign,
+      color: this.tint,
+    }
+  }
 
   /** Build/rebuild the text geometry and frame it. */
   async rebuildText(): Promise<void> {
@@ -244,7 +264,14 @@ export class Studio {
       this.textMesh = null
     }
     if (!this.textValue.trim()) return
-    const result = await buildTextMesh(this.scene, this.textValue, this.tint, this.textAlign)
+    const result = await buildTextMesh(this.scene, this.textValue, {
+      color: this.tint,
+      align: this.textAlign,
+      scale: this.textScale,
+      letterSpacing: this.textLetterSpacing,
+      lineSpacing: this.textLineSpacing,
+      depth: this.textDepth,
+    })
     if (token !== this.textBuildToken) {
       result.mesh.dispose()
       return
@@ -285,8 +312,8 @@ export class Studio {
     if (patch.target) {
       this.camera.setTarget(new Vector3(patch.target[0], patch.target[1], patch.target[2]))
     }
-    if (patch.radius !== undefined) this.camera.radius = Math.max(0.01, patch.radius)
-    if (patch.fovDeg !== undefined) {
+    if (patch.radius !== undefined && Number.isFinite(patch.radius)) this.camera.radius = Math.max(0.001, patch.radius)
+    if (patch.fovDeg !== undefined && Number.isFinite(patch.fovDeg)) {
       this.camera.fov = deg2rad(patch.fovDeg)
     }
     if (patch.rotationDeg) {
