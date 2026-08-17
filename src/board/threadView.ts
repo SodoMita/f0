@@ -26,6 +26,9 @@ interface TNode {
   frameMat: ShaderMaterial
   spinner: Mesh
   spinnerMat: ShaderMaterial
+  // reply button (bottom-right pill): tap -> studio compose for THIS node
+  reply: Mesh
+  replyMat: ShaderMaterial
   x: number
   y: number
   w: number
@@ -42,6 +45,9 @@ const GAP_X = 2.2
 const GAP_Y = 4.6
 const ZOOM_MIN = 0.12
 const ZOOM_MAX = 6
+// reply pill (world units) — same visual language as the board badge
+const REPLY_W = 2.3
+const REPLY_H = 1.15
 
 /**
  * Thread view: a 2D map of the reply tree.
@@ -73,6 +79,8 @@ export class ThreadView {
   private frameTex: DynamicTexture
   private spinnerTex: DynamicTexture
   private rootFrameTex: DynamicTexture
+  private replyTex!: DynamicTexture
+  private onReply: ((m: ThreadMeta) => void) | null = null
   private background: string = theme.background
   private isDark = true
   private panX = 0
@@ -108,6 +116,9 @@ export class ThreadView {
     this.spinnerTex = makeSpinnerTexture(this.scene, 'thread-spinner-tex')
     this.frameTex = this.makeFrameTexture('thread-frame', false)
     this.rootFrameTex = this.makeFrameTexture('thread-frame-root', true)
+    this.replyTex = new DynamicTexture('thread-reply-tex', { width: 256, height: 128 }, this.scene, true)
+    this.replyTex.hasAlpha = true
+    this.paintReplyTexture()
 
     this.applyCamera()
 
@@ -132,14 +143,21 @@ export class ThreadView {
     for (const n of this.nodes.values()) setCardTint(n.spinnerMat, this.isDark ? theme.ink : '#3a3a44')
     this.paintFrame(this.frameTex, false)
     this.paintFrame(this.rootFrameTex, true)
+    this.paintReplyTexture()
     const edge = Color3.FromHexString(shade(hex, this.isDark ? 0.3 : -0.3))
     for (const l of this.lineMeshes) l.color = edge
   }
 
-  setup(assets: AssetCache, index: ThreadIndex, onOpenModel: (m: ThreadMeta) => void): void {
+  setup(
+    assets: AssetCache,
+    index: ThreadIndex,
+    onOpenModel: (m: ThreadMeta) => void,
+    onReply?: (m: ThreadMeta) => void,
+  ): void {
     this.assets = assets
     this.index = index
     this.onOpenModel = onOpenModel
+    this.onReply = onReply ?? null
   }
 
   private makeFrameTexture(name: string, root: boolean): DynamicTexture {
@@ -147,6 +165,57 @@ export class ThreadView {
     tex.hasAlpha = true
     this.paintFrame(tex, root)
     return tex
+  }
+
+  /**
+   * Shared reply-pill texture: rounded pill + vector ↩ arrow and a tiny "+".
+   * Same visual language as the board's reply badge (drawBadge in board.ts)
+   * so "pill with arrow" reads as one concept: replies live here.
+   */
+  private paintReplyTexture(): void {
+    const tex = this.replyTex
+    const { width: w, height: h } = tex.getSize()
+    const ctx = tex.getContext() as CanvasRenderingContext2D
+    ctx.clearRect(0, 0, w, h)
+    const dark = this.isDark
+    const pad = Math.round(h * 0.08)
+    const bw = w - pad * 2
+    const bh = h - pad * 2
+    ctx.fillStyle = dark ? 'rgba(12,12,14,0.62)' : 'rgba(250,250,252,0.72)'
+    ctx.strokeStyle = dark ? 'rgba(255,255,255,0.30)' : 'rgba(0,0,0,0.28)'
+    ctx.lineWidth = Math.max(2, h * 0.03)
+    roundRect(ctx, pad, pad, bw, bh, bh / 2)
+    ctx.fill()
+    ctx.stroke()
+
+    const ink = dark ? theme.ink : '#101014'
+    const cy = h / 2
+    // ↩ arrow (vector, same construction as the board badge)
+    const ax = w * 0.40
+    const s = bh * 0.30
+    ctx.strokeStyle = ink
+    ctx.lineWidth = Math.max(2.5, h * 0.05)
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
+    ctx.beginPath()
+    ctx.moveTo(ax + s, cy - s * 0.85)
+    ctx.lineTo(ax + s * 0.15, cy - s * 0.85)
+    ctx.quadraticCurveTo(ax - s * 0.75, cy - s * 0.85, ax - s * 0.75, cy + s * 0.05)
+    ctx.lineTo(ax - s * 0.75, cy + s * 0.5)
+    ctx.stroke()
+    ctx.beginPath()
+    ctx.moveTo(ax - s * 0.75 - s * 0.5, cy + s * 0.05)
+    ctx.lineTo(ax - s * 0.75, cy + s * 0.6)
+    ctx.lineTo(ax - s * 0.75 + s * 0.5, cy + s * 0.05)
+    ctx.stroke()
+    // "+" — compose, not navigate (distinguishes it from the count badge)
+    const px = w * 0.66
+    const ps = bh * 0.22
+    ctx.beginPath()
+    ctx.moveTo(px - ps, cy); ctx.lineTo(px + ps, cy)
+    ctx.moveTo(px, cy - ps); ctx.lineTo(px, cy + ps)
+    ctx.stroke()
+    tex.update()
   }
 
   private paintFrame(tex: DynamicTexture, root: boolean): void {
@@ -219,6 +288,19 @@ export class ThreadView {
       spinner.position.set(p.x, p.y, -0.05)
       spinner.isPickable = false
 
+      // reply pill, bottom-right, floating half out of the card like the
+      // board badge; pickable and routed to the studio compose flow
+      const reply = MeshBuilder.CreatePlane(`treply-${meta.eventId.slice(0, 8)}`, { width: 4, height: 4 }, this.scene)
+      const replyMat = makeCardMaterial(this.scene)
+      reply.material = replyMat
+      setCardTexture(replyMat, this.replyTex)
+      setCardWhite(replyMat)
+      setCardFlip(replyMat, 'dyn')
+      reply.scaling.set(REPLY_W / 4, REPLY_H / 4, 1)
+      reply.position.set(p.x + w / 2 - REPLY_W / 2 + 0.35, p.y - h / 2 + REPLY_H * 0.28, -0.1)
+      reply.isPickable = true
+      reply.metadata = { treply: meta }
+
       setCardTint(mat, meta.tint || theme.panel)
       setCardOpacity(mat, 0.16)
       const gen = this.generation
@@ -232,7 +314,7 @@ export class ThreadView {
         this.form.kick()
       })
 
-      this.nodes.set(meta.eventId, { meta, mesh, mat, frame, frameMat, spinner, spinnerMat, x: p.x, y: p.y, w, h, depth: p.depth })
+      this.nodes.set(meta.eventId, { meta, mesh, mat, frame, frameMat, spinner, spinnerMat, reply, replyMat, x: p.x, y: p.y, w, h, depth: p.depth })
     }
 
     for (const meta of metas) {
@@ -511,6 +593,12 @@ export class ThreadView {
   }
 
   private tapAt(x: number, y: number): void {
+    // reply pill first — it overlaps the card corner and must win the tap
+    const reply = this.scene.pick(x, y, (m) => Boolean(m.metadata?.treply))
+    if (reply?.hit && reply.pickedMesh?.metadata?.treply) {
+      this.onReply?.(reply.pickedMesh.metadata.treply as ThreadMeta)
+      return
+    }
     const pick = this.scene.pick(x, y, (m) => Boolean(m.metadata?.tnode))
     if (!pick?.hit || !pick.pickedMesh?.metadata?.tnode) return
     const meta = pick.pickedMesh.metadata.tnode as ThreadMeta
@@ -526,6 +614,7 @@ export class ThreadView {
     for (const n of this.nodes.values()) {
       n.mesh.dispose(); n.mat.dispose(); n.frame.dispose(); n.frameMat.dispose()
       n.spinner.dispose(); n.spinnerMat.dispose()
+      n.reply.dispose(); n.replyMat.dispose()
     }
     this.nodes.clear()
     for (const l of this.lineMeshes) l.dispose()

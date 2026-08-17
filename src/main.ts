@@ -10,11 +10,14 @@ import { ThreadView } from './board/threadView'
 import { Viewer } from './viewer/viewer'
 import { Studio } from './studio/studio'
 import { AssetCache } from './core/assets'
+import { publishModel, type PublishProgress } from './protocol/publish'
 import { configureDraco } from './model/draco'
 import { enforceOffline } from './model/offline'
 import { DEFAULTS, theme } from './theme'
 import { luminance } from './core/gfx'
-import { loadNetworkConfig, loadSettings, saveSettings } from './protocol/storage'
+import { loadNetworkConfig, loadSettings, saveSettings, listOwnedPosts, type OwnedPostRecord } from './protocol/storage'
+import { hexToBytes } from './util/hex'
+import { DELETE_KIND } from './theme'
 import { Legend } from './hud/legend'
 import { NetworkPanel } from './hud/networkPanel'
 import { ErrorSheet, ERRORS } from './hud/errorSheet'
@@ -62,7 +65,15 @@ async function boot(): Promise<void> {
   const viewer = new Viewer(engine)
   const studio = new Studio(engine)
   const threadView = new ThreadView(engine)
-  threadView.setup(assets, index, (meta) => router.go({ name: 'viewer', id: meta.eventId }))
+  threadView.setup(
+    assets, index,
+    (meta) => router.go({ name: 'viewer', id: meta.eventId }),
+    // reply pill on a thread node -> studio compose, replying to THAT node
+    (meta) => {
+      const rootId = meta.refs.rootId ?? meta.eventId
+      router.go({ name: 'studio', rootId, parentId: meta.eventId })
+    },
+  )
 
   // ---------- HUD modules (legend / network / errors) ----------
   const legend = new Legend()
@@ -74,6 +85,13 @@ async function boot(): Promise<void> {
   const topbar = $('topbar')
   const viewerBar = $('viewer-bar')
   const drawer = $('meta-drawer')
+  const studioBar = $('studio-bar')
+  const studioFilename = $('studio-filename')
+  const studioStatus = $('studio-status')
+  const btnStudioImport = $('btn-studio-import') as HTMLButtonElement
+  const btnStudioPublish = $('btn-studio-publish') as HTMLButtonElement
+  const fileInput = $('file-input') as HTMLInputElement
+  let publishing = false
   const netDot = $('net-dot')
   const btnPlay = $('btn-play') as HTMLButtonElement
   const camDots = $('cam-dots')
@@ -103,6 +121,7 @@ async function boot(): Promise<void> {
   }
 
   let currentMeta: ThreadMeta | null = null
+  let studioReply: { rootId: string; parentId: string } | null = null
   // Every viewer navigation takes a ticket. A download/parse that finishes
   // after the user has moved on must not paint into the current view (that is
   // how two models ended up stacked in the single-model viewer).
@@ -117,6 +136,88 @@ async function boot(): Promise<void> {
   netDot.addEventListener('click', () => router.go({ name: 'network' }))
   $('btn-add').addEventListener('click', () => router.go({ name: 'studio' }))
   $('btn-shuffle').addEventListener('click', () => { board.shuffle(orderedRoots()); engine.kick() })
+
+  // ---------- studio (import + publish) ----------
+  function setStudioStatus(text: string, cls = ''): void {
+    studioStatus.textContent = text
+    studioStatus.className = 'studio-status ' + cls
+  }
+
+  async function pickStudioFile(): Promise<void> {
+    fileInput.value = ''
+    const prevAccept = fileInput.accept
+    const prevMultiple = fileInput.multiple
+    fileInput.accept = '.glb'
+    fileInput.multiple = false
+    fileInput.addEventListener('change', async () => {
+      const file = fileInput.files?.[0]
+      // Restore the shared input to its neutral state.
+      fileInput.accept = prevAccept
+      fileInput.multiple = prevMultiple
+      if (!file) return
+      try {
+        setStudioStatus('importing…', 'busy')
+        const imported = await studio.importGLB(file)
+        studioFilename.textContent = file.name
+        btnStudioPublish.disabled = false
+        setStudioStatus(`${imported.report.stats.meshes} mesh · ${(file.size / 1048576).toFixed(1)} MiB`)
+      } catch (err) {
+        setStudioStatus(err instanceof Error ? err.message : 'import failed', 'err')
+      }
+    }, { once: true })
+    // File dialog must open from a trusted click.
+    fileInput.click()
+  }
+
+  async function publishStudio(): Promise<void> {
+    if (publishing) return
+    const imported = studio.currentModel
+    if (!imported) return
+    publishing = true
+    btnStudioPublish.disabled = true
+    try {
+      setStudioStatus('poster…', 'busy')
+      const { blob: poster, blank } = await assets.renderPosterFor(imported.file, studio.tintColor)
+      if (blank) setStudioStatus('poster placeholder', 'busy')
+      const onProgress = (p: PublishProgress) => {
+        if (p.stage === 'blossom') setStudioStatus('upload…', 'busy')
+        else if (p.stage === 'relay') setStudioStatus('nostr…', 'busy')
+        else if (p.stage === 'done') setStudioStatus(`done · ${p.ok ?? 0}/${(p.ok ?? 0) + (p.failed ?? 0)}`, p.failed ? 'err' : 'ok')
+        else if (p.stage === 'error') setStudioStatus(p.detail ?? 'failed', 'err')
+      }
+      const result = await publishModel(
+        {
+          model: imported.file,
+          poster,
+          tint: studio.tintColor,
+          filename: imported.file.name,
+          sourceFormat: 'glb',
+          cameraCount: imported.report.stats.cameras,
+          hasAnimation: imported.report.stats.animations > 0,
+          role: studioReply ? 'reply' : 'root',
+          rootId: studioReply?.rootId,
+          parentId: studioReply?.parentId,
+        },
+        { relays: pool.relayUrls, blossoms: blossoms.servers, pool, onProgress: onProgress },
+      )
+      // registered as owned immediately (publishModel saved the record)
+      void listOwnedPosts().then((list) => {
+        for (const rec of list) owned.set(rec.eventId, rec)
+      })
+      // Open the freshly published model.
+      if (studioReply) router.go({ name: 'thread', rootId: studioReply.rootId, focusId: result.eventId })
+      else router.go({ name: 'viewer', id: result.eventId })
+      studioReply = null
+    } catch (err) {
+      setStudioStatus(err instanceof Error ? err.message : 'publish failed', 'err')
+      btnStudioPublish.disabled = false
+    } finally {
+      publishing = false
+    }
+  }
+
+  btnStudioImport.addEventListener('click', () => void pickStudioFile())
+  btnStudioPublish.addEventListener('click', () => void publishStudio())
   $('btn-close').addEventListener('click', () => router.go({ name: 'board' }))
   $('btn-prev').addEventListener('click', () => void stepViewer(-1))
   $('btn-next').addEventListener('click', () => void stepViewer(1))
@@ -124,7 +225,62 @@ async function boot(): Promise<void> {
   $('btn-thread').addEventListener('click', () => {
     if (currentMeta) router.go({ name: 'thread', rootId: currentMeta.refs.rootId ?? currentMeta.eventId })
   })
+  $('btn-reply').addEventListener('click', () => {
+    if (currentMeta) {
+      const rootId = currentMeta.refs.rootId ?? currentMeta.eventId
+      router.go({ name: 'studio', rootId, parentId: currentMeta.eventId })
+    }
+  })
   $('btn-download').addEventListener('click', () => void downloadCurrent())
+
+  // ---------- deletion (owned posts only) ----------
+  // ownedPosts holds the per-post signing secret; only those posts can emit
+  // a valid kind-5 (relays check the pubkey). The button stays hidden for
+  // everything else — wordless UI shows no dead controls.
+  const owned = new Map<string, OwnedPostRecord>()
+  void listOwnedPosts().then((list) => {
+    for (const rec of list) owned.set(rec.eventId, rec)
+    syncDeleteButton()
+  })
+  const vbtnDelete = $('vbtn-delete')
+  function syncDeleteButton(): void {
+    vbtnDelete.hidden = !(currentMeta && owned.has(currentMeta.eventId))
+  }
+  let deleting = false
+  $('btn-delete').addEventListener('click', () => {
+    if (!currentMeta || deleting) return
+    const rec = owned.get(currentMeta.eventId)
+    if (!rec) return
+    errorSheet.show({
+      code: 'D001',
+      cause: 'Delete this post? A kind-5 tombstone is published to your relays. Servers may keep the bytes; deletion hides, it does not destroy (spec SECURITY).',
+      action: 'delete post',
+      onAction: () => { void doDelete(rec) },
+    })
+  })
+  async function doDelete(rec: OwnedPostRecord): Promise<void> {
+    deleting = true
+    try {
+      const { ok, failed } = await pool.publish(
+        {
+          kind: DELETE_KIND,
+          created_at: Math.floor(Date.now() / 1000),
+          tags: [['e', rec.eventId]],
+          content: '',
+        },
+        hexToBytes(rec.secretKey),
+      )
+      // local tombstone immediately — the feed must not wait for the relays
+      index.tombstone(rec.eventId)
+      board.setMetas(orderedRoots())
+      showToast(ok.length ? `deleted · ${ok.length}/${ok.length + failed.length} relays` : 'delete failed on all relays')
+      if (ok.length) router.go({ name: 'board' })
+    } catch {
+      showToast('delete failed')
+    } finally {
+      deleting = false
+    }
+  }
   $('btn-meta').addEventListener('click', toggleDrawer)
   $('btn-meta-close').addEventListener('click', () => {
     drawer.hidden = true
@@ -250,6 +406,7 @@ async function boot(): Promise<void> {
       setLoading('model', false)
       viewer.clear()
     }
+    studioBar.hidden = next !== 'studio'
     if (next === 'board') {
       engine.setActiveScene(board.scene)
       topbar.hidden = false
@@ -288,6 +445,7 @@ async function boot(): Promise<void> {
     if (!meta) { setMode('board'); return }
     const nav = ++viewerNav
     currentMeta = meta
+    syncDeleteButton()
     setMode('viewer')
     camDots.innerHTML = ''
     setLoading('model', true, 'loading model')
@@ -315,7 +473,14 @@ async function boot(): Promise<void> {
       void threadView.open(route.rootId).finally(() => setLoading('thread', false))
     }
     else if (route.name === 'viewer') void openViewer(route.id)
-    else if (route.name === 'studio') setMode('studio')
+    else if (route.name === 'studio') {
+      studioReply = route.rootId && route.parentId ? { rootId: route.rootId, parentId: route.parentId } : null
+      setMode('studio')
+      // Fresh composer each time (drop the previous import preview).
+      studioFilename.textContent = ''
+      btnStudioPublish.disabled = true
+      setStudioStatus(studioReply ? 'replying…' : '')
+    }
     else if (route.name === 'network') {
       setMode('board')
       networkPanel.open(() => { if (router.current.name === 'network') router.go({ name: 'board' }) })

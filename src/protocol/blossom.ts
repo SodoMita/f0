@@ -93,7 +93,7 @@ export class BlossomClient {
       this.servers.map(async (server) => {
         const res = await fetch(`${server}/upload`, {
           method: 'PUT',
-          headers: { Authorization: this.auth('upload', hash, secret) },
+          headers: { Authorization: `Nostr ${this.auth('upload', hash, secret)}` },
           body: blob,
           credentials: 'omit',
           signal: AbortSignal.timeout(60000),

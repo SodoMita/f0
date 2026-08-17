@@ -5,6 +5,48 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 
+- [x] **Deletion UI** (agent-kestrel, branch kestrel/deletion-ui). Viewer
+      bar shows a red delete button ONLY for posts in the ownedPosts store
+      (wordless UI: no dead controls). Tap -> D001 confirm sheet (kind-5 is
+      a tombstone, not destruction) -> pool.publish(kind 5, ['e', id]) with
+      the per-post secret -> immediate local index.tombstone + board refresh
+      + relay-count toast + back to board. Newly published posts become
+      deletable without a reload. Verified headless: hidden for foreign
+      posts, visible for owned, confirm flow, tombstone + board removal
+      (publish stubbed — no junk kind-5 sent to real relays).
+
+- [x] **Instant scroll-return + animations survive reloads** (agent-kestrel,
+      branch kestrel/instant-rebind). (1) bind() re-applies a RAM-cached
+      poster texture synchronously (assets.peekPoster) instead of resetting
+      the slot to placeholder+spinner and re-queueing an async job —
+      scroll-back re-show measured 0.8ms (was ~500ms+: settle-gate 150ms +
+      queue + IDB decode). Footprint/shadow restored in the same frame.
+      (2) The 'animated' flag is persisted in the poster cache
+      (:anim key) and restored by cachedPoster() — after a reload the app
+      knew a cached poster but forgot the post animates (events carry no
+      hint), so live previews were never requested again. Verified: warm
+      reload spins the live slot up again. (3) isSettled(): a slow inertia
+      glide counts as settled — the glide tail no longer delays loads ~1s.
+
+- [x] **Thread map: per-node reply buttons** (agent-kestrel, branch
+      kestrel/thread-reply-buttons). Every node carries a ↩+ pill
+      (bottom-right, board-badge visual language; ONE shared DynamicTexture,
+      repainted on theme change; per-node 4-vert plane). Pill tap wins over
+      the card body (picked first via metadata.treply) and routes to
+      #/studio?root=<rootId>&parent=<nodeId> — the reply targets the TAPPED
+      node, enabling deep-thread replies (board badge only reaches the
+      root's thread; viewer reply button only the open model). Card-body tap
+      still opens the viewer. Legend copy updated. Verified headless:
+      pill projection -> tap -> studio "replying…" with correct parent id,
+      body tap -> viewer, smoke/features/standalone green.
+
+- [x] **Studio publish flow (merged to main by agent-kestrel)**: BUD-01
+      Blossom upload w/ Nostr auth, kind-1063 publish, ownership secrets in
+      ownedPosts, reply authoring, studio import/publish HUD (branch
+      agent/studio-publish, merge 91617ca). Preservation report + partial-
+      success UI still open. NOTE for the studio agent: importGLB/clearModel/
+      setBackground now must kick() (SPEC 17) — added during the merge.
+
 - [x] **Performance: demand-driven rendering** (agent-kestrel, branch
       kestrel/perf). The RAF loop renders only when (a) input/content
       invalidated the picture (`FormEngine.kick()`, 300ms window, uncapped)
@@ -143,6 +185,12 @@ move it to **Done** with a commit reference. One agent per area.
 
 
 
+
+
+
+
+
+
 - [ ] Studio: import GLB only. Publish (BUD-01) + audio embed + ownership are
       **not** implemented (`studio/studio.ts` is a stub).
 
@@ -178,10 +226,7 @@ move it to **Done** with a commit reference. One agent per area.
 - [ ] **Low-poly text geometry** (spec 05b §1): pixel-font table, run-merge,
       weld, live triangle count — pairs with hand-writing (extrude strokes or
       offer the typed fallback).
-- [ ] **Studio publish flow**: BUD-01 upload, kind-1063 event, ownership
-      secrets, preservation report (blocks publish on loss), partial-success UI.
 - [ ] **Reply authoring** (compose → publish flow).
-- [ ] **Deletion UI** (tombstones already applied in the index).
 - [ ] **Tests**: Vitest unit suite (URL normalize, tags, NIP-10, VFS, GLB
       round-trip, text tris, quaternions) + Playwright browser suite
       (plateau, churn, preview isolation, 404 retry bound, publish round-trip).

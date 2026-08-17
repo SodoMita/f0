@@ -36,6 +36,19 @@
       </button>
     </div>
 
+
+    <div id="studio-bar" class="hud" hidden>
+      <button id="btn-studio-import" class="hbtn" title="import GLB" aria-label="import GLB">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4"/><path d="M7 9l5-5 5 5"/><path d="M5 16v3a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3"/></svg>
+      </button>
+      <span class="studio-filename" id="studio-filename"></span>
+      <div class="spacer"></div>
+      <span id="studio-status" class="studio-status"></span>
+      <button id="btn-studio-publish" class="hbtn primary" title="publish to Nostr + Blossom" aria-label="publish" disabled>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l4 4L19 6"/></svg>
+      </button>
+    </div>
+
     <div id="settings-panel" class="hud" hidden>
       <div class="drawer-head">
         <span>SETTINGS</span>
@@ -81,6 +94,12 @@
         <span class="vbtn"><button id="btn-thread" class="hbtn" title="thread (T)" aria-label="thread">
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="2.3"/><circle cx="6" cy="19" r="2.3"/><circle cx="18" cy="19" r="2.3"/><path d="M12 7.3v3.2M6 16.7v-2.4h12v2.4M6 14.3h12"/></svg>
         </button><span class="vlabel">thread</span></span>
+        <span class="vbtn"><button id="btn-reply" class="hbtn" title="reply" aria-label="reply">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11a8 8 0 0 1 8-8 8 8 0 0 1 8 8v3l-2.5-2M4 11v4l2.5-2"/><path d="M9 17l-2 3M12 15v5M15 17l2 3"/></svg>
+        </button><span class="vlabel">reply</span></span>
+        <span class="vbtn" id="vbtn-delete" hidden><button id="btn-delete" class="hbtn danger" title="delete post" aria-label="delete post">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14"/><path d="M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7"/><path d="M7 7l1 12.5A1.5 1.5 0 0 0 9.5 21h5a1.5 1.5 0 0 0 1.5-1.5L17 7"/><path d="M10 11v6M14 11v6"/></svg>
+        </button><span class="vlabel">delete</span></span>
         <span class="vbtn"><button id="btn-download" class="hbtn" title="download GLB" aria-label="download">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v10"/><path d="M8 10.5l4 4 4-4"/><path d="M4.5 18.5h15"/></svg>
         </button><span class="vlabel">save</span></span>
@@ -120,7 +139,7 @@
         <div class="legend-rows">
           <div class="legend-row"><span class="legend-glyph"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg></span><span>board — the feed of 3D posts. Tap a card to open it.</span></div>
           <div class="legend-row"><span class="legend-glyph legend-pill">&#8617;&nbsp;3</span><span>replies — tap the pill on a card to open its thread map.</span></div>
-          <div class="legend-row"><span class="legend-glyph"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5.5" r="2.2"/><circle cx="5.5" cy="18.5" r="2.2"/><circle cx="18.5" cy="18.5" r="2.2"/><path d="M12 7.7v4.3m0 0-5 4.7m5-4.7 5 4.7"/></svg></span><span>thread — drag pans, wheel / pinch zooms, tap a node opens it, 0 re-fits.</span></div>
+          <div class="legend-row"><span class="legend-glyph"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5.5" r="2.2"/><circle cx="5.5" cy="18.5" r="2.2"/><circle cx="18.5" cy="18.5" r="2.2"/><path d="M12 7.7v4.3m0 0-5 4.7m5-4.7 5 4.7"/></svg></span><span>thread — drag pans, wheel / pinch zooms, tap a node opens it, its ↩+ pill replies to it, 0 re-fits.</span></div>
           <div class="legend-row"><span class="legend-glyph"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 5.5v13l10-6.5z"/></svg></span><span>viewer — orbit with the pointer; A plays, C cycles the model's own cameras.</span></div>
           <div class="legend-row"><span class="legend-glyph"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg></span><span>create — import a GLB model and post it.</span></div>
           <div class="legend-row"><span class="legend-glyph"><span class="net-dot legend-dot"></span></span><span>relays — grey none, amber partial, green all connected. Tap for the network panel.</span></div>

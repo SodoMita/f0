@@ -2,7 +2,7 @@ export type Route =
   | { name: 'board' }
   | { name: 'thread'; rootId: string; focusId?: string }
   | { name: 'viewer'; id?: string }
-  | { name: 'studio' }
+  | { name: 'studio'; rootId?: string; parentId?: string }
   | { name: 'network' }
 
 function parse(): Route {
@@ -13,7 +13,11 @@ function parse(): Route {
   const params = new URLSearchParams(query)
   if (parts[0] === 'thread' && parts[1]) return { name: 'thread', rootId: parts[1], focusId: parts[2] || params.get('post') || undefined }
   if (parts[0] === 'viewer') return { name: 'viewer', id: parts[1] }
-  if (parts[0] === 'studio') return { name: 'studio' }
+  if (parts[0] === 'studio') {
+      const rootId = params.get('root') || undefined
+      const parentId = params.get('parent') || undefined
+      return { name: 'studio', rootId, parentId }
+    }
   if (parts[0] === 'network') return { name: 'network' }
   return { name: 'board' }
 }
@@ -23,7 +27,13 @@ function stringify(route: Route): string {
     case 'board': return '#/'
     case 'thread': return `#/thread/${route.rootId}${route.focusId ? '/' + route.focusId : ''}`
     case 'viewer': return `#/viewer${route.id ? '/' + route.id : ''}`
-    case 'studio': return '#/studio'
+    case 'studio': {
+      const q = new URLSearchParams()
+      if (route.rootId) q.set('root', route.rootId)
+      if (route.parentId) q.set('parent', route.parentId)
+      const qs = q.toString()
+      return '#/studio' + (qs ? '?' + qs : '')
+    }
     case 'network': return '#/network'
   }
 }

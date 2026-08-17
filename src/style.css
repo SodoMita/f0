@@ -452,3 +452,35 @@ body[data-theme="light"] .net-btn { background: rgba(0, 0, 0, 0.05); border-colo
 .sheet-cause { font-size: 12px; line-height: 1.5; color: var(--ink); opacity: 0.88; }
 .sheet-actions { display: flex; justify-content: flex-end; }
 body[data-theme="light"] .sheet-card { background: rgba(253, 246, 245, 0.97); border-color: rgba(200, 60, 40, 0.35); }
+
+#studio-bar {
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(18, 18, 19, 0.78);
+  border: 1px solid var(--line);
+  backdrop-filter: blur(12px);
+  max-width: calc(100vw - 32px);
+}
+.studio-filename {
+  font: 11px/1 ui-monospace, monospace;
+  color: var(--muted);
+  max-width: 40vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.studio-status { font: 11px/1 ui-monospace, monospace; color: var(--muted); min-width: 64px; text-align: right; }
+.studio-status.ok { color: var(--success); }
+.studio-status.err { color: var(--danger); }
+.studio-status.busy { color: var(--warning); }
+#btn-studio-publish:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* delete button (viewer, owned posts only) */
+.hbtn.danger { color: var(--danger); border-color: rgba(255, 103, 75, 0.4); }
+.hbtn.danger:hover { background: rgba(255, 103, 75, 0.14); border-color: rgba(255, 103, 75, 0.6); }
