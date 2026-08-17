@@ -5,6 +5,16 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 
+- [x] **Deletion UI** (agent-kestrel, branch kestrel/deletion-ui). Viewer
+      bar shows a red delete button ONLY for posts in the ownedPosts store
+      (wordless UI: no dead controls). Tap -> D001 confirm sheet (kind-5 is
+      a tombstone, not destruction) -> pool.publish(kind 5, ['e', id]) with
+      the per-post secret -> immediate local index.tombstone + board refresh
+      + relay-count toast + back to board. Newly published posts become
+      deletable without a reload. Verified headless: hidden for foreign
+      posts, visible for owned, confirm flow, tombstone + board removal
+      (publish stubbed — no junk kind-5 sent to real relays).
+
 - [x] **Instant scroll-return + animations survive reloads** (agent-kestrel,
       branch kestrel/instant-rebind). (1) bind() re-applies a RAM-cached
       poster texture synchronously (assets.peekPoster) instead of resetting
@@ -168,6 +178,8 @@ move it to **Done** with a commit reference. One agent per area.
 
 
 
+
+
 - [ ] Studio: import GLB only. Publish (BUD-01) + audio embed + ownership are
       **not** implemented (`studio/studio.ts` is a stub).
 
@@ -204,7 +216,6 @@ move it to **Done** with a commit reference. One agent per area.
       weld, live triangle count — pairs with hand-writing (extrude strokes or
       offer the typed fallback).
 - [ ] **Reply authoring** (compose → publish flow).
-- [ ] **Deletion UI** (tombstones already applied in the index).
 - [ ] **Tests**: Vitest unit suite (URL normalize, tags, NIP-10, VFS, GLB
       round-trip, text tris, quaternions) + Playwright browser suite
       (plateau, churn, preview isolation, 404 retry bound, publish round-trip).
