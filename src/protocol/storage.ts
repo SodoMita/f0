@@ -1,6 +1,6 @@
 const DB = 'form-zero'
-const VERSION = 2
-const STORES = ['modelCache', 'posterCache', 'networkConfig', 'settings'] as const
+const VERSION = 3
+const STORES = ['modelCache', 'posterCache', 'networkConfig', 'settings', 'ownedPosts'] as const
 type StoreName = (typeof STORES)[number]
 
 // In-memory fallback when IndexedDB is unavailable (sandboxed iframe, private mode).
@@ -48,6 +48,17 @@ export async function get<T>(store: StoreName, key: string): Promise<T | undefin
   })
 }
 
+export async function getAll<T>(store: StoreName): Promise<T[]> {
+  const db = await open()
+  if (!db) return [...mstore(store).values()] as T[]
+  return new Promise((resolve) => {
+    const tx = db.transaction(store, 'readonly')
+    const req = tx.objectStore(store).getAll()
+    req.onsuccess = () => { db.close(); resolve(req.result as T[]) }
+    req.onerror = () => { db.close(); resolve([]) }
+  })
+}
+
 export interface NetworkConfig { relays: string[]; blossoms: string[] }
 export async function loadNetworkConfig(): Promise<NetworkConfig> {
   return (await get<NetworkConfig>('networkConfig', 'default')) ?? { relays: [], blossoms: [] }
@@ -62,4 +73,23 @@ export async function loadSettings(): Promise<Settings> {
 }
 export function saveSettings(s: Settings): Promise<void> {
   return put('settings', 'default', s)
+}
+
+export interface OwnedPostRecord {
+  eventId: string
+  secretKey: string // hex; per-post Nostr signing key
+  modelSha256: string
+  modelUrls: string[]
+  posterUrl?: string
+  posterSha256?: string
+  relays: string[]
+  createdAt: number
+  rootId?: string
+  parentId?: string
+}
+export function saveOwnedPost(rec: OwnedPostRecord): Promise<void> {
+  return put('ownedPosts', rec.eventId, rec)
+}
+export function listOwnedPosts(): Promise<OwnedPostRecord[]> {
+  return getAll<OwnedPostRecord>('ownedPosts')
 }

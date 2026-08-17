@@ -221,6 +221,12 @@ export class AssetCache {
     }
   }
 
+  /** Render a poster for an arbitrary (not-yet-published) model blob. */
+  async renderPosterFor(model: Blob): Promise<Blob> {
+    const result = await this.poster.render(model)
+    return result.toPng() // PosterResult holds raw pixels; PNG is encoded on demand
+  }
+
   dispose(): void {
     for (const t of this.posterTex.values()) t.dispose()
     this.posterTex.clear()

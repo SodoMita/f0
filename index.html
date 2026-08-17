@@ -36,6 +36,19 @@
       </button>
     </div>
 
+
+    <div id="studio-bar" class="hud" hidden>
+      <button id="btn-studio-import" class="hbtn" title="import GLB" aria-label="import GLB">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4"/><path d="M7 9l5-5 5 5"/><path d="M5 16v3a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3"/></svg>
+      </button>
+      <span class="studio-filename" id="studio-filename"></span>
+      <div class="spacer"></div>
+      <span id="studio-status" class="studio-status"></span>
+      <button id="btn-studio-publish" class="hbtn primary" title="publish to Nostr + Blossom" aria-label="publish" disabled>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l4 4L19 6"/></svg>
+      </button>
+    </div>
+
     <div id="settings-panel" class="hud" hidden>
       <div class="drawer-head">
         <span>SETTINGS</span>
@@ -81,6 +94,9 @@
         <span class="vbtn"><button id="btn-thread" class="hbtn" title="thread (T)" aria-label="thread">
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="2.3"/><circle cx="6" cy="19" r="2.3"/><circle cx="18" cy="19" r="2.3"/><path d="M12 7.3v3.2M6 16.7v-2.4h12v2.4M6 14.3h12"/></svg>
         </button><span class="vlabel">thread</span></span>
+        <span class="vbtn"><button id="btn-reply" class="hbtn" title="reply" aria-label="reply">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11a8 8 0 0 1 8-8 8 8 0 0 1 8 8v3l-2.5-2M4 11v4l2.5-2"/><path d="M9 17l-2 3M12 15v5M15 17l2 3"/></svg>
+        </button><span class="vlabel">reply</span></span>
         <span class="vbtn"><button id="btn-download" class="hbtn" title="download GLB" aria-label="download">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v10"/><path d="M8 10.5l4 4 4-4"/><path d="M4.5 18.5h15"/></svg>
         </button><span class="vlabel">save</span></span>
