@@ -5,6 +5,14 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 
+- [x] **Deletion made discoverable + mirrors** (agent-kestrel). Deletion
+      logic extracted to `src/protocol/deletion.ts` (DeletionService) with a
+      file-header map of every piece (button, ownership store, tombstone) —
+      another agent could not find it buried in main.ts. main.ts keeps only
+      HUD wiring. CI now mirrors every build to the `site` branch, servable
+      via jsDelivr / githack for users whose ISP filters *.github.io (README
+      "Mirrors" section).
+
 - [x] **Poster thumbs fixed + rebrand to game vocabulary** (agent-kestrel,
       branch kestrel/thumb-magic-and-rename). ROOT CAUSE of "posters for my
       uploads never work": BlossomClient.download() enforced the GLB magic

@@ -306,6 +306,17 @@ Multiple agents work on this repo. Start with **`AGENTS.md`** (root), then:
 - `docs/STATUS.md` — task board (claim a task before working)
 - `docs/CONVENTIONS.md` — toolchain, code, verification, git rules
 
+## Mirrors (if github.io is filtered for you)
+
+The site is ONE self-contained HTML file, so any static host can serve it.
+CI pushes every build to the `site` branch; these mirrors serve it directly:
+
+- https://cdn.jsdelivr.net/gh/SodoMita/f0@site/index.html
+- https://rawcdn.githack.com/SodoMita/f0/site/index.html
+
+Or grab `index.html` from the `site` branch and open it from `file://` — it
+works offline-first and only talks to Nostr relays / Blossom servers.
+
 ## Deploy to GitHub Pages
 
 Automatic: `.github/workflows/deploy-pages.yml` builds the standalone with Bun

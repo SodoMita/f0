@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write # mirror job pushes the built site to the 'site' branch
   pages: write
   id-token: write
 
@@ -33,6 +33,21 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
+      # MIRROR: publish the same single-file build to the 'site' branch so it
+      # is reachable through OTHER domains when *.github.io is DPI-filtered:
+      #   https://cdn.jsdelivr.net/gh/SodoMita/f0@site/index.html
+      #   https://rawcdn.githack.com/SodoMita/f0/site/index.html
+      # The app is one self-contained HTML that only fetches user content at
+      # runtime, so it works identically from any static host.
+      - name: Push mirror branch
+        run: |
+          cd site
+          git init -q -b site
+          git config user.name "form0-ci"
+          git config user.email "ci@f0.local"
+          git add index.html
+          git commit -qm "site build $GITHUB_SHA"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" site:site
 
   deploy:
     environment:
