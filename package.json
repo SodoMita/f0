@@ -7,7 +7,13 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 0.0.0.0",
-    "build:standalone": "vite build --config vite.standalone.config.ts && python3 make-standalone.py"
+    "build:standalone": "vite build --config vite.standalone.config.ts && python3 make-standalone.py",
+    "check:orient": "node scripts/orient.mjs",
+    "check:interact": "node scripts/interact.mjs",
+    "check:facing": "node scripts/facing.mjs",
+    "capture": "node scripts/capture.mjs",
+    "smoke": "node scripts/smoke.mjs",
+    "features": "node scripts/features.mjs"
   },
   "dependencies": {
     "@babylonjs/core": "8.10.1",

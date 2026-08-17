@@ -5,14 +5,15 @@ relays + Blossom servers, one `<canvas>` drawn entirely by Babylon.js.
 Posts are animated GLB models with their own cameras, optional embedded audio.
 
 ## Layout & interaction
-- **Board**: single vertical column of 16:10 model cards (no borders, no
-  stretching). Wheel-down / drag-down scroll toward later cards; PageUp/PageDown/
-  Home/End; **scroll inertia** (configurable in settings). Tap a card → viewer;
-  the **reply badge (↩ N)** at the card's bottom-right is the reply button →
-  thread.
-- **Thread**: a 2D map of the reply tree — node planes + parent→child lines,
-  laid out by Fruchterman-Reingold force relaxation. Drag pans, wheel zooms,
-  tapping a node opens it.
+- **Board**: responsive 1–3 column grid of 16:10 model cards. Cards are fully
+  transparent — the models float on the backdrop over a soft contact shadow,
+  separated by full-bleed hairlines. Wheel-down / drag-down scrolls toward
+  later cards; PageUp/PageDown/Home/End; **scroll inertia** (configurable).
+  Tap a card → viewer; the **reply badge (↩ N)** at the card's bottom-right is
+  the reply button → thread.
+- **Thread**: a 2D map of the reply tree — framed node cards + elbow connectors
+  in a tidy top-down tree, accent-outlined root. Drag pans, **pinch zooms**,
+  wheel zooms about the cursor, `0` re-fits, tapping a node opens it.
 - **Viewer**: one interactive model; orbit camera (A) or the model's own
   cameras via dots / C; play/pause (A); metadata drawer (M); download; thread
   (T); prev/next.
@@ -21,6 +22,54 @@ Posts are animated GLB models with their own cameras, optional embedded audio.
 Settings, navigation, toolbars, metadata, toasts are plain HTML overlays.
 Only the models, the board, the reply badges and the thread map are Babylon.
 Settings: **background color** (viewer/thread/studio) + **scroll inertia**.
+
+## Key fixes this round (2026-08-17, round 3, see git history)
+
+### Mirroring: root-caused in the camera, calibration deleted
+Flat scenes were viewed from **+Z**. Babylon is left-handed, so screen-right
+was world **-X** and every `CreatePlane` card was seen from BEHIND: posters
+mirrored, reply badges mirrored, and even the board's column order reversed.
+All flat scenes now build their camera with `core/gfx.flatCamera()` (ortho at
+**-Z**), and with that **no texture kind needs any flip** — the per-GPU,
+per-kind boot calibration from round 2 is gone. `test/orient2.ts` +
+`node scripts/orient.mjs` render raw/dyn/rtt probe quads and fail if any
+corner lands in the wrong place.
+
+Flat *models* were also framed from the wrong side: `dominantFacing()` now
+picks the thin AABB axis, signs it with area-weighted **authored normals**
+(left-handed winding, verified against Babylon's own `CreatePlane`) and falls
+back to `+axis` for closed shapes. Measured on live feed content with
+`test/facing.ts` — wordmarks that used to read backwards now read forwards.
+
+### Transparent previews for real
+Two bugs, both fixed: `makeCardMaterial` **called** `mat.needAlphaBlending()`
+(a getter) instead of passing `needAlphaBlending: true` as a ShaderMaterial
+option, so cards drew opaque; and the poster/preview scenes had
+`autoClear = false`, so `rtt.clearColor` never ran (the scene owns the clear on
+the `camera.outputRenderTarget` path). Models now float on the backdrop, with a
+soft contact shadow placed from the poster's **measured footprint** (the model's
+projected AABB), not guessed.
+
+### Crisp HUD
+Every icon is inline stroked SVG (the old ⤨ ⏃ ⤓ glyphs are missing from default
+UI fonts and fell back to a blurry substitute face); the reply badge draws its
+arrow with canvas vector strokes; the engine renders at `devicePixelRatio`
+(capped at 2) instead of a pinned 1.0/1.25. Toolbar is a glass rail with
+labels, and the whole HUD flips to dark ink on light backgrounds.
+
+### Thread map: real pan, real pinch
+Pan measured the delta from the pointer-down anchor on *every* move and added
+it to the pan, so the map accelerated away while you held the pointer. It now
+integrates the delta since the previous event. Input is bound to the canvas
+with **native pointer events** (Babylon funnels touches through
+`navigator.maxTouchPoints` slots and drops the second finger), giving pinch
+zoom + two-finger pan; the wheel zooms about the cursor; `0` re-fits. Layout is
+a tidy tree (leaf slots, parents centred) with elbow connectors, node frames
+and an accent-outlined root.
+
+### Framing
+`frameDistance()` fits the 8 AABB corners against both frustum planes, so a
+wide model fills a 16:10 card instead of being sphere-fitted into a stamp.
 
 ## Key fixes this round (2026-08-17, round 2, see git history)
 
@@ -90,6 +139,8 @@ bun install
 bun run dev              # http://localhost:5173
 bun run build            # typecheck + normal build → release/
 bun run build:standalone # ONE .html → form-zero-standalone.html
+bun scripts/orient.mjs   # orientation guard (raw/dyn/rtt probes) — exits 1 on a mirror
+bun scripts/interact.mjs # thread pan/pinch/zoom + tap targets
 bun scripts/smoke.mjs    # headless boot + layout/poster/live/click/scroll
 bun scripts/features.mjs # badges + thread view + settings assertions
 ```
@@ -100,8 +151,9 @@ src/
   core/      engine (1 canvas/1 context), router, assets (poster/model cache)
   protocol/  nostr (Relay pool + backoff), blossom (SHA-256 verified), events, storage
   model/     draco (local), limits (pre-load GLB validation), facing, poster
-  board/     board (vertical column + badges + inertia), threadView (2D force map),
-             cardMaterial (unlit quad shader), previewPool (RTT slots)
+  core/gfx   flatCamera (orientation contract), backdrops, contact shadows
+  board/     board (responsive grid + badges + inertia), threadView (tidy tree map,
+             native pan/pinch), cardMaterial (unlit quad shader), previewPool (RTT slots)
   viewer/    detail viewer (one model, own cameras + orbit)
   studio/    import foundation
 ```

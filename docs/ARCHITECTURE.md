@@ -22,21 +22,24 @@ src/
     draco.ts         local Draco decoders (data: URIs), numWorkers:0
     offline.ts       blank KTX2/MSC CDN URLs (zero-CDN guarantee)
     limits.ts        validateGLB() — pre-load GLB complexity caps (crash guard)
-    facing.ts        worldBounds (union AABB) + dominantFacing (magnitude axis) +
-                     fitDistance; the auto-fit math
+    facing.ts        worldBox (union AABB) + dominantFacing (thin-axis / authored
+                     normals) + frameDistance (aspect-aware tight fit); auto-fit math
     poster.ts        GLB → 512×320 PNG via scene.render() + camera.outputRenderTarget;
                      blank-frame retry loop
   board/
     board.ts         responsive 1–3 col grid, scroll+inertia, tap→viewer, reply badges
-    cardMaterial.ts  custom unlit quad ShaderMaterial: tex.rgb*tint*alpha, per-path
-                     flip vec2, rounded corners, hairline border
+    cardMaterial.ts  unlit quad ShaderMaterial (tex.rgb*tint, tex.a*opacity),
+                     needAlphaBlending OPTION, deterministic zero flips
     previewPool.ts   bounded live-preview RTT slots; scene.render() per slot
-    threadView.ts    2D reply-tree map, Fruchterman-Reingold force relaxation
+    threadView.ts    2D reply-tree map: tidy tree + elbow edges, native-pointer
+                     pan / pinch / wheel-zoom-about-cursor, fit-to-content
   viewer/
-    viewer.ts        detail viewer: orbit + authored cameras, lights, ground glow,
-                     stats, setBackground
+    viewer.ts        detail viewer: orbit + authored cameras, lights, camera-
+                     parented spotlight backdrop, contact shadow, stats
   studio/
     studio.ts        import-only stub (publish/audio TBD)
+  core/gfx.ts        flatCamera (THE orientation contract), backdrop/spotlight/
+                     contact-shadow textures, colour helpers (shade/luminance)
   theme.ts           colors, LIMITS, DEFAULTS (relays/blossoms), kind numbers
 ```
 
@@ -49,10 +52,10 @@ relays ──(kind 1063 + 5)──▶ RelayPool ─▶ parseModelEvent ─▶ Th
                                                               ▼
                     Board ◀── setMetas/setReplyCount ──── main.ts
                      │  per card:
-                     ├─ AssetCache.getPoster ─▶ PosterRenderer ─▶ RawTexture (flip Y)
-                     └─ PreviewPool.request ─▶ RTT (no flip) ──▶ card shader
+                     ├─ AssetCache.getPoster ─▶ PosterRenderer ─▶ RawTexture (no flip)
+                     └─ PreviewPool.request ─▶ RTT (no flip) ─────▶ card shader
    tap card ─▶ #/viewer/:id ─▶ Viewer.load ─▶ authored cameras + orbit
-   tap badge ─▶ #/thread/:id ─▶ ThreadView.open ─▶ force-relaxed 2D map
+   tap badge ─▶ #/thread/:id ─▶ ThreadView.open ─▶ tidy-tree 2D map
 ```
 
 ## Scenes (one engine, swapped, never recreated)
@@ -69,18 +72,54 @@ relays ──(kind 1063 + 5)──▶ RelayPool ─▶ parseModelEvent ─▶ Th
 render target. It must **not** reset `clearColor` — each scene owns its
 background (settings).
 
-## Texture flip matrix (empirically verified — see `test/orient2.ts`)
+## Orientation contract (proved by `test/orient2.ts` + `scripts/orient.mjs`)
 
-Babylon 8 inverts `uv.x` for ShaderMaterial quads → always sample
-`1.0 - uv.x`. The Y axis depends on the texture source:
+**Every flat/ortho scene builds its camera with `core/gfx.flatCamera()`.**
+It parks an orthographic `ArcRotateCamera` at **-Z looking toward +Z**
+(`alpha = -PI/2`). This is the whole mirroring story:
 
-| Source | Storage | flip.y |
+* Babylon is LEFT-handed. A camera at **+Z** looking back at the origin has
+  screen-right = world **-X**, so quads are seen from behind: posters and
+  reply badges render mirrored AND the board's column order reverses.
+  (That was the "x flipped posts with their buttons" bug; the previous
+  per-GPU boot calibration was papering over it and got `dyn`/`rtt` wrong.)
+* `CreatePlane` = XY quad, normal (0,0,-1), uv (0,0) at the bottom-left.
+  Seen from -Z it is front-facing with u→right and v→up.
+
+With that camera **no texture kind needs any flip**:
+
+| Source | Storage | flip |
 |---|---|---|
-| Posters (`RawTexture`) | top-down | **1** |
-| Live preview (`RenderTargetTexture`) | bottom-up | 0 |
-| Badges / HUD (`DynamicTexture`) | upload flips rows | 0 |
+| Posters (`RawTexture`, `invertY=true` upload) | rows flipped at upload | (0,0) |
+| Badges / backdrops (`DynamicTexture`, `invertY` default true) | rows flipped at upload | (0,0) |
+| Live preview (`RenderTargetTexture`) | GL bottom-up | (0,0) |
 
-Set via `setCardFlip(mat, x, y)` in `cardMaterial.ts`. Never hardcode a Y-flip.
+Depth convention in flat scenes (camera at -Z, smaller z = nearer):
+backdrop `z=+2` · contact shadow `z=+0.5` · card `z=0` · badge `z=-0.05`.
+
+Run `node scripts/orient.mjs` after ANY change to cameras, planes, UVs or the
+card shader. It fails if a probe corner lands in the wrong place.
+
+## Transparency contract
+
+* `makeCardMaterial(scene, blend = true)` passes **`needAlphaBlending` as a
+  ShaderMaterial OPTION**. `mat.needAlphaBlending()` is a getter — calling it
+  does nothing, and that is why transparent posters used to sit in black
+  rectangles. Backdrops pass `blend = false` so they draw in the opaque pass.
+* Offscreen scenes (`PosterRenderer`, `PreviewPool`) must set
+  `scene.autoClear = true` + `scene.clearColor = Color4(0,0,0,0)`. When
+  rendering through `camera.outputRenderTarget` the **scene** owns the clear;
+  `rtt.clearColor` alone never runs.
+
+## Auto-fit contract
+
+`frameDistance(min, max, center, forward, fovY, aspect, fill)` projects all 8
+AABB corners into the camera basis and solves both frustum planes, so a wide
+model fills a 16:10 card. `fitDistance` (sphere fit) is legacy — it framed a
+wide sign as a postage stamp. `dominantFacing` picks the thin axis for flat
+models, signs it with authored normals, and falls back to **+axis** for closed
+shapes (measured with `test/facing.ts`: the negative side renders wordmarks
+mirrored).
 
 ## Engine traps (do not re-learn these)
 

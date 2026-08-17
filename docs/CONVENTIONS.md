@@ -70,3 +70,26 @@ bun scripts/capture.mjs && python3 scripts/visual_critique.py
 Fix it in code, then record it twice so other agents don't reintroduce it:
 1. `docs/SPEC.md` → AMENDMENTS (one terse numbered entry), and
 2. `docs/STATUS.md` → Known gaps/debt if still open.
+
+
+## Verification (2026-08-17, round 3)
+
+Vision is the only way these bugs get caught. Before claiming a visual or
+input change works:
+
+| Command | Guards |
+|---|---|
+| `node scripts/orient.mjs` | mirrored / upside-down cards, badges, live previews |
+| `node scripts/interact.mjs` | thread pan drift, pinch zoom, wheel-about-cursor, taps |
+| `node scripts/smoke.mjs` | boot, feed, posters, live slots, scroll, click |
+| `node scripts/features.mjs` | reply badges, thread view, settings |
+| `node scripts/capture.mjs` | screenshots incl. light theme + phone viewport |
+| `node scripts/facing.mjs <url>` | which side of a model is the readable one |
+
+Rules of thumb learned the hard way:
+
+* Never calibrate geometry at runtime. If something is mirrored, the camera or
+  the winding is wrong — find it and write the invariant down.
+* Never trust a symbol glyph to exist in the user's font. Draw icons.
+* Anything that integrates pointer deltas must integrate them **per event**.
+* Look at the light theme and a phone viewport before calling a design done.

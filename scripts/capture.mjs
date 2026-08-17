@@ -95,5 +95,20 @@ await page.screenshot({ path: `${OUT}/settings.png` })
 await page.evaluate(() => document.querySelector('#btn-settings')?.click())
 await page.waitForTimeout(200)
 
+// --- light theme board ---
+await page.evaluate(() => document.querySelector('.swatch[data-bg="#ffffff"]')?.click())
+await page.waitForTimeout(600)
+await page.screenshot({ path: `${OUT}/board_light.png` })
+await page.evaluate(() => document.querySelector('.swatch[data-bg="#0B0B0C"]')?.click())
+await page.evaluate(() => document.querySelector('#btn-settings')?.click())
+await page.waitForTimeout(500)
+
+// --- phone viewport ---
+const phone = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true })
+await phone.goto(URL, { waitUntil: 'domcontentloaded', timeout: 30000 })
+await phone.waitForFunction(() => window.__form0 && window.__form0.board, null, { timeout: 15000 }).catch(() => {})
+await phone.waitForTimeout(WAIT)
+await phone.screenshot({ path: `${OUT}/board_phone.png` })
+
 console.log('LOGS', JSON.stringify(logs, null, 1))
 await browser.close()

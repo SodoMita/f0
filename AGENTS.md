@@ -61,10 +61,23 @@ bun run build:standalone  # ONE self-contained form-zero-standalone.html
 8. **Side-effect imports** are required for `scene.pick` (`@babylonjs/core/Culling/ray`)
    and screenshots (`@babylonjs/core/Misc/screenshotTools`); loaders:
    `@babylonjs/loaders/glTF`.
-9. **Card textures have a per-path flip matrix** (`cardMaterial.ts`,
-   empirically verified in `test/orient2.ts`): posters/RawTexture flip Y;
-   RTT live previews and DynamicTexture badges do NOT. Don't "fix" a flip by
-   eye — use `scripts/capture.mjs` + `scripts/visual_critique.py`.
+9. **Flat scenes get their camera from `core/gfx.flatCamera()`** (ortho, at
+   **-Z**, `alpha = -PI/2`). Babylon is left-handed: a camera at +Z sees every
+   `CreatePlane` quad from BEHIND — mirrored textures and mirrored column
+   order. With the -Z camera **no texture kind needs a flip** (raw/dyn/rtt all
+   sample `(0,0)`); there is no per-GPU calibration any more. Never "fix" an
+   orientation by eye — run `node scripts/orient.mjs` (probe quads through all
+   three kinds) and `node scripts/capture.mjs` + `visual_critique.py`.
+9b. **Alpha blending is a ShaderMaterial OPTION** (`needAlphaBlending: true`),
+   not the `mat.needAlphaBlending()` getter, and offscreen scenes must set
+   `autoClear = true` + `clearColor = (0,0,0,0)` — on the
+   `camera.outputRenderTarget` path the SCENE owns the clear, so `rtt.clearColor`
+   alone leaves models sitting on black.
+9c. **HUD icons are inline SVG**, never font glyphs (⤨ ⏃ ⤓ … fall back to a
+   blurry substitute face), and the engine renders at `devicePixelRatio`.
+9d. **The thread map binds native pointer events** — Babylon drops the second
+   finger via `navigator.maxTouchPoints` slots. Pan integrates the delta since
+   the previous move event (anchor-based deltas drift forever).
 10. **Zero CDN.** Draco decoders are local (`model/draco.ts`); KTX2/MSC
     transcoder CDN URLs are blanked (`model/offline.ts`). Assert
     `grep -c cdn.babylonjs.com` on the built bundle is 0 (except the inert
@@ -78,11 +91,23 @@ Agents have no vision; **pixel/OCR checks are the eyes**. Always run:
 
 ```bash
 bun run build                       # must be clean
+bun scripts/orient.mjs              # ORIENTATION GUARD: raw/dyn/rtt probes, exits 1 on a mirror
+bun scripts/interact.mjs            # thread pan (no drift) + pinch + wheel-about-cursor + taps
 bun scripts/smoke.mjs               # boot + feed + posters + live slots + scroll + click
 bun scripts/features.mjs            # reply badges + thread view + settings
-bun scripts/capture.mjs             # save board/viewer/thread screenshots to shots/
+bun scripts/capture.mjs             # board/viewer/thread/light/phone screenshots to shots/
 python3 scripts/visual_critique.py  # orientation + composition on those shots
 ```
+
+Extra tools when touching the auto-fit/facing math:
+
+```bash
+bun scripts/collect-urls.mjs                 # list the GLB urls the live feed is serving
+bun scripts/facing.mjs <glb-url> [<url>…]    # renders each model from +facing and -facing
+                                             # -> shots/facing.png (judge the readable side)
+```
+
+`npm` works too if Bun is unavailable (`npx vite`, `node scripts/…`).
 
 Screenshots in `shots/` are scratch (gitignored). If a visual change is
 claimed, include the critique output.

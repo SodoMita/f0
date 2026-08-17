@@ -1,0 +1,12 @@
+import { chromium } from 'playwright'
+const urls = process.argv.slice(2)
+const q = urls.map((u) => 'u=' + encodeURIComponent(u)).join('&')
+const browser = await chromium.launch({ headless: true, args: ['--use-angle=swiftshader','--enable-unsafe-swiftshader','--no-sandbox'] })
+const page = await browser.newPage({ viewport: { width: 900, height: 300 * urls.length + 60 } })
+page.on('pageerror', (e) => console.log('[pageerror]', e.message.slice(0, 200)))
+await page.goto('http://localhost:5173/test/facing.html?' + q, { waitUntil: 'domcontentloaded' })
+await page.waitForFunction(() => window.__facingDone, null, { timeout: 180000 })
+await page.waitForTimeout(500)
+await page.screenshot({ path: 'shots/facing.png', fullPage: true })
+console.log(await page.evaluate(() => [...document.querySelectorAll('#out>div>div')].map(d => d.textContent).join('\n')))
+await browser.close()

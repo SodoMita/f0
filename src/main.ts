@@ -13,6 +13,7 @@ import { AssetCache } from './core/assets'
 import { configureDraco } from './model/draco'
 import { enforceOffline } from './model/offline'
 import { DEFAULTS, theme } from './theme'
+import { luminance } from './core/gfx'
 import { loadNetworkConfig, loadSettings, saveSettings } from './protocol/storage'
 
 type Mode = 'boot' | 'board' | 'viewer' | 'studio' | 'thread'
@@ -97,11 +98,16 @@ async function boot(): Promise<void> {
   })
   $('btn-download').addEventListener('click', () => void downloadCurrent())
   $('btn-meta').addEventListener('click', toggleDrawer)
-  $('btn-meta-close').addEventListener('click', () => { drawer.hidden = true })
+  $('btn-meta-close').addEventListener('click', () => {
+    drawer.hidden = true
+    document.body.classList.remove('drawer-open')
+  })
 
   // ---------- settings (HTML) ----------
   const settingsPanel = $('settings-panel')
   function applyBackground(hex: string): void {
+    // HUD ink follows the backdrop so a light board is still readable
+    document.body.dataset.theme = luminance(hex) < 0.5 ? 'dark' : 'light'
     board.setBackground(hex)
     viewer.setBackground(hex)
     studio.setBackground(hex)
@@ -176,6 +182,7 @@ async function boot(): Promise<void> {
 
   function toggleDrawer(): void {
     drawer.hidden = !drawer.hidden
+    document.body.classList.toggle('drawer-open', !drawer.hidden)
     if (!drawer.hidden && currentMeta) fillDrawer(currentMeta)
   }
 
@@ -215,6 +222,7 @@ async function boot(): Promise<void> {
       topbar.hidden = false
       viewerBar.hidden = true
       drawer.hidden = true
+      document.body.classList.remove('drawer-open')
       viewer.detach()
       studio.detach()
     } else if (next === 'viewer') {
@@ -228,6 +236,7 @@ async function boot(): Promise<void> {
       topbar.hidden = false
       viewerBar.hidden = true
       drawer.hidden = true
+      document.body.classList.remove('drawer-open')
       viewer.detach()
       studio.detach()
       threadView.attach()

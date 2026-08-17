@@ -11,6 +11,27 @@
   --glass-line: rgba(255, 255, 255, 0.14);
 }
 
+/* Light themes: the HUD flips to dark ink so buttons/labels stay legible
+   over a bright backdrop (the settings background colour drives this). */
+body[data-theme="light"] {
+  --ink: #16161b;
+  --muted: #6d6d76;
+  --line: rgba(0, 0, 0, 0.14);
+  --glass: rgba(255, 255, 255, 0.55);
+  --glass-line: rgba(0, 0, 0, 0.14);
+}
+body[data-theme="light"] .hbtn:hover { background: rgba(255, 255, 255, 0.85); border-color: rgba(0, 0, 0, 0.28); }
+body[data-theme="light"] .hbtn.primary { color: #fff5f1; }
+body[data-theme="light"] .rail { background: rgba(255, 255, 255, 0.62); border-color: rgba(0, 0, 0, 0.10); }
+body[data-theme="light"] .rail .hbtn:hover { background: rgba(0, 0, 0, 0.07); }
+body[data-theme="light"] .rail-sep { background: rgba(0, 0, 0, 0.14); }
+body[data-theme="light"] #meta-drawer { background: rgba(250, 250, 252, 0.78); border-color: rgba(0, 0, 0, 0.10); }
+body[data-theme="light"] #settings-panel { background: rgba(252, 252, 254, 0.95); border-color: rgba(0, 0, 0, 0.10); }
+body[data-theme="light"] #toast { background: rgba(250, 250, 252, 0.85); border-color: rgba(0, 0, 0, 0.12); }
+body[data-theme="light"] .cam-dot { border-color: rgba(0, 0, 0, 0.28); }
+body[data-theme="light"] .cam-dot.active { background: #16161b; color: #fafafc; border-color: #16161b; }
+body[data-theme="light"] .net-dot { box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.06); }
+
 html, body {
   margin: 0; padding: 0; width: 100%; height: 100%;
   overflow: hidden; background: var(--bg); color: var(--ink);
@@ -110,6 +131,7 @@ html, body {
   bottom: 0; left: 0; right: 0;
   display: flex; justify-content: center;
   padding: 0 16px 18px;
+  transition: padding-right 0.18s ease;
   padding-bottom: max(18px, env(safe-area-inset-bottom));
   pointer-events: none;
 }
@@ -143,6 +165,10 @@ html, body {
 .rail .hbtn { background: transparent; border-color: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; }
 .rail .hbtn:hover { background: rgba(255, 255, 255, 0.10); border-color: transparent; }
 
+/* the drawer must not cover the toolbar */
+body.drawer-open #viewer-bar { padding-right: calc(min(400px, 92vw) + 16px); }
+@media (max-width: 720px) { body.drawer-open #viewer-bar { display: none; } }
+
 /* camera dots */
 #cam-dots { display: flex; gap: 6px; padding-top: 6px; pointer-events: auto; }
 .cam-dot {
@@ -159,8 +185,8 @@ html, body {
 /* ---------- metadata drawer ---------- */
 #meta-drawer {
   top: 0; right: 0; bottom: 0;
-  width: min(430px, 92vw);
-  background: rgba(16, 16, 20, 0.62);
+  width: min(400px, 92vw);
+  background: rgba(14, 14, 18, 0.88);
   border-left: 1px solid rgba(255, 255, 255, 0.10);
   padding: 16px; overflow: auto;
   backdrop-filter: blur(24px) saturate(120%);
@@ -201,13 +227,15 @@ html, body {
   top: 68px; right: 16px;
   width: 250px;
   display: flex; flex-direction: column; gap: 14px;
-  background: rgba(16, 16, 20, 0.62);
+  /* nearly opaque: a translucent panel sitting under the orange + button
+     smeared its accent all over the settings */
+  background: rgba(15, 15, 19, 0.93);
   border: 1px solid rgba(255, 255, 255, 0.11);
   border-radius: 16px;
   padding: 14px 16px 16px;
   pointer-events: auto;
-  backdrop-filter: blur(24px) saturate(130%);
-  -webkit-backdrop-filter: blur(24px) saturate(130%);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
 }
 #settings-panel .drawer-head { margin-bottom: 0; }
 .setting-row { display: flex; flex-direction: column; gap: 9px; }
@@ -222,9 +250,10 @@ html, body {
 .swatch[data-bg="#ffffff"] { border-color: rgba(0, 0, 0, 0.3); }
 .swatch.active { box-shadow: 0 0 0 2px var(--accent); }
 #bg-custom {
-  width: 26px; height: 26px; border: 1px solid rgba(255, 255, 255, 0.22);
+  width: 26px; height: 26px; border: 1px dashed rgba(255, 255, 255, 0.45);
   border-radius: 8px; padding: 0; background: none; cursor: pointer;
 }
+body[data-theme="light"] #bg-custom { border-color: rgba(0, 0, 0, 0.4); }
 #bg-custom::-webkit-color-swatch-wrapper { padding: 2px; }
 #bg-custom::-webkit-color-swatch { border: none; border-radius: 5px; }
 

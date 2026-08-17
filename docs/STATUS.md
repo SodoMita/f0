@@ -28,9 +28,30 @@ move it to **Done** with a commit reference. One agent per area.
       (`vite.standalone.config.ts`, `make-standalone.py`, `.github/workflows/`)
 - [x] Visual pass + texture-flip root-cause (`test/orient2.ts`,
       `scripts/visual_critique.py`).
-- [x] Mirror fix round 2: per-kind (raw/dyn/rtt) per-axis boot calibration of
-      card orientation, measured through the real board framebuffer
-      (`board/cardMaterial.ts`, commit 9dfda25).
+- [x] ~~Mirror fix round 2: per-kind boot calibration~~ **superseded** — the
+      calibration guessed wrong for badges/live previews. Round 3 removed it.
+- [x] **Mirror fix round 3 (root cause, done)**: flat scenes now use
+      `core/gfx.flatCamera()` (ortho at -Z). Babylon is left-handed, so the old
+      +Z camera showed every card quad from behind — mirrored posters, mirrored
+      reply badges, reversed column order. Zero flips, zero calibration.
+      Guarded by `test/orient2.ts` + `scripts/orient.mjs`.
+- [x] **Transparent cards for real**: `needAlphaBlending` passed as a
+      ShaderMaterial option (the code was calling the getter) + offscreen
+      scenes clear with `autoClear=true, clearColor=(0,0,0,0)`.
+- [x] **Crisp HUD**: inline SVG icons, vector-drawn reply arrow, engine renders
+      at `devicePixelRatio` (was pinned to 1.0/1.25).
+- [x] **Thread map**: pan drift fixed (per-event deltas via native pointer
+      events), pinch zoom + two-finger pan, wheel zoom about the cursor, tidy
+      tree layout with elbow connectors + node frames, fit-to-content, `0`
+      re-fits. Guarded by `scripts/interact.mjs`.
+- [x] **Auto-fit**: `frameDistance()` (aspect-aware, 8 AABB corners) so wide
+      models fill the card; `dominantFacing()` rewritten (thin axis + authored
+      normals + `+axis` fallback) so flat wordmarks are never viewed from
+      behind. Measured with `test/facing.ts` / `scripts/facing.mjs`.
+- [x] **Design pass 3**: measured contact shadows under each model, spotlight
+      viewer backdrop (the old one sat behind the camera and leaked a white
+      band), full-bleed row hairlines, glass toolbar rail with labels, light
+      theme for the whole HUD, settings swatches actually show their colours.
 - [x] Mockup pass: frameless transparent cards, separator lines between rows,
       reply tree constrained to a <90° cone (measured ~84°), ghost badges +
       glassy HUD. (commit 9dfda25)

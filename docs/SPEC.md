@@ -106,3 +106,45 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     animation + embedded audio. Rotation-only is an acceptable fallback; the
     recorded camera must play back in the feed's live preview like any other
     authored camera animation (spec 05b §2.3).
+
+13. Card orientation is a CAMERA contract, not a driver quirk. All flat scenes
+    use core/gfx.flatCamera() (ortho ArcRotateCamera at -Z, alpha=-PI/2).
+    Babylon is left-handed, so a camera at +Z sees every CreatePlane quad from
+    behind: mirrored textures AND mirrored column order. With the camera at -Z
+    no texture kind needs a flip (raw/dyn/rtt all sample (0,0)); the previous
+    per-GPU, per-kind boot calibration is DELETED. Guard: scripts/orient.mjs.
+
+14. Alpha blending on ShaderMaterial is an OPTION, not a method call.
+    `new ShaderMaterial(..., { needAlphaBlending: true })`. `mat.needAlphaBlending()`
+    is a getter; calling it (as the code did) leaves the material opaque, which
+    is why transparent posters/previews still showed black rectangles.
+
+15. Offscreen scenes own their clear. When rendering via
+    camera.outputRenderTarget + scene.render(), the SCENE clears the bound
+    framebuffer: set scene.autoClear = true and scene.clearColor = (0,0,0,0).
+    Setting only rtt.clearColor does nothing on that path.
+
+16. Auto-fit must respect the frame aspect. frameDistance() solves both
+    frustum planes over the 8 AABB corners (fill ~0.86 for posters). A bounding
+    SPHERE fit shrinks wide/flat models to a stamp in a 16:10 card.
+
+17. Facing for flat content. dominantFacing(): thin AABB axis when the model is
+    clearly flat, signed by AREA-WEIGHTED AUTHORED NORMALS (winding uses the
+    left-handed cross(e2,e1) — Babylon's own CreatePlane proves the sign), and
+    +axis when the shape is closed and the normals cancel. Measured on live
+    board content with test/facing.ts; the opposite convention rendered every
+    wordmark mirrored.
+
+18. Multi-touch does not come from Babylon's observable. Babylon routes touches
+    through navigator.maxTouchPoints device slots and silently drops extra
+    fingers, so the thread map binds NATIVE pointer events on the canvas
+    (attach()/detach() with the route). Pan integrates the delta since the
+    PREVIOUS move event — measuring from the pointer-down anchor and adding it
+    every move makes the map drift forever (reported bug). Guard:
+    scripts/interact.mjs.
+
+19. HUD icons are inline SVG, never font glyphs. Symbols like the reply arrow,
+    shuffle and download glyphs are missing from default UI fonts and fall back
+    to a blurry substitute face; the reply badge draws its arrow with canvas
+    vector strokes. The engine renders at devicePixelRatio (capped at 2) — it
+    was pinned to 1.0/1.25, which softened everything Babylon drew on HiDPI.
