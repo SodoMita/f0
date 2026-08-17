@@ -162,25 +162,25 @@ async function boot(): Promise<void> {
     fileInput.value = ''
     const prevAccept = fileInput.accept
     const prevMultiple = fileInput.multiple
-    fileInput.accept = '.glb'
-    fileInput.multiple = false
+    // glB, glTF + sidecars (.bin + images), or OBJ + .mtl + images.
+    fileInput.accept = '.glb,.gltf,.obj,.mtl,.bin,.png,.jpg,.jpeg,.webp,.ktx2,.basis'
+    fileInput.multiple = true
     fileInput.addEventListener('change', async () => {
-      const file = fileInput.files?.[0]
-      // Restore the shared input to its neutral state.
+      const picked = fileInput.files ? Array.from(fileInput.files) : []
       fileInput.accept = prevAccept
       fileInput.multiple = prevMultiple
-      if (!file) return
+      if (!picked.length) return
       try {
         setStudioStatus('importing…', 'busy')
-        const imported = await studio.importGLB(file)
-        studioFilename.textContent = file.name
+        const imported = await studio.importFiles(picked)
+        const label = picked.length === 1 ? picked[0].name : `${picked.length} files`
+        studioFilename.textContent = label
         btnStudioPublish.disabled = false
-        setStudioStatus(`${imported.report.stats.meshes} mesh · ${(file.size / 1048576).toFixed(1)} MiB`)
+        setStudioStatus(`${imported.report.stats.meshes} mesh · ${(imported.file.size / 1048576).toFixed(1)} MiB`)
       } catch (err) {
         setStudioStatus(err instanceof Error ? err.message : 'import failed', 'err')
       }
     }, { once: true })
-    // File dialog must open from a trusted click.
     fileInput.click()
   }
 
