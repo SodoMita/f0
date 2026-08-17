@@ -149,6 +149,11 @@ move it to **Done** with a commit reference. One agent per area.
   pushes to `main`.
 ## In progress
 
+- [ ] **[claimed: agent-kestrel]** Board fixes: instant card re-show on
+      scroll-return (sync rebind from the RAM poster cache) + animated flag
+      persisted with the poster cache so live previews survive reloads.
+      Touches core/assets, board/board.
+
 
 
 
