@@ -15,18 +15,27 @@ and optional embedded audio.
 - **Thread**: a 2D map of the reply tree — framed node cards + elbow connectors
   in a tidy top-down tree, accent-outlined root. Drag pans, **pinch zooms**,
   wheel zooms about the cursor, `0` re-fits, tapping a node opens it.
+  **Planned modes** (a settings choice, spec AMENDMENT 43): 2D posters (now) ·
+  tree view · **3D** — the actual GLB models instead of poster textures. In 3D
+  each node shows its real model through the model's own MAIN camera, applied
+  as the model's transform vs a static thread camera (the camera is just a
+  position) — when a model is centered, the thread view matches the model's
+  main-camera view.
 - **Viewer**: one interactive model; orbit camera (A) or the model's own
   cameras via dots / C; play/pause (A); metadata drawer (M); download; thread
-  (T); prev/next.
+  (T); prev/next. **VR** (spec AMENDMENT 41): an enter-VR action puts the
+  model in 1:1 WebXR immersive space with 6-DOF head tracking (same canvas /
+  engine); hidden when unsupported.
 
 ## HUD is HTML
 Settings, navigation, toolbars, metadata, toasts are plain HTML overlays.
 Only the models, the board, the reply badges and the thread map are Babylon.
 Settings: **background color** (viewer/thread/studio) + **scroll inertia**.
 
-## Settings (2026-08-17, round 7)
+## Settings — there are MANY (2026-08-17, round 7)
 
-A full graphics/audio settings system — `src/settings/schema.ts` is the single
+FORM/0 has a large, growing settings surface (spec AMENDMENT 42): a full
+graphics/audio settings system — `src/settings/schema.ts` is the single
 source of truth that drives persistence, the panel, the presets and the
 availability copy.
 
@@ -293,10 +302,13 @@ src/
   studio/    import foundation
 ```
 
-## Next (spec order)
-Network panel / error sheets → studio publish (BUD-01) + audio embed →
-brush editor (05-B) + low-poly text + animation editor (05b) →
-Vitest + Playwright suite with screenshots.
+## Next (priority order)
+
+Editor core first (the product's primary use cases): **paint editor for
+hand-writing text** → **animation editor** → **audio recording** → **phone-pose
+camera while recording**. Then: 3D thread view mode, VR support (WebXR), new
+settings entries (thread mode + VR toggle), low-poly text geometry, and the
+Vitest + Playwright suite. See `docs/STATUS.md` for the full board.
 
 ## Docs for agents
 

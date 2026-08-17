@@ -6,7 +6,8 @@ swap) · core/router (hash routes) · core/assets (poster/model cache by SHA,
 blossom (SHA verify + BUD-01), events, thread-index, storage} · model/{draco
 (local), offline (blank CDN URLs), limits (pre-load GLB caps), facing (auto-fit
 math), poster} · board/{board (1-3 col grid, inertia, badges), cardMaterial
-(custom unlit shader), previewPool (RTT slots), threadView (force-relaxed map)}
+(custom unlit shader), previewPool (RTT slots), threadView (2D tree map;
+planned 3D mode = actual models via main-camera-as-model-transform)}
 · viewer (orbit + authored cameras) · studio (stub).
 
 DATA FLOW: relays -> parseModelEvent -> ThreadIndex -> board (setMetas +

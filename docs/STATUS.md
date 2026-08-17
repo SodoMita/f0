@@ -280,6 +280,22 @@ move it to **Done** with a commit reference. One agent per area.
 
 **Rest (spec order):**
 
+- [ ] **3D thread view mode** (AMENDMENT 43): thread setting — (a) 2D posters
+      (current), (b) tree view, (c) 3D actual GLB models. In 3D, apply the
+      model's MAIN camera as the MODEL transform vs a static thread camera
+      (model rotated by inverse(main-cam rotation), at the node's camera
+      position; thread camera is only a position). Center a node -> thread view
+      == model's main-camera view. Fall back to auto-fit when no camera. Load
+      models only near viewport (same pipeline as board).
+- [ ] **VR support** (AMENDMENT 41): WebXR immersive viewing in the viewer —
+      `WebXRExperienceHelper`, xrCompatible canvas (same engine/canvas), 6-DOF
+      tracking, enter-VR action hidden when unsupported, error sheet on failed
+      entry, reduced-motion respected.
+- [ ] **New settings entries** (AMENDMENT 42): the settings system already
+      exists (`src/settings/schema.ts`, ~50 settings, 11 groups). Add the NEW
+      tunables to it — thread view mode (AMENDMENT 43) and VR toggle
+      (AMENDMENT 41), plus any camera/editor defaults — as schema entries
+      (persisted, searchable, presets-aware), never as hard-coded constants.
 - [ ] **Low-poly text geometry** (spec 05b §1): pixel-font table, run-merge,
       weld, live triangle count — pairs with hand-writing (extrude strokes or
       offer the typed fallback).

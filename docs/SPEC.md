@@ -300,6 +300,7 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     posts. GLB image dimensions are now really parsed (PNG/JPEG/WebP headers)
     so the spec's decoded-pixel budget is enforced instead of stubbed.
 
+
 37. SECURITY: GLBs are self-contained, enforced at validation
     (`validateGLB`, src/model/limits.ts). Any non-empty `uri` that is not a
     `data:` URI — `buffers[].uri`, `images[].uri`, or any extension uri —
@@ -331,3 +332,36 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     weaker header (`script-src 'unsafe-inline' data:`) locks base-uri,
     object-src, frame-src and every connect/img/media/worker scheme to what
     the app actually uses.
+
+41. VR support. WebXR immersive viewing is a first-class, natural feature:
+    - Viewer: an "enter VR" action (hidden when unsupported) puts the model in
+      1:1 immersive space with 6-DOF head tracking via WebXR
+      (WebXRExperienceHelper + xrCompatible canvas; same single canvas, same
+      engine — the one-canvas rule still holds).
+    - Board/thread/editor previews may add a VR mode later; the viewer is the
+      primary surface.
+    - Constraints: requires a secure context (HTTPS) and a WebXR-capable
+      browser/headset; degrade gracefully (button hidden, error sheet if entry
+      fails). Respect prefers-reduced-motion.
+
+42. Many settings. FORM/0 has MANY settings — see `src/settings/schema.ts`
+    (single source of truth, ~50 settings across 11 groups, presets + Custom,
+    search, persistence) and AMENDMENT 32. The settings surface is HTML and
+    keeps GROWING: new tunables (thread view mode — AMENDMENT 43 — VR toggle,
+    camera options, network endpoints, editor defaults) go into the schema, are
+    persisted, and are read at use-sites — never hard-code a tunable in a
+    module.
+
+43. Thread view = three modes (a settings choice):
+    (a) 2D posts — flat poster cards (the current force-relaxed map, AMENDMENT 3);
+    (b) tree view — hierarchical tree layout;
+    (c) 3D — actual GLB models instead of poster textures, arranged in 3D space.
+    In 3D mode each node shows its REAL model through the model's MAIN camera,
+    applied as the MODEL's transform relative to a static camera: the model is
+    rotated by inverse(main-camera rotation) and placed at the node's camera
+    position; the thread camera's orientation never changes — it is "just a
+    position" that moves between nodes. When a model's node is at the center of
+    the view, the thread camera and the model's main camera show the same view.
+    (Fall back to auto-fit when a model has no camera.) Nodes load models only
+    near the viewport, same pipeline as the board.
+

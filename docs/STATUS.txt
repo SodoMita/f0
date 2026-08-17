@@ -1,11 +1,23 @@
 STATUS — task board (digest of docs/STATUS.md; the .md is authoritative)
 
-DONE: skeleton+router · relay pool + live feed · Blossom download+SHA ·
-poster pipeline · board (1-3 col, inertia, badges) · preview slot pool ·
-viewer (orbit + authored cameras) · thread 2D map · HTML HUD + settings ·
-local Draco + GLB limits · standalone + GitHub Pages · visual pass + flip fix.
+DONE (highlights): skeleton+router · relay pool + live feed · Blossom+SHA ·
+local posters (auto-fit, frameDistance) · board (1-3 col, virtualised,
+inertia, badges) · preview slot pool (viewport-gated, FPS cap) · viewer
+(orbit + authored cameras, single-model guard) · thread map (pan/pinch/zoom,
+tidy tree, per-node reply pills) · HTML HUD · demand-driven render loop
+(kick(), render-on-demand, adaptive resolution) · comprehensive settings
+(~50 settings, 11 groups, presets, src/settings/schema.ts) · deletion service
++ deletion UI · studio publish flow (BUD-01 + kind-1063 + ownership; merged) ·
+first-run legend · network panel · error sheets · local Draco + GLB limits ·
+standalone + GitHub Pages + mirrors (site branch / jsDelivr / githack) ·
+perf passes (workers, PBO, curated loader) · design passes + mirror/flip fixes.
 
-IN PROGRESS: studio (import-only stub; publish/audio/ownership not done).
+INCIDENT LOG: Pages had a 503 outage (artifact fine, re-run); main was once
+force-pushed away and restored — unlanded work kept on salvage/dev-rewrite
+(publish.ts, textMesh.ts, gui experiments); CHERRY-PICK from there, don't
+rewrite. Branch protection now blocks force-pushes.
+
+IN PROGRESS: studio polish (preservation report + partial-success UI remain).
 
 NEXT — EDITOR CORE FIRST (primary use cases):
  1 paint editor, primary = hand-writing text (ink: pressure, coalesced events,
@@ -15,8 +27,9 @@ NEXT — EDITOR CORE FIRST (primary use cases):
  4 phone-pose camera while recording (DeviceOrientation rotation; WebXR for
    position; sync pose+audio on one clock -> glTF camera anim)
 
-REST: low-poly text · studio publish (BUD-01) · first-run legend · network
-panel · error sheets · reply authoring · deletion UI · Vitest+Playwright suite.
+REST: 3D thread view mode (AMENDMENT 39: 2D posters / tree / 3D models with
+the main-camera-as-model-transform rule) · VR support (AMENDMENT 37, WebXR
+viewer) · new settings entries (thread mode + VR toggle into the schema) ·
+low-poly text geometry · tests (Vitest + Playwright).
 
-DEBT: studio is a stub · #/network falls back to board · poster/preview pool
-shares one scene (mutex) · no service worker.
+DEBT: poster/preview pool shares one scene (mutex) · no service worker.

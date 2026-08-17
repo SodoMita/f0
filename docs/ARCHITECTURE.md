@@ -64,7 +64,7 @@ relays ──(kind 1063 + 5)──▶ RelayPool ─▶ parseModelEvent ─▶ Th
 |---|---|---|
 | board | `Board` | ortho; card planes (XY), badges, shadows |
 | viewer | `Viewer` | one model; orbit + authored cameras |
-| thread | `ThreadView` | ortho; 2D reply map |
+| thread | `ThreadView` | ortho; 2D reply map (future: 3D models mode) |
 | studio | `Studio` | editor scene (stub) |
 | ui | `FormEngine` | fallback overlay (autoClear=false) |
 

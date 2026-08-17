@@ -30,4 +30,22 @@ poster renders (mutex), concurrent downloads <=3. 10 paint editor's primary job
 = hand-writing text (ink-style). 11 editor priorities: handwriting -> animation
 editing -> audio recording (getUserMedia+MediaRecorder). 12 phone-pose camera
 while recording (DeviceOrientation rotation; WebXR for translation; never
-double-integrate DeviceMotion acceleration).
+double-integrate DeviceMotion acceleration). 13-36 (added by other agents):
+flat-camera contract, alpha-blend option, offscreen clears, aspect-aware
+frameDistance, dominantFacing thin-axis, multi-touch via native events, inline
+SVG HUD, one-model view tokens, spinner loading, demand-driven render loop,
+virtualised board, viewport-gated work, cheap posters, curated glTF loader,
+persistent shaders, async PBO readPixels, worker offload, decode-once bytes,
+no-mipmap DynamicTextures, honest settings schema (~50 settings, 11 groups),
+on-demand pipelines, conditional image processing, non-destructive texture cap.
+41 VR support: WebXR immersive viewing in the viewer (6-DOF head tracking,
+same canvas/engine, enter-VR action hidden when unsupported); HTTPS + capable
+browser, graceful degrade, reduced-motion respected. 42 MANY settings: a large,
+growing settings surface (see src/settings/schema.ts, ~50 settings) — new
+tunables (thread mode, VR toggle, cameras, endpoints) are schema entries,
+never hard-coded. 43 thread view = 3 modes: (a) 2D posters (current),
+(b) tree view, (c) 3D = actual GLB models instead of textures; in 3D each node
+shows its real model through the model's MAIN camera applied as the MODEL
+transform vs a static camera (model rotated by inverse of main-cam rotation, at
+the node's camera position; thread camera is only a position) — when centered,
+thread view == model's main-camera view. Fall back to auto-fit when no camera.
