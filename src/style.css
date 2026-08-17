@@ -58,21 +58,21 @@ html, body {
 /* ---------- buttons ---------- */
 .hbtn {
   pointer-events: auto;
-  background: rgba(22, 22, 26, 0.72);
+  background: rgba(255, 255, 255, 0.06);
   color: var(--ink);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 11px;
   width: 46px; height: 46px;
   font-size: 19px; line-height: 1;
   cursor: pointer;
   display: grid; place-items: center;
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  box-shadow: 0 2px 14px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.22);
   transition: background 0.12s ease, border-color 0.12s ease, transform 0.12s ease;
 }
-.hbtn:hover { background: #2a2a31; border-color: rgba(255, 255, 255, 0.32); }
-.hbtn:active { background: #34343c; transform: scale(0.96); }
+.hbtn:hover { background: rgba(255, 255, 255, 0.13); border-color: rgba(255, 255, 255, 0.34); }
+.hbtn:active { background: rgba(255, 255, 255, 0.2); transform: scale(0.96); }
 .hbtn.primary {
   background: var(--accent);
   color: #180a06;
@@ -115,11 +115,11 @@ html, body {
 #meta-drawer {
   top: 0; right: 0; bottom: 0;
   width: min(430px, 92vw);
-  background: rgba(20, 20, 24, 0.88);
+  background: rgba(18, 18, 24, 0.55);
   border-left: 1px solid rgba(255, 255, 255, 0.12);
   padding: 16px; overflow: auto;
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
 }
 .drawer-head {
   display: flex; justify-content: space-between; align-items: center;
@@ -135,7 +135,7 @@ html, body {
 /* ---------- toast ---------- */
 #toast {
   left: 50%; bottom: 84px; transform: translateX(-50%);
-  background: rgba(22, 22, 26, 0.88); border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(22, 22, 26, 0.6); border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 12px; padding: 12px 18px; font-size: 13px;
   max-width: 80vw;
   backdrop-filter: blur(12px);
@@ -154,14 +154,14 @@ html, body {
 #settings-panel {
   top: 70px; right: 18px;
   width: 264px;
-  background: rgba(22, 22, 26, 0.82);
+  background: rgba(20, 20, 28, 0.5);
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 14px;
   padding: 16px 18px;
   pointer-events: auto;
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
 }
 .setting-row { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
 .setting-label { font-size: 11px; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; }

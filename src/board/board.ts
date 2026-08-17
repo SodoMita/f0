@@ -17,7 +17,7 @@ import type { FormEngine } from '../core/engine'
 import type { ThreadMeta } from '../protocol/thread-index'
 import type { AssetCache } from '../core/assets'
 import { PreviewPool } from './previewPool'
-import { makeCardMaterial, setCardTexture, setCardTint, setCardWhite, setCardFlip, setCardRounded, setCardBorder } from './cardMaterial'
+import { makeCardMaterial, setCardTexture, setCardTint, setCardWhite, setCardFlip } from './cardMaterial'
 import type { ShaderMaterial } from '@babylonjs/core/Materials/shaderMaterial'
 import { theme, LIMITS } from '../theme'
 
@@ -32,8 +32,6 @@ interface CardSlot {
   mat: ShaderMaterial
   poster: Texture | null
   live: RenderTargetTexture | null
-  shadow: Mesh
-  shadowMat: ShaderMaterial
   // reply badge (Babylon — same space as the cards): "↩ N" pill that opens the thread
   badge: Mesh
   badgeMat: ShaderMaterial
@@ -58,8 +56,8 @@ const BADGE_H = 1.1
 
 // Board background: subtle vertical gradient (keeps the scene readable
 // without the pitch-black void the first VLM critique flagged).
-const BG_TOP = '#191922'
-const BG_BOTTOM = '#0b0b0c'
+const BG_TOP = '#22222c'
+const BG_BOTTOM = '#141419'
 
 export class Board {
   readonly scene: Scene
@@ -77,7 +75,8 @@ export class Board {
   private scrollY = 0
   private maxScroll = 0
   private backdrop: Mesh
-  private shadowTex: DynamicTexture
+  private seps: Mesh[] = []
+  private sepTops: number[] = []
   // tap vs drag + inertia
   private dragging = false
   private downPointerY = 0
@@ -121,34 +120,8 @@ export class Board {
     }
     setCardTexture(bgMat, bgTex)
     setCardWhite(bgMat)
-    setCardFlip(bgMat, false, false)
+    setCardFlip(bgMat, 'dyn')
 
-    // Shared soft shadow blob (alpha gradient) for cards.
-    this.shadowTex = new DynamicTexture('card-shadow', { width: 256, height: 160 }, this.scene, false)
-    {
-      const ctx = this.shadowTex.getContext() as CanvasRenderingContext2D
-      ctx.clearRect(0, 0, 256, 160)
-      ctx.fillStyle = 'rgba(0,0,0,0.55)'
-      ctx.beginPath()
-      const r = 22
-      ctx.moveTo(18 + r, 18)
-      ctx.lineTo(238 - r, 18)
-      ctx.arcTo(238, 18, 238, 18 + r, r)
-      ctx.lineTo(238, 142 - r)
-      ctx.arcTo(238, 142, 238 - r, 142, r)
-      ctx.lineTo(18 + r, 142)
-      ctx.arcTo(18, 142, 18, 142 - r, r)
-      ctx.lineTo(18, 18 + r)
-      ctx.arcTo(18, 18, 18 + r, 18, r)
-      ctx.closePath()
-      ctx.shadowColor = 'rgba(0,0,0,0.85)'
-      ctx.shadowBlur = 34
-      ctx.shadowOffsetY = 6
-      ctx.fill()
-      ctx.shadowBlur = 0
-      ctx.fill()
-      this.shadowTex.update()
-    }
 
     this.cb = cb
     this.previewPool = new PreviewPool(
@@ -162,7 +135,7 @@ export class Board {
       slot.live = rtt
       setCardTexture(slot.mat, rtt)
       setCardWhite(slot.mat)
-      setCardFlip(slot.mat, false, false) // RTT storage is bottom-up: no Y flip
+      setCardFlip(slot.mat, 'rtt')
     }
     this.scene.onBeforeRenderObservable.add(() => this.tick())
 
@@ -232,18 +205,6 @@ export class Board {
       mesh.isPickable = false
       const mat = makeCardMaterial(this.scene)
       mesh.material = mat
-      setCardRounded(mat, 0.022)
-      setCardBorder(mat, 0.014)
-
-      const shadow = MeshBuilder.CreatePlane(`shadow-${i}`, { width: 4, height: 4 }, this.scene)
-      shadow.setEnabled(false)
-      shadow.isPickable = false
-      shadow.position.z = -0.06
-      const shadowMat = makeCardMaterial(this.scene)
-      shadow.material = shadowMat
-      setCardTexture(shadowMat, this.shadowTex)
-      setCardWhite(shadowMat)
-      setCardFlip(shadowMat, false, false)
 
       const badge = MeshBuilder.CreatePlane(`badge-${i}`, { width: 4, height: 4 }, this.scene)
       badge.setEnabled(false)
@@ -255,9 +216,9 @@ export class Board {
       badgeTex.hasAlpha = true // pill shape comes from canvas alpha
       setCardTexture(badgeMat, badgeTex)
       setCardWhite(badgeMat)
-      setCardFlip(badgeMat, false, false) // DynamicTexture upload flips Y already
+      setCardFlip(badgeMat, 'dyn')
 
-      const slot: CardSlot = { mesh, mat, poster: null, live: null, shadow, shadowMat, badge, badgeMat, badgeTex, replyCount: 0 }
+      const slot: CardSlot = { mesh, mat, poster: null, live: null, badge, badgeMat, badgeTex, replyCount: 0 }
       this.cards.push(slot)
       mesh.metadata = { card: slot }
       badge.metadata = { card: slot, badge: true }
@@ -276,8 +237,8 @@ export class Board {
     }
     // pill
     const r = h / 2 - 1
-    ctx.fillStyle = 'rgba(18,18,19,0.92)'
-    ctx.strokeStyle = 'rgba(255,255,255,0.3)'
+    ctx.fillStyle = 'rgba(16,16,18,0.55)'
+    ctx.strokeStyle = 'rgba(255,255,255,0.42)'
     ctx.lineWidth = 2
     ctx.beginPath()
     ctx.moveTo(2 + r, 2)
@@ -326,7 +287,6 @@ export class Board {
         this.release(slot)
         slot.meta = undefined
         slot.mesh.setEnabled(false)
-        slot.shadow.setEnabled(false)
         slot.badge.setEnabled(false)
         slot.mesh.isPickable = false
         continue
@@ -340,7 +300,7 @@ export class Board {
         slot.replyCount = 0
         setCardTexture(slot.mat, null)
         setCardTint(slot.mat, row.meta.tint || theme.panel)
-        setCardFlip(slot.mat, false, true) // posters are RawTextures: Y flip
+        setCardFlip(slot.mat, 'raw')
         this.drawBadge(slot)
       }
       slot.mesh.setEnabled(true)
@@ -348,9 +308,9 @@ export class Board {
       slot.mesh.scaling.set(CARD_W / 4, CARD_H / 4, 1)
       slot.mesh.position.set(this.colX(row.col), this.worldY(row), 0)
       this.positionBadge(slot)
-      this.positionShadow(slot)
       if (changed) this.drive(slot)
     }
+    this.buildSeparators()
   }
 
   private positionBadge(slot: CardSlot): void {
@@ -361,13 +321,6 @@ export class Board {
     slot.badge.setEnabled(slot.replyCount > 0 && slot.mesh.isEnabled())
   }
 
-  private positionShadow(slot: CardSlot): void {
-    slot.shadow.setEnabled(slot.mesh.isEnabled())
-    slot.shadow.scaling.set((CARD_W + 1.6) / 4, (CARD_H + 1.6) / 4, 1)
-    slot.shadow.position.x = slot.mesh.position.x
-    slot.shadow.position.y = slot.mesh.position.y - 0.25
-    slot.shadow.position.z = -0.06
-  }
 
   private applyScroll(): void {
     for (let i = 0; i < this.rows.length; i++) {
@@ -375,7 +328,28 @@ export class Board {
       slot.mesh.position.x = this.colX(this.rows[i].col)
       slot.mesh.position.y = this.worldY(this.rows[i])
       this.positionBadge(slot)
-      this.positionShadow(slot)
+    }
+    for (let i = 0; i < this.seps.length; i++) {
+      this.seps[i].position.y = this.halfH - MARGIN - (this.sepTops[i] - GAP / 2) + this.scrollY
+    }
+  }
+
+  /** Thin horizontal separator lines between rows (no card frames). */
+  private buildSeparators(): void {
+    for (const l of this.seps) l.dispose()
+    this.seps = []
+    this.sepTops = []
+    const tops = [...new Set(this.rows.map((r) => r.top))].filter((t) => t > 0)
+    const gridW = this.cols * CARD_W + (this.cols - 1) * GAP
+    for (const top of tops) {
+      const line = MeshBuilder.CreateLines(`sep-${top}`, {
+        points: [new Vector3(0, 0, -0.02), new Vector3(gridW, 0, -0.02)],
+      }, this.scene)
+      line.color = Color3.FromHexString('#3d3d4a')
+      line.position.x = -gridW / 2
+      line.position.y = this.halfH - MARGIN - (top - GAP / 2) + this.scrollY
+      this.seps.push(line)
+      this.sepTops.push(top)
     }
   }
 
@@ -466,7 +440,7 @@ export class Board {
       slot.poster = tex
       setCardTexture(slot.mat, tex)
       setCardWhite(slot.mat)
-      setCardFlip(slot.mat, false, true)
+      setCardFlip(slot.mat, 'raw')
       const animated = assets.isAnimated(meta)
       if (animated ?? (meta.animHint || meta.cameraCount > 0)) this.previewPool.request(meta.eventId)
     })
@@ -476,8 +450,8 @@ export class Board {
     if (slot.meta) this.previewPool.release(slot.meta.eventId)
     if (slot.live) {
       slot.live = null
-      if (slot.poster) { setCardTexture(slot.mat, slot.poster); setCardWhite(slot.mat); setCardFlip(slot.mat, false, true) }
-      else { setCardTexture(slot.mat, null); setCardTint(slot.mat, slot.meta?.tint || theme.panel); setCardFlip(slot.mat, false, true) }
+      if (slot.poster) { setCardTexture(slot.mat, slot.poster); setCardWhite(slot.mat); setCardFlip(slot.mat, 'raw') }
+      else { setCardTexture(slot.mat, null); setCardTint(slot.mat, slot.meta?.tint || theme.panel); setCardFlip(slot.mat, 'raw') }
     }
   }
 
@@ -500,6 +474,8 @@ export class Board {
 
   dispose(): void {
     for (const c of this.cards) this.release(c)
+    for (const l of this.seps) l.dispose()
+    this.seps = []
     this.previewPool.dispose()
     this.scene.dispose()
   }

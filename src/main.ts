@@ -6,6 +6,7 @@ import { BlossomClient } from './protocol/blossom'
 import { parseModelEvent } from './protocol/events'
 import { ThreadIndex, type ThreadMeta } from './protocol/thread-index'
 import { Board } from './board/board'
+import { detectCardFlipsOnBoard, setGlobalFlips } from './board/cardMaterial'
 import { ThreadView } from './board/threadView'
 import { Viewer } from './viewer/viewer'
 import { Studio } from './studio/studio'
@@ -51,6 +52,12 @@ async function boot(): Promise<void> {
     onOpenModel: (meta) => router.go({ name: 'viewer', id: meta.eventId }),
     onOpenThread: (meta) => router.go({ name: 'thread', rootId: meta.refs.rootId ?? meta.eventId }),
   })
+  // Calibrate the horizontal orientation of the card pipeline per texture
+  // kind for THIS driver (left-right mirroring differs per GPU/kind). The
+  // probe is anchored to the real board (empty at boot, relays connect later)
+  // so it measures the exact framebuffer the user sees.
+  const flips = await detectCardFlipsOnBoard(engine.engine, board.scene)
+  setGlobalFlips(flips)
   const assets = new AssetCache(blossoms, board.scene)
   board.setAssets(assets)
   const viewer = new Viewer(engine)
@@ -312,7 +319,7 @@ async function boot(): Promise<void> {
 
   window.addEventListener('resize', () => { engine.resize(); board.resize() })
 
-  ;(window as any).__form0 = { engine, pool, blossoms, index, board, viewer, studio, threadView, router, assets }
+  ;(window as any).__form0 = { engine, pool, blossoms, index, board, viewer, studio, threadView, router, assets, flips }
 }
 
 boot().catch((err) => console.error(err))

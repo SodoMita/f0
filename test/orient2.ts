@@ -11,12 +11,14 @@ import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder'
 import { RawTexture } from '@babylonjs/core/Materials/Textures/rawTexture'
 import { DynamicTexture } from '@babylonjs/core/Materials/Textures/dynamicTexture'
 import { RenderTargetTexture } from '@babylonjs/core/Materials/Textures/renderTargetTexture'
-import { makeCardMaterial, setCardFlip } from '../src/board/cardMaterial'
+import { makeCardMaterial, setCardFlip, setGlobalFlips } from '../src/board/cardMaterial'
 
 const canvas = document.getElementById('c') as HTMLCanvasElement
 const out = document.getElementById('out') as HTMLDivElement
 const log = (...a: unknown[]) => { out.textContent += a.join(' ') + '\n' }
 const kind = new URLSearchParams(location.search).get('kind') || 'raw'
+// deterministic test: pin the global X flip (production calibrates it at boot)
+setGlobalFlips({ flipX: { raw: 0, dyn: 0, rtt: 0 }, flipY: { raw: 0, dyn: 0, rtt: 0 } })
 
 const engine = new Engine(canvas, true, { preserveDrawingBuffer: true })
 const scene = new Scene(engine)
@@ -53,7 +55,7 @@ if (kind === 'raw') {
   const dt = new DynamicTexture('dt', patternCanvas(64, 64), stage, false)
   dt.update()
   smat.setTexture('tex', dt)
-  setCardFlip(smat, false, false)
+  setCardFlip(smat, 'dyn')
   splane.material = smat
   const rtt = new RenderTargetTexture('rtt', { width: 64, height: 64 }, stage)
   rtt.clearColor = new Color4(0, 0, 0, 0)
@@ -63,7 +65,7 @@ if (kind === 'raw') {
   texture = rtt
 }
 
-const flips: [number, number][] = [[0, 1], [0, 0], [1, 1], [1, 0]]
+const flips: boolean[] = [true, false, true, false]
 const cxs = [-6.5, -2.5, 1.5, 5.5]
 const quads: any[] = []
 for (let i = 0; i < 4; i++) {
@@ -71,7 +73,7 @@ for (let i = 0; i < 4; i++) {
   mesh.position.x = cxs[i]
   const mat = makeCardMaterial(scene)
   mat.setTexture('tex', texture)
-  setCardFlip(mat, flips[i][0] === 1, flips[i][1] === 1)
+  mat.setVector2('flip', new (await import('@babylonjs/core/Maths/math.vector')).Vector2(0, flips[i] ? 1 : 0))
   mesh.material = mat
   quads.push({ mesh, mat, flip: flips[i] })
 }
@@ -96,7 +98,7 @@ for (const q of quads) {
     return [px[i], px[i + 1], px[i + 2]]
   }
   const top = at(0.5, 1.3), bot = at(0.5, -1.3), left = at(-1, 1.3), right = at(1, 1.3)
-  log(`flip(${q.flip[0]},${q.flip[1]})  top=${name(top)} bot=${name(bot)} left=${name(left)} right=${name(right)}`)
+  log(`flipY=${q.flip}  top=${name(top)} bot=${name(bot)} left=${name(left)} right=${name(right)}`)
 }
 // 2D grid
 const L = (x: number, y: number) => {

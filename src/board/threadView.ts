@@ -85,7 +85,7 @@ export class ThreadView {
       const mesh = MeshBuilder.CreatePlane(`tnode-${meta.eventId.slice(0, 8)}`, { width: 4, height: 4 }, this.scene)
       const mat = makeCardMaterial(this.scene)
       mesh.material = mat
-      setCardFlip(mat, false, true)
+      setCardFlip(mat, 'raw')
       const root = meta.eventId === rootId
       const size = root ? ROOT_SIZE : NODE_W
       mesh.scaling.set(size / 4, (root ? ROOT_SIZE : NODE_H) / 4, 1)
@@ -149,6 +149,11 @@ export class ThreadView {
         kids.get(pid)!.push(m.eventId)
       }
     }
+    const parentOf = new Map<string, string>()
+    for (const m of metas) {
+      const pid = m.refs.parentId
+      if (pid && kids.has(pid)) parentOf.set(m.eventId, pid)
+    }
     const leafCount = new Map<string, number>()
     const countLeaves = (id: string): number => {
       const ch = kids.get(id) ?? []
@@ -160,19 +165,34 @@ export class ThreadView {
     }
     countLeaves(rootId)
 
-    const place = (id: string, cx: number, cy: number, width: number): void => {
+    // Tree cone: the whole reply tree must fan out within an aperture of
+    // < 90° (≈ ±42° from the vertical) so it reads as a tree, not a hedge.
+    // The DFS fan width is capped by depth: per level a child may sit at most
+    // tan(42°)*LEVEL_GAP to the side of its parent, and the relaxation pass
+    // re-clamps every node to that cone (see below).
+    const LEVEL_GAP = 4.2
+    const depthOf = (id: string, d = 0): number => {
+      const ch = kids.get(id) ?? []
+      if (ch.length === 0) return d
+      return Math.max(...ch.map((c) => depthOf(c, d + 1)))
+    }
+    const maxDepth = Math.max(1, depthOf(rootId))
+    const coneLimit = 0.92 * LEVEL_GAP // ≈ tan(42.6°) * gap
+    const level = new Map<string, number>()
+    const place = (id: string, cx: number, cy: number, width: number, lvl: number): void => {
       pos.set(id, { x: cx, y: cy })
+      level.set(id, lvl)
       const ch = kids.get(id) ?? []
       if (ch.length === 0) return
       const total = leafCount.get(id) ?? 1
       let x = cx - width / 2
       for (const c of ch) {
         const w = ((leafCount.get(c) ?? 1) / total) * width
-        place(c, x + w / 2, cy - 4.2, w)
+        place(c, x + w / 2, cy - LEVEL_GAP, w, lvl + 1)
         x += w
       }
     }
-    place(rootId, 0, 0, n * 5)
+    place(rootId, 0, 0, Math.min(n * 5, 2 * coneLimit * maxDepth), 0)
 
     // Force relaxation.
     const area = n * 46
@@ -216,15 +236,24 @@ export class ThreadView {
         disp.get(e.child)!.dx += fx
         disp.get(e.child)!.dy += fy
       }
-      // apply with temperature cap; root stays fixed
+      // apply with temperature cap; root stays fixed; keep the cone AND
+      // keep every node below its parent so the map reads as a tree
       for (const id of ids) {
         if (id === rootId) continue
         const d = disp.get(id)!
         const len = Math.sqrt(d.dx * d.dx + d.dy * d.dy)
         if (len < 1e-6) continue
         const step = Math.min(len, temp)
-        pos.get(id)!.x += (d.dx / len) * step
-        pos.get(id)!.y += (d.dy / len) * step
+        const p = pos.get(id)!
+        p.x += (d.dx / len) * step
+        p.y += (d.dy / len) * step
+        const lim = coneLimit * (level.get(id) ?? 0)
+        p.x = Math.max(-lim, Math.min(lim, p.x))
+        const pid = parentOf.get(id)
+        if (pid) {
+          const pp = pos.get(pid)!
+          p.y = Math.min(p.y, pp.y - 4.3) // strictly below the parent, matching the cone slope
+        }
       }
       temp *= 0.94
     }

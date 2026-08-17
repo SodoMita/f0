@@ -78,7 +78,7 @@ export class Viewer {
     }
     setCardTexture(bm, bt)
     setCardWhite(bm)
-    setCardFlip(bm, false, false)
+    setCardFlip(bm, 'dyn')
     this.backdrop.scaling.set(400, 400, 1)
 
     // Soft ground glow under the model — a spatial reference point.
@@ -104,7 +104,7 @@ export class Viewer {
     }
     setCardTexture(gm, gt)
     setCardWhite(gm)
-    setCardFlip(gm, false, false)
+    setCardFlip(gm, 'dyn')
     this.scene.onBeforeRenderObservable.add(() => {
       // keep the backdrop glued to whichever camera is active
       const cam = this.scene.activeCamera

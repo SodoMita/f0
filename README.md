@@ -22,7 +22,26 @@ Settings, navigation, toolbars, metadata, toasts are plain HTML overlays.
 Only the models, the board, the reply badges and the thread map are Babylon.
 Settings: **background color** (viewer/thread/studio) + **scroll inertia**.
 
-## Key fixes this round (2026-08-17, see git history)
+## Key fixes this round (2026-08-17, round 2, see git history)
+
+### Mirroring fixed for real: per-kind, per-GPU boot calibration
+The horizontal flip of the card pipeline differs per GL driver AND per texture
+kind. At boot the app now renders red/blue probe quads for each kind (poster
+RawTexture, badge DynamicTexture, live-preview RTT) through the REAL board
+camera and reads the default framebuffer back atomically (no flush), then
+applies the measured flip per kind. Both X and Y are calibrated — nothing is
+hardcoded. Verified end-to-end: synthetic GLB -> PosterRenderer -> PNG ->
+RawTexture -> card -> framebuffer reads correctly on both axes.
+
+### Mockup-driven design pass
+- Cards are frameless and fully transparent (no rounded rects, borders,
+  shadows) — models float on the backdrop, "air styled".
+- Thin separator lines between rows instead of card frames.
+- Reply tree fans within a <90 degree cone (measured ~84 degrees) and every
+  node stays below its parent — it reads as a tree.
+- Ghost reply badges, glassy translucent HUD, brighter backdrop gradient.
+
+## Key fixes this round (2026-08-17, round 1, see git history)
 
 ### "Flipped posts" bugs (root-caused empirically, see `test/orient2.ts`)
 Card textures are sampled by a custom unlit shader whose Y-flip was hardcoded.
