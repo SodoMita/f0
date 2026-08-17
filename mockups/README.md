@@ -9,6 +9,7 @@ The production Babylon client is intentionally untouched.
 - [`viewer.html`](./viewer.html) — immersive single-creation viewer
 - [`thread.html`](./thread.html) — branch map with zoom controls
 - [`studio.html`](./studio.html) — creation studio and inspector
+- [`generated.html`](./generated.html) — four image-generated “round 02” concept boards
 
 ## Direction
 
@@ -20,9 +21,11 @@ The production Babylon client is intentionally untouched.
 - No CDN, web fonts, or runtime image requests
 
 The three artwork renders in `assets/` were generated specifically for this
-mockup. `mockup.js` adds small interactions: gallery filters and density,
-viewer navigation/play/cameras, thread zoom, studio tabs, live sliders, and a
-publish confirmation state.
+mockup. A second image-generation pass used the visual direction and those
+artworks to produce the four aspirational boards in `generated/`. They are
+visual research rather than literal production screens. `mockup.js` adds small
+interactions: gallery filters and density, viewer navigation/play/cameras,
+thread zoom, studio tabs, live sliders, and a publish confirmation state.
 
 Serve the repository root and open `/mockups/`. For example:
 

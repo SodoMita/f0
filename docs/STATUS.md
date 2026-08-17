@@ -5,11 +5,13 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 
-- [x] **Object-first UI concept mockups** (Arena, 2026-08-17). Four standalone,
+- [x] **Object-first UI concept mockups** (Arena, 2026-08-18). Four standalone,
       responsive HTML explorations in `mockups/`: world, viewer, thread map,
       and studio. The direction combines warm museum-catalogue surfaces with
       an ink navigation rail, coral/acid action signals, generated 3D artwork,
       shared SVG iconography, mobile layouts, and small interactive states.
+      A second image-generation pass produced four more expressive concept
+      boards in `mockups/generated/`, collected in `generated.html`.
       Production Babylon scenes are intentionally untouched. `npm run build`
       remains green.
 
