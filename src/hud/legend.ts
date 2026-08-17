@@ -13,6 +13,8 @@ function $(id: string): HTMLElement {
 export class Legend {
   private root = $('legend')
   private lastFocus: Element | null = null
+  /** Dismissed by the user (or a harness) before the first-run check resolved. */
+  private dismissed = false
 
   constructor() {
     $('btn-legend-close').addEventListener('click', () => this.close())
@@ -26,19 +28,27 @@ export class Legend {
     }, true) // capture: beat the viewer/thread Escape handlers
   }
 
-  /** Show on first run only (seen-flag in IDB). */
+  /**
+   * Show on first run only (seen-flag in IDB).
+   *
+   * The IDB read resolves AFTER boot finishes, so anything that dismissed the
+   * legend in between (a fast user, or a headless harness) must not have it
+   * pop back up over the canvas swallowing every pointer event.
+   */
   async maybeShowFirstRun(): Promise<void> {
     const seen = await get<boolean>('settings', SEEN_KEY)
-    if (!seen) this.open()
+    if (!seen && !this.dismissed) this.open()
   }
 
   open(): void {
+    this.dismissed = false
     this.lastFocus = document.activeElement
     this.root.hidden = false
     ;($('btn-legend-ok') as HTMLButtonElement).focus()
   }
 
   close(): void {
+    this.dismissed = true
     if (this.root.hidden) return
     this.root.hidden = true
     void put('settings', SEEN_KEY, true)
