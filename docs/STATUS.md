@@ -5,6 +5,13 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 
+- [x] **Studio publish flow (merged to main by agent-kestrel)**: BUD-01
+      Blossom upload w/ Nostr auth, kind-1063 publish, ownership secrets in
+      ownedPosts, reply authoring, studio import/publish HUD (branch
+      agent/studio-publish, merge 91617ca). Preservation report + partial-
+      success UI still open. NOTE for the studio agent: importGLB/clearModel/
+      setBackground now must kick() (SPEC 17) — added during the merge.
+
 - [x] **Performance: demand-driven rendering** (agent-kestrel, branch
       kestrel/perf). The RAF loop renders only when (a) input/content
       invalidated the picture (`FormEngine.kick()`, 300ms window, uncapped)
@@ -167,8 +174,6 @@ move it to **Done** with a commit reference. One agent per area.
 - [ ] **Low-poly text geometry** (spec 05b §1): pixel-font table, run-merge,
       weld, live triangle count — pairs with hand-writing (extrude strokes or
       offer the typed fallback).
-- [ ] **Studio publish flow**: BUD-01 upload, kind-1063 event, ownership
-      secrets, preservation report (blocks publish on loss), partial-success UI.
 - [ ] **Reply authoring** (compose → publish flow).
 - [ ] **Deletion UI** (tombstones already applied in the index).
 - [ ] **Tests**: Vitest unit suite (URL normalize, tags, NIP-10, VFS, GLB
