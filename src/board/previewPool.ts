@@ -343,7 +343,9 @@ export class PreviewPool {
     } catch {
       if (container) { container.removeAllFromScene(); container.dispose() }
       slot.postId = null
-      this.rejected.set(postId, 'FAILED')
+      // Do not mark a post FAILED when the slot itself was recycled mid-load
+      // (a settings shrink) — nothing about the model was wrong.
+      if (alive()) this.rejected.set(postId, 'FAILED')
     } finally {
       slot.pending = false
       this.loading.delete(postId)
