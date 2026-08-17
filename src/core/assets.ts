@@ -4,7 +4,7 @@ import { Scene } from '@babylonjs/core/scene'
 import { get, put } from '../protocol/storage'
 import { sha256Hex, BlossomClient } from '../protocol/blossom'
 import type { ThreadMeta } from '../protocol/thread-index'
-import { PosterRenderer, type Footprint } from '../model/poster'
+import { PosterRenderer, POSTER_W, POSTER_H, type Footprint } from '../model/poster'
 
 // Bump when the poster pipeline changes visually (framing, transparency…):
 // cached PNGs from an older pipeline must not be reused.
@@ -240,10 +240,21 @@ export class AssetCache {
     }
   }
 
-  /** Render a poster for an arbitrary (not-yet-published) model blob. */
-  async renderPosterFor(model: Blob): Promise<Blob> {
-    const result = await this.poster.render(model)
-    return result.toPng() // PosterResult holds raw pixels; PNG is encoded on demand
+  /**
+   * Render a poster for an arbitrary (not-yet-published) model blob.
+   * Falls back to a generated placeholder if the model renders blank
+   * (transparent/empty/invisible) so publishing is not hard-blocked.
+   */
+  async renderPosterFor(model: Blob, tint = '#FF5C35'): Promise<{ blob: Blob; blank: boolean }> {
+    try {
+      const result = await this.poster.render(model)
+      return { blob: await result.toPng(), blank: false }
+    } catch (err) {
+      if (err instanceof Error && /rendered empty|blank/i.test(err.message)) {
+        return { blob: placeholderPoster(tint), blank: true }
+      }
+      throw err
+    }
   }
 
   dispose(): void {
@@ -264,4 +275,30 @@ function loadImage(blob: Blob): Promise<HTMLImageElement> {
     img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('poster decode failed')) }
     img.src = url
   })
+}
+
+
+/** A deterministic 448x280 placeholder used when a model renders blank. */
+function placeholderPoster(tint: string): Blob {
+  const canvas = document.createElement('canvas')
+  canvas.width = POSTER_W
+  canvas.height = POSTER_H
+  const ctx = canvas.getContext('2d')!
+  ctx.fillStyle = '#121213'
+  ctx.fillRect(0, 0, POSTER_W, POSTER_H)
+  ctx.strokeStyle = 'rgba(255,255,255,0.05)'
+  ctx.lineWidth = 1
+  for (let x = 0; x <= POSTER_W; x += 32) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, POSTER_H); ctx.stroke() }
+  for (let y = 0; y <= POSTER_H; y += 32) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(POSTER_W, y); ctx.stroke() }
+  ctx.fillStyle = tint
+  const cx = POSTER_W / 2, cy = POSTER_H / 2
+  ctx.beginPath()
+  ctx.moveTo(cx, cy - 26); ctx.lineTo(cx + 26, cy); ctx.lineTo(cx, cy + 26); ctx.lineTo(cx - 26, cy); ctx.closePath()
+  ctx.fill()
+  // toBlob sync-ish
+  const data = canvas.toDataURL('image/png')
+  const bin = atob(data.slice(data.indexOf(',') + 1))
+  const bytes = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+  return new Blob([bytes], { type: 'image/png' })
 }
