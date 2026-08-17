@@ -172,7 +172,7 @@ export function makeContactShadow(scene: Scene, name: string): DynamicTexture {
 export function makeSpinnerTexture(scene: Scene, name: string): DynamicTexture {
   const S = 256
   const DOTS = 12
-  const tex = new DynamicTexture(name, { width: S, height: S }, scene, true)
+  const tex = new DynamicTexture(name, { width: S, height: S }, scene, false)
   tex.hasAlpha = true
   const ctx = tex.getContext() as CanvasRenderingContext2D
   ctx.clearRect(0, 0, S, S)

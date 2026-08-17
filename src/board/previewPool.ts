@@ -14,8 +14,7 @@ import type { AnimationGroup } from '@babylonjs/core/Animations/animationGroup'
 import '../model/gltf'
 import { configureDraco } from '../model/draco'
 import { dominantFacing, worldBox, frameDistance } from '../model/facing'
-import { toFile } from '../model/poster'
-import { validateGLB } from '../model/limits'
+import { validateGLBCached } from '../model/limits'
 
 interface Slot {
   index: number
@@ -58,7 +57,11 @@ export class PreviewPool {
   readonly opts: PreviewPoolOptions
   onLive: ((postId: string, rtt: RenderTargetTexture) => void) | null = null
 
-  constructor(engine: AbstractEngine, private getModel: (postId: string) => Promise<Blob | undefined>, opts?: Partial<PreviewPoolOptions>) {
+  constructor(
+    engine: AbstractEngine,
+    private getModel: (postId: string) => Promise<{ bytes: Uint8Array; sha256: string } | undefined>,
+    opts?: Partial<PreviewPoolOptions>,
+  ) {
     this.opts = { maxSlots: 6, rttWidth: 448, rttHeight: 280, slotsPerFrame: 2, targetFps: PREVIEW_FPS, ...opts }
     configureDraco()
     this.stage = new Scene(engine)
@@ -195,13 +198,12 @@ export class PreviewPool {
   private async load(slot: Slot, postId: string): Promise<void> {
     let container: AssetContainer | null = null
     try {
-      const blob = await this.getModel(postId)
-      if (!blob) throw new Error('download failed')
-      const bytes = new Uint8Array(await blob.arrayBuffer())
-      const report = validateGLB(bytes)
+      const model = await this.getModel(postId)
+      if (!model) throw new Error('download failed')
+      const report = validateGLBCached(model.bytes, model.sha256)
       if (!report.ok) throw new Error(report.reason)
 
-      container = await LoadAssetContainerAsync(toFile(blob, 'model.glb'), this.stage)
+      container = await LoadAssetContainerAsync(model.bytes, this.stage, { pluginExtension: '.glb' })
       for (const m of container.meshes) {
         if (m.material) m.material.backFaceCulling = false
       }

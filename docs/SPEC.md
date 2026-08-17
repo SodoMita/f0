@@ -216,3 +216,44 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     the 2.0 loader plus the extensions that change how a model LOOKS. If a
     real post needs another extension, add the import (and MSFT_audio_emitter
     when audio playback lands).
+
+27. Compiled shaders must survive material disposal. `Effect.PersistentMode = true`
+    (set in core/engine.ts). Babylon keys compiled programs by
+    "vertex+fragment@defines", but `Effect.dispose()` DELETES the cache entry
+    when the last material using it goes away — and we dispose an
+    AssetContainer after every poster render, every preview swap and every
+    viewer navigation. Measured before the flag (scripts/shaders.mjs): opening
+    the SAME model three times compiled its shaders three times, zero cache
+    hits, and only 2 of 14 compiled programs were still cached. After: +0
+    programs on repeat opens. The cache is bounded by distinct define sets, not
+    by models, so it does not grow with the feed.
+
+28. Never stall the main thread on the GPU. `rtt.readPixels()` is a
+    Promise-wrapped SYNCHRONOUS `gl.readPixels` (a full pipeline sync) and was
+    11% of wall time during a board load. Posters read back through
+    `engine._readPixelsAsync` (PIXEL_PACK_BUFFER + fence) with the sync call
+    only as a fallback (WebGL1 / missing internals).
+
+29. Heavy CPU work goes to inline workers. Signature verification
+    (`protocol/verify.worker.ts`) and poster encoding
+    (`model/encode.worker.ts`) are `?worker&inline` — blob workers, which the
+    CSP already allows (`worker-src 'self' blob:`) and which are verified to
+    work from `file://` in the standalone build. Both have main-thread
+    fallbacks. ALSO: nostr-tools' Relay verifies every matching event itself,
+    synchronously — that duplicate check is disabled (`relay.verifyEvent`)
+    because we verify off-thread before dispatching, and `verifyFresh` now
+    remembers what WE verified in a WeakSet (it used to run twice per event:
+    ingress + parseModelEvent).
+
+30. Decode a model's bytes ONCE. `AssetCache.getModelBytes()` hands the same
+    `Uint8Array` to the poster renderer, the preview pool and the viewer, and
+    `validateGLBCached(bytes, sha)` memoises the limit report by content hash.
+    Load with `LoadAssetContainerAsync(bytes, scene, { pluginExtension: '.glb' })`
+    — a `File` source makes Babylon re-read the whole model through a
+    FileReader. Before: three `blob.arrayBuffer()` copies + three JSON-chunk
+    parses per post.
+
+31. DynamicTextures that are repainted (badges, rings) must be created with
+    `generateMipMaps = false`. Every `update()` otherwise re-uploads AND
+    regenerates the whole mip chain — with slot recycling that fires
+    constantly while scrolling.

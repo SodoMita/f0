@@ -113,6 +113,17 @@ move it to **Done** with a commit reference. One agent per area.
       pixel budget on the target ratio, and the curated glTF loader.
       `engine.invalidate()` is kept only as an alias of `kick()`.
 
+- [x] **Perf round 6 — duplicated work** (`scripts/shaders.mjs`,
+      `scripts/profile.mjs` are the new probes):
+      shaders no longer recompile for models already drawn
+      (`Effect.PersistentMode`; repeat opens went 3 compiles -> 0), the
+      synchronous poster `readPixels` (11% of wall time) is now an async PBO
+      read, signature verification moved to an inline worker AND stopped
+      running three times per event, poster PNG encoding moved to an
+      OffscreenCanvas worker, model bytes are decoded/validated once and shared
+      by poster+preview+viewer, and repainted DynamicTextures no longer
+      regenerate mipmaps. Main-thread idle during a load: 71% -> 82%.
+
 ## Incident log
 
 - 2026-08-17: `main` was force-pushed away (replaced by an unrelated 3-commit

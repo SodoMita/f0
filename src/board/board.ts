@@ -161,7 +161,7 @@ export class Board {
     this.cb = cb
     this.previewPool = new PreviewPool(
       engine.engine,
-      (postId) => this.assets?.getModelBlobByPostId(postId) ?? Promise.resolve(undefined),
+      (postId) => this.assets?.getModelBytesByPostId(postId) ?? Promise.resolve(undefined),
       {
         maxSlots: isMobile ? 2 : 5,
         rttWidth: isMobile ? 384 : 448,
@@ -339,7 +339,9 @@ export class Board {
       badge.position.z = -0.05
       const badgeMat = makeCardMaterial(this.scene)
       badge.material = badgeMat
-      const badgeTex = new DynamicTexture(`badge-tex-${i}`, { width: 320, height: 118 }, this.scene, true, Texture.TRILINEAR_SAMPLINGMODE)
+      // No mipmaps: a badge is drawn at ~1:1 and every repaint would
+      // otherwise re-upload AND regenerate the whole mip chain.
+      const badgeTex = new DynamicTexture(`badge-tex-${i}`, { width: 320, height: 118 }, this.scene, false, Texture.BILINEAR_SAMPLINGMODE)
       badgeTex.hasAlpha = true // pill shape comes from canvas alpha
       setCardTexture(badgeMat, badgeTex)
       setCardWhite(badgeMat)

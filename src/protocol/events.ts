@@ -1,10 +1,80 @@
 import { verifyEvent, verifiedSymbol, type Event, type VerifiedEvent } from 'nostr-tools'
+// Inlined worker: keeps the single-file standalone build working (blob: URL,
+// already allowed by the CSP's worker-src).
+import VerifyWorker from './verify.worker?worker&inline'
 import { LIMITS, MODEL_KIND, MODEL_MIMES } from '../theme'
 import { parseThreadRefs, type ThreadMeta } from './thread-index'
 
-export function verifyFresh(event: Event): event is VerifiedEvent {
+/**
+ * Events WE verified ourselves. A relay can pre-set nostr-tools' own
+ * `verifiedSymbol` on the wire object, so that flag is still stripped on first
+ * sight — but a second verification of the same object is pure waste, and
+ * secp256k1 verification costs tens of milliseconds of main thread each.
+ * (It used to run twice per event: once at ingress, once in parseModelEvent.)
+ */
+const selfVerified = new WeakSet<object>()
+
+// ---------------------------------------------------------------- worker
+
+let worker: Worker | null = null
+let workerBroken = false
+let nextJob = 1
+const jobs = new Map<number, (ok: boolean) => void>()
+
+function getWorker(): Worker | null {
+  if (workerBroken) return null
+  if (worker) return worker
+  try {
+    worker = new VerifyWorker()
+    worker.onmessage = (m: MessageEvent<{ id: number; ok: boolean }>) => {
+      const done = jobs.get(m.data.id)
+      if (!done) return
+      jobs.delete(m.data.id)
+      done(m.data.ok)
+    }
+    worker.onerror = () => {
+      workerBroken = true
+      for (const done of jobs.values()) done(false)
+      jobs.clear()
+      worker = null
+    }
+  } catch {
+    workerBroken = true
+    worker = null
+  }
+  return worker
+}
+
+/**
+ * Verify off the main thread. Falls back to synchronous verification when
+ * workers are unavailable. The result is remembered per event object exactly
+ * like `verifyFresh`, so `parseModelEvent` never pays for it again.
+ */
+export async function verifyFreshAsync(event: Event): Promise<boolean> {
+  if (selfVerified.has(event)) return true
   try { delete (event as Record<symbol, unknown>)[verifiedSymbol] } catch { /* non-extensible */ }
-  return verifyEvent(event)
+  const w = getWorker()
+  if (!w) return verifyFresh(event)
+  const id = nextJob++
+  const ok = await new Promise<boolean>((resolve) => {
+    jobs.set(id, resolve)
+    try {
+      w.postMessage({ id, event })
+    } catch {
+      jobs.delete(id)
+      resolve(verifyEvent(event))
+    }
+  })
+  if (ok) selfVerified.add(event)
+  return ok
+}
+
+export function verifyFresh(event: Event): event is VerifiedEvent {
+  if (selfVerified.has(event)) return true
+  try { delete (event as Record<symbol, unknown>)[verifiedSymbol] } catch { /* non-extensible */ }
+  if (!verifyEvent(event)) return false
+  selfVerified.add(event)
+  return true
 }
 
 const HEX64 = /^[0-9a-f]{64}$/i

@@ -292,11 +292,11 @@ async function boot(): Promise<void> {
     camDots.innerHTML = ''
     setLoading('model', true, 'loading model')
     try {
-      const blob = await assets.getModel(meta)
+      const bytes = await assets.getModelBytes(meta)
       if (nav !== viewerNav) return
       // error sheet, not a toast: code + cause + concrete action (spec)
-      if (!blob) { errorSheet.show(ERRORS.MODEL_DOWNLOAD(() => void openViewer(id))); return }
-      await viewer.load(blob, meta)
+      if (!bytes) { errorSheet.show(ERRORS.MODEL_DOWNLOAD(() => void openViewer(id))); return }
+      await viewer.load(bytes, meta)
       if (nav !== viewerNav) return
       renderCamDots()
       syncPlay()

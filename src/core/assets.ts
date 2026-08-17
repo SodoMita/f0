@@ -23,6 +23,7 @@ export class AssetCache {
   private posterTex = new Map<string, Texture>()
   private modelBlobs = new Map<string, Blob>() // insertion order == LRU order
   private modelInflight = new Map<string, Promise<Blob | undefined>>()
+  private modelBytes = new Map<string, Uint8Array>() // insertion order == LRU
   private byPostId = new Map<string, ThreadMeta>()
   private animatedBySha = new Map<string, boolean>()
   private footprintBySha = new Map<string, Footprint | null>()
@@ -39,6 +40,35 @@ export class AssetCache {
   getModelBlobByPostId(postId: string): Promise<Blob | undefined> {
     const meta = this.byPostId.get(postId)
     return meta ? this.getModel(meta) : Promise.resolve(undefined)
+  }
+
+  /** Shared bytes + content hash for a post (preview pool / viewer). */
+  async getModelBytesByPostId(postId: string): Promise<{ bytes: Uint8Array; sha256: string } | undefined> {
+    const meta = this.byPostId.get(postId)
+    if (!meta) return undefined
+    const bytes = await this.getModelBytes(meta)
+    return bytes ? { bytes, sha256: meta.sha256 } : undefined
+  }
+
+  /**
+   * Model bytes, decoded once and shared. `blob.arrayBuffer()` copies the
+   * whole file every call, and poster + preview + viewer each did it (plus
+   * Babylon's own File/FileReader copy on top).
+   */
+  async getModelBytes(meta: ThreadMeta): Promise<Uint8Array | undefined> {
+    const hit = this.modelBytes.get(meta.sha256)
+    if (hit) return hit
+    const blob = await this.getModel(meta)
+    if (!blob) return undefined
+    const bytes = new Uint8Array(await blob.arrayBuffer())
+    this.modelBytes.set(meta.sha256, bytes)
+    // bytes are heavier than blobs (blobs can live on disk) — keep very few
+    while (this.modelBytes.size > 3) {
+      const oldest = this.modelBytes.keys().next()
+      if (oldest.done) break
+      this.modelBytes.delete(oldest.value)
+    }
+    return bytes
   }
 
   /** Poster: thumb tag = fast path; local render = normal path (00 §2.2). */
@@ -156,18 +186,22 @@ export class AssetCache {
   private async renderLocalPixels(meta: ThreadMeta): Promise<{ pixels: Uint8Array; width: number; height: number } | undefined> {
     if (meta.size > AUTO_POSTER_MAX_BYTES) return undefined // no auto-poster >8 MiB
     if (await this.cachedPoster(meta)) return undefined     // decode the cached PNG instead
-    const model = await this.getModel(meta)
-    if (!model) return undefined
-    const result = await this.poster.render(model)
+    const bytes = await this.getModelBytes(meta)
+    if (!bytes) return undefined
+    const result = await this.poster.render(bytes, meta.sha256)
     this.animatedBySha.set(meta.sha256, result.animated)
     this.footprintBySha.set(meta.sha256, result.footprint)
-    // Encode the cache copy off the critical path — the card is already up.
-    setTimeout(() => {
+    // Encode the cache copy when the browser is idle — the card is already up
+    // and canvas.toBlob is another chunk of main thread.
+    const idle = (fn: () => void) => (typeof requestIdleCallback === 'function'
+      ? requestIdleCallback(fn, { timeout: 4000 })
+      : setTimeout(fn, 400))
+    idle(() => {
       void result.toPng().then((png) => {
         void put('posterCache', POSTER_CACHE_V + meta.sha256, png)
         if (result.footprint) void put('posterCache', POSTER_CACHE_V + meta.sha256 + ':fp', result.footprint)
       }).catch(() => undefined)
-    }, 0)
+    })
     return { pixels: result.pixels, width: result.width, height: result.height }
   }
 

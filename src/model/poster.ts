@@ -13,10 +13,12 @@ import type { AssetContainer } from '@babylonjs/core/assetContainer'
 import './gltf'
 import { configureDraco } from './draco'
 import { dominantFacing, worldBox, frameDistance } from './facing'
-import { validateGLB } from './limits'
+import { validateGLBCached } from './limits'
 
 // Cards display at roughly 320x200 CSS px; 448x280 keeps them sharp on
 // HiDPI while costing ~24% fewer pixels per offscreen render than 512x320.
+import EncodeWorker from './encode.worker?worker&inline'
+
 export const POSTER_W = 448
 export const POSTER_H = 280
 
@@ -54,7 +56,7 @@ export class PosterRenderer {
   private scene: Scene
   private headlight: DirectionalLight
   /** reused readback buffer (0.5 MB per poster otherwise) */
-  private readback = new Uint8Array(POSTER_W * POSTER_H * 4)
+  private readbackBuf = new Uint8Array(POSTER_W * POSTER_H * 4)
   private rtt: RenderTargetTexture
   // Renders share one scene (shared activeCamera + env); a promise-chain mutex
   // serializes them so concurrent calls can never stomp each other's camera.
@@ -92,14 +94,14 @@ export class PosterRenderer {
     this.rtt.clearColor = new Color4(0, 0, 0, 0)
   }
 
-  render(blob: Blob): Promise<PosterResult> {
-    const run = () => this.doRender(blob)
+  render(bytes: Uint8Array, sha256: string): Promise<PosterResult> {
+    const run = () => this.doRender(bytes, sha256)
     const result = this.chain.then(run, run)
     this.chain = result.then(() => undefined, () => undefined)
     return result
   }
 
-  private async doRender(blob: Blob): Promise<PosterResult> {
+  private async doRender(bytes: Uint8Array, sha256: string): Promise<PosterResult> {
     let container: AssetContainer | null = null
     let ownCamera: FreeCamera | null = null
     // ONE render target for the whole session — allocating and freeing a
@@ -107,11 +109,12 @@ export class PosterRenderer {
     const rtt = this.rtt
     try {
       // Enforce GLB limits before Babylon parses (07 §4).
-      const bytes = new Uint8Array(await blob.arrayBuffer())
-      const report = validateGLB(bytes)
+      const report = validateGLBCached(bytes, sha256)
       if (!report.ok) throw new Error(report.reason)
 
-      container = await LoadAssetContainerAsync(toFile(blob, 'model.glb'), this.scene)
+      // Load from the shared bytes: a File source makes Babylon re-read the
+      // whole model through a FileReader.
+      container = await LoadAssetContainerAsync(bytes, this.scene, { pluginExtension: '.glb' })
       container.addAllToScene()
       // Display-only: render both faces so thin/flat geometry (text, signs)
       // is never invisible from the auto-fit side. The source GLB is untouched.
@@ -149,7 +152,7 @@ export class PosterRenderer {
       for (let attempt = 0; attempt < 14; attempt++) {
         this.scene.render()
         if (attempt < 2) { await sleep(0); continue }
-        pixels = await rtt.readPixels(0, 0, this.readback, true)
+        pixels = await this.readback()
         if (pixels && !isBlank(pixels)) break
         await sleep(attempt < 6 ? 30 : 90)
       }
@@ -167,11 +170,49 @@ export class PosterRenderer {
         height: POSTER_H,
         animated,
         footprint,
-        toPng: () => encodePng(out, POSTER_W, POSTER_H),
+        toPng: () => encodePoster(out, POSTER_W, POSTER_H),
       }
     } finally {
       ownCamera?.dispose()
       if (container) { container.removeAllFromScene(); container.dispose() }
+    }
+  }
+
+  /**
+   * Read the render target back WITHOUT stalling the main thread.
+   *
+   * Babylon's `rtt.readPixels()` is a Promise-wrapped *synchronous*
+   * `gl.readPixels`, i.e. a full GPU pipeline sync — it was the single
+   * biggest main-thread cost of a board load (11% of wall time, ~120 ms per
+   * poster in the profile). WebGL2 can read into a PIXEL_PACK_BUFFER and poll
+   * a fence instead, which keeps the CPU free while the GPU drains.
+   */
+  private async readback(): Promise<ArrayBufferView | null> {
+    const engine = this.scene.getEngine() as unknown as {
+      _gl?: WebGL2RenderingContext
+      _dummyFramebuffer?: WebGLFramebuffer | null
+      _currentFramebuffer?: WebGLFramebuffer | null
+      _readPixelsAsync?: (x: number, y: number, w: number, h: number, f: number, t: number, out: ArrayBufferView) => Promise<ArrayBufferView> | null
+      webGLVersion?: number
+    }
+    const gl = engine._gl
+    const internal = this.rtt.getInternalTexture() as unknown as {
+      _hardwareTexture?: { underlyingResource?: WebGLTexture }
+    } | null
+    const resource = internal?._hardwareTexture?.underlyingResource
+    if (!gl || !resource || (engine.webGLVersion ?? 1) < 2 || !engine._readPixelsAsync) {
+      return this.rtt.readPixels(0, 0, this.readbackBuf, true)
+    }
+    try {
+      if (!engine._dummyFramebuffer) engine._dummyFramebuffer = gl.createFramebuffer()
+      const previous = engine._currentFramebuffer ?? null
+      gl.bindFramebuffer(gl.FRAMEBUFFER, engine._dummyFramebuffer)
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, resource, 0)
+      const out = await engine._readPixelsAsync(0, 0, POSTER_W, POSTER_H, gl.RGBA, gl.UNSIGNED_BYTE, this.readbackBuf)
+      gl.bindFramebuffer(gl.FRAMEBUFFER, previous)
+      return out ?? this.readbackBuf
+    } catch {
+      return this.rtt.readPixels(0, 0, this.readbackBuf, true)
     }
   }
 
@@ -208,9 +249,59 @@ function isBlank(view: ArrayBufferView): boolean {
   return true
 }
 
+// --------------------------------------------------------------- encoding
+
+let encodeWorker: Worker | null = null
+let encodeBroken = false
+let encodeJob = 1
+const encodeJobs = new Map<number, { resolve: (b: Blob) => void; reject: (e: Error) => void }>()
+
+function getEncodeWorker(): Worker | null {
+  if (encodeBroken || typeof OffscreenCanvas === 'undefined') return null
+  if (encodeWorker) return encodeWorker
+  try {
+    encodeWorker = new EncodeWorker()
+    encodeWorker.onmessage = (m: MessageEvent<{ id: number; blob?: Blob; error?: string }>) => {
+      const job = encodeJobs.get(m.data.id)
+      if (!job) return
+      encodeJobs.delete(m.data.id)
+      if (m.data.blob) job.resolve(m.data.blob)
+      else job.reject(new Error(m.data.error || 'encode failed'))
+    }
+    encodeWorker.onerror = () => {
+      encodeBroken = true
+      for (const j of encodeJobs.values()) j.reject(new Error('encode worker died'))
+      encodeJobs.clear()
+      encodeWorker = null
+    }
+  } catch {
+    encodeBroken = true
+    encodeWorker = null
+  }
+  return encodeWorker
+}
+
+/** PNG for the poster cache, encoded on a worker when possible. */
+async function encodePoster(view: Uint8Array, w: number, h: number): Promise<Blob> {
+  const worker = getEncodeWorker()
+  if (worker) {
+    const id = encodeJob++
+    const copy = view.slice(0)  // transferred to the worker
+    try {
+      return await new Promise<Blob>((resolve, reject) => {
+        encodeJobs.set(id, { resolve, reject })
+        worker.postMessage({ id, pixels: copy.buffer, width: w, height: h }, [copy.buffer])
+      })
+    } catch {
+      // fall through to the main-thread encoder
+    }
+  }
+  return encodePng(view, w, h)
+}
+
 let pngCanvas: HTMLCanvasElement | null = null
 
-/** GL bottom-up RGBA -> top-down PNG (cache format). */
+/** GL bottom-up RGBA -> top-down PNG (main-thread fallback). */
 function encodePng(view: ArrayBufferView, w: number, h: number): Promise<Blob> {
   const bytes = new Uint8Array(view.buffer, view.byteOffset, view.byteLength)
   const canvas = pngCanvas ?? (pngCanvas = document.createElement('canvas'))
@@ -229,5 +320,6 @@ function encodePng(view: ArrayBufferView, w: number, h: number): Promise<Blob> {
     }
   }
   ctx.putImageData(img, 0, 0)
-  return new Promise<Blob>((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('PNG encode failed'))), 'image/png'))
+  return new Promise<Blob>((resolve, reject) =>
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('poster encode failed'))), 'image/png'))
 }

@@ -15,8 +15,7 @@ import type { AnimationGroup } from '@babylonjs/core/Animations/animationGroup'
 import '../model/gltf'
 import type { FormEngine } from '../core/engine'
 import type { ThreadMeta } from '../protocol/thread-index'
-import { toFile } from '../model/poster'
-import { validateGLB } from '../model/limits'
+import { validateGLBCached } from '../model/limits'
 import { worldBox, frameDistance, dominantFacing } from '../model/facing'
 import type { ShaderMaterial } from '@babylonjs/core/Materials/shaderMaterial'
 import {
@@ -147,15 +146,14 @@ export class Viewer {
   }
   detach(): void { this.orbit.detachControl() }
 
-  async load(blob: Blob, meta: ThreadMeta): Promise<void> {
+  async load(bytes: Uint8Array, meta: ThreadMeta): Promise<void> {
     this.clear()
     const token = ++this.loadToken
     this.pending = true
     try {
-      const bytes = new Uint8Array(await blob.arrayBuffer())
-      const report = validateGLB(bytes)
+      const report = validateGLBCached(bytes, meta.sha256)
       if (!report.ok) throw new Error(report.reason)
-      const container = await LoadAssetContainerAsync(toFile(blob, 'model.glb'), this.scene)
+      const container = await LoadAssetContainerAsync(bytes, this.scene, { pluginExtension: '.glb' })
       // Superseded while we were parsing (fast prev/next, or the user went
       // back to the board): drop it on the floor. Without this, BOTH models
       // ended up in the single-model view, stacked on top of each other, and

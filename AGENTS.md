@@ -86,6 +86,11 @@ bun run build:standalone  # ONE self-contained form-zero-standalone.html
    that animates must say so through its activity probe. Never latch a probe
    flag true; a stuck flag quietly restores full-rate rendering (check
    `scripts/perf.mjs` -> `idleBoard.rendersPerSec`, which must stay ~2-3).
+9i. **Don't pay twice.** Before optimising, run `scripts/profile.mjs`. The
+   expensive things in this app are duplicated work, not slow algorithms:
+   shaders recompiled because a container was disposed, events verified by
+   nostr-tools AND by us AND again in the parser, the same GLB copied and
+   validated three times, a synchronous `readPixels` per poster.
 9h. **Work follows the viewport.** Posters/live previews are requested only
    for cards near the viewport and only after scrolling settles; the poster
    queue is paused while the feed moves. Card slots are recycled — never bind
@@ -115,6 +120,8 @@ bun scripts/smoke.mjs               # boot + feed + posters + live slots + scrol
 bun scripts/features.mjs            # reply badges + thread view + settings
 bun scripts/capture.mjs             # board/viewer/thread/light/phone screenshots to shots/
 bun scripts/perf.mjs                # PERF: boot, per-view frame cost, 48-card stress, idle, heap
+bun scripts/shaders.mjs             # shader recompiles (repeat model opens must compile 0 programs)
+PHASE=load bun scripts/profile.mjs  # CPU profile of a board load, aggregated by self time
 CPU=4 bun scripts/perf.mjs          #   …the same, throttled to emulate a phone
 python3 scripts/visual_critique.py  # orientation + composition on those shots
 ```

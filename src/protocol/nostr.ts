@@ -1,5 +1,5 @@
 import { Relay, finalizeEvent, generateSecretKey, type Event, type EventTemplate } from 'nostr-tools'
-import { verifyFresh } from './events'
+import { verifyFreshAsync } from './events'
 import { DEFAULTS, DELETE_KIND, FORM_ZERO_TAG, MODEL_KIND } from '../theme'
 
 export type RelayState = 'connecting' | 'online' | 'offline'
@@ -68,7 +68,13 @@ export class RelayPool {
 
   private async open(url: string): Promise<void> {
     if (!this.urls.includes(url)) return // removed via applyRelays; don't resurrect
+    // nostr-tools verifies every matching event ITSELF, synchronously, on the
+    // main thread — on top of our own check. We verify in a worker before
+    // dispatching (see events.verifyFreshAsync), so the relay's duplicate
+    // check is disabled rather than paid for twice. (`verifyEvent` is private
+    // in the .d.ts but settable at runtime; AbstractRelay reads it per event.)
     const relay = new Relay(url)
+    ;(relay as unknown as { verifyEvent: (e: Event, url: string) => boolean }).verifyEvent = () => true
     this.relays.set(url, relay)
     relay.onclose = () => {
       if (this.closed) return
@@ -104,7 +110,12 @@ export class RelayPool {
         { kinds: [DELETE_KIND], limit: 120, since },
       ],
       {
-        onevent: (event) => { if (verifyFresh(event)) this.onEvent?.(event) },
+        // cheap structural filter BEFORE the expensive signature check, so a
+        // chatty relay cannot burn the main thread on events we would drop
+        onevent: (event) => {
+          if (event.kind !== MODEL_KIND && event.kind !== DELETE_KIND) return
+          void verifyFreshAsync(event).then((ok) => { if (ok) this.onEvent?.(event) })
+        },
         oneose: () => this.setState(url, 'online'),
       },
     )

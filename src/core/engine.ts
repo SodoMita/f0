@@ -1,4 +1,5 @@
 import { Engine } from '@babylonjs/core/Engines/engine'
+import { Effect } from '@babylonjs/core/Materials/effect'
 import { Scene } from '@babylonjs/core/scene'
 import { ArcRotateCamera } from '@babylonjs/core/Cameras/arcRotateCamera'
 import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight'
@@ -32,6 +33,16 @@ const KICK_MS = 300
 const SLOW_MS = 45 // degrade when EMA exceeds this
 const FAST_MS = 18 // restore when EMA stays below this
 const RESTORE_FRAMES = 150
+
+// Compiled GL programs are cached per engine by "vertex+fragment@defines", but
+// `Effect.dispose()` DELETES the cache entry when the last material using it
+// goes away. We dispose an AssetContainer after every poster render, every
+// preview swap and every viewer navigation, so identical models recompiled
+// their shaders every single time (measured with scripts/shaders.mjs: opening
+// the same model three times = three compiles, zero cache hits).
+// PersistentMode keeps the compiled programs alive for the session; the cache
+// is bounded by the number of distinct define sets, not by models.
+Effect.PersistentMode = true
 
 export class FormEngine {
   readonly engine: Engine

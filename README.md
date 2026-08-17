@@ -23,6 +23,38 @@ Settings, navigation, toolbars, metadata, toasts are plain HTML overlays.
 Only the models, the board, the reply badges and the thread map are Babylon.
 Settings: **background color** (viewer/thread/studio) + **scroll inertia**.
 
+## Key fixes this round (2026-08-17, round 6 — duplicated work)
+
+Profiled with `scripts/profile.mjs` (V8 sampling profile of a board load) and
+`scripts/shaders.mjs` (GL program compiles per model open):
+
+| | before | after |
+|---|---|---|
+| shader compiles when re-opening the SAME model | 1–2 every time, 0 cache hits | **0** |
+| compiled programs still cached after a load | 2 of 14 | **13 of 13** |
+| `readPixels` (synchronous GPU stall) | 2985 ms · 11.4% of wall | **gone** (async PBO) |
+| signature verification on the main thread | ~700 ms, run 2–3× per event | **gone** (inline worker, once) |
+| poster PNG encode on the main thread | ~1000 ms · 4% | **gone** (OffscreenCanvas worker) |
+| GLB bytes copied + validated per post | 3× | **1×** |
+| main thread idle during a load | 71% | **82%** |
+
+- **Shaders recompiled for identical models.** Babylon caches compiled programs
+  per engine, but `Effect.dispose()` deletes the cache entry when the last
+  material using it goes away — and we dispose a container after every poster
+  render, preview swap and viewer navigation. `Effect.PersistentMode = true`
+  keeps them; the cache is bounded by distinct define sets, not by models.
+- **Nothing waits on the GPU any more.** `rtt.readPixels()` is a
+  Promise-wrapped *synchronous* `gl.readPixels`; posters now read back through
+  a PIXEL_PACK_BUFFER + fence.
+- **Event verification was happening three times** — inside nostr-tools' relay,
+  at our ingress, and again in the parser — all on the main thread at ~46 ms
+  each. Now: once, in an inline worker (with a sync fallback), remembered per
+  event object.
+- **One decode per model.** `getModelBytes()` shares a single `Uint8Array`
+  between poster, preview and viewer, `validateGLBCached()` memoises the limit
+  report by hash, and Babylon loads from those bytes instead of a `File`
+  (which re-reads through a FileReader).
+
 ## Key fixes this round (2026-08-17, round 5 — performance)
 
 Measured with the new `scripts/perf.mjs` harness (headless SwiftShader,

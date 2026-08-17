@@ -117,3 +117,17 @@ a per-frame path, work queued for offscreen cards, or a new barrel import.
 It is a full-screen `backdrop-filter: blur()` overlay; leaving it up makes every
 frame measurement meaningless (it turned a 65 ms p95 into 4600 ms here) and
 swallows clicks.
+
+
+## Profiling tools (round 6)
+
+| Command | What it answers |
+|---|---|
+| `node scripts/shaders.mjs` | Are shaders recompiled for models we already drew? (prints GL program compiles + cache hits per model open; repeat opens must be `+0`) |
+| `PHASE=load node scripts/profile.mjs` | Where does the main thread actually go during a board load? (V8 sampling profile aggregated by self time) |
+| `PHASE=viewer/scroll node scripts/profile.mjs` | Same, for viewer navigation and flinging |
+
+Both write artefacts to `shots/`. Read the profile before optimising anything:
+the four biggest wins of round 6 (`readPixels`, `verifyEvent`, `toBlob`,
+duplicate GLB parses) were all invisible until they were measured, and two of
+them were duplicate work rather than slow code.

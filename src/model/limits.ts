@@ -16,6 +16,22 @@ export interface LimitReport {
  * This is what prevents a huge/hostile model from exhausting GPU memory and
  * crashing the renderer ("Aw, Snap!").
  */
+/**
+ * Memo of validation results by content hash. The poster renderer, the live
+ * preview pool and the viewer all validate the SAME model; parsing the JSON
+ * chunk three times per post is pure waste.
+ */
+const reportBySha = new Map<string, LimitReport>()
+
+export function validateGLBCached(bytes: Uint8Array, sha256: string): LimitReport {
+  const hit = reportBySha.get(sha256)
+  if (hit) return hit
+  const report = validateGLB(bytes)
+  if (reportBySha.size > 256) reportBySha.clear()
+  reportBySha.set(sha256, report)
+  return report
+}
+
 export function validateGLB(bytes: Uint8Array): LimitReport {
   const stats = { nodes: 0, meshes: 0, primitives: 0, vertices: 0, indices: 0, materials: 0, textures: 0, cameras: 0, lights: 0, skins: 0, animations: 0, channels: 0, keyframes: 0, decodedPixels: 0, depth: 0 }
   const fail = (reason: string): LimitReport => ({ ok: false, reason, stats })
