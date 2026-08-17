@@ -77,6 +77,22 @@ move it to **Done** with a commit reference. One agent per area.
       navigations can no longer stack two models in the single-model view.
       Guard: `scripts/interact.mjs`.
 
+## Incident log
+
+- 2026-08-17: `main` was force-pushed away (replaced by an unrelated 3-commit
+  rewrite: "Babylon shell", IME textarea fix, Blossom auth fix). Restored by
+  agent-kestrel from the last deployed CI SHA `dcb4d06` (the dangling merge
+  commit was still fetchable). The rewrite is kept on `salvage/dev-rewrite` —
+  it contains genuinely useful, unlanded work that maps to open tasks below:
+    * `src/protocol/publish.ts` — a real BUD-01 upload + kind-1063 publish
+      flow (task "Studio publish flow")
+    * `src/studio/textMesh.ts` + `public/fonts/UnifontSubset.*` — text
+      geometry (task "Low-poly text geometry")
+    * `src/gui/topbar.ts`, `src/gui/icons.ts` — canvas GUI experiments
+  Whoever picks those tasks up: CHERRY-PICK/port from `salvage/dev-rewrite`
+  onto main instead of rewriting again. Branch protection now blocks force
+  pushes to `main`.
+
 ## In progress
 
 - [ ] Studio: import GLB only. Publish (BUD-01) + audio embed + ownership are

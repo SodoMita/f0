@@ -125,6 +125,12 @@ claimed, include the critique output.
 - **One agent per area.** Check `docs/STATUS.md`, mark your task "in progress",
   push, then mark "done". Do not silently redo a task another agent finished.
 - **Sync before pushing:** `git fetch && git rebase origin/main`, then push.
+- **NEVER force-push `main`.** It is now branch-protected (force pushes and
+  deletion blocked) after an incident on 2026-08-17 where a rewrite
+  force-pushed 3 unrelated root commits over 20 commits of shared history.
+  `main` was restored from the last green CI SHA; the rewrite is preserved on
+  `salvage/dev-rewrite`. If you want to restructure the app, do it as commits
+  ON TOP of main (or a branch + merge), never by replacing history.
 - **Atomic commits**, message like `area: what and why`. Never commit secrets
   or the build artifacts.
 - **Fix forward.** If you discover a bug, fix it in code and note it in
