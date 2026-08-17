@@ -139,3 +139,12 @@ claimed, include the critique output.
 - **Deploy is automatic.** `.github/workflows/deploy-pages.yml` builds the
   standalone and publishes to GitHub Pages on every push to `main`. Do not
   hand-edit `docs/index.html` (that path was removed).
+- **Pages source MUST stay "GitHub Actions"** (Settings → Pages → Source).
+  On 2026-08-17 it was flipped to "Deploy from a branch /", which serves the
+  RAW repo root: the dev `index.html` that loads `/src/main.ts` — a TypeScript
+  module no browser can run, so https://sodomita.github.io/f0/ went blank
+  ("network changed"/timeout in practice). The repo root is SOURCE, not a
+  site; only the workflow artifact (form-zero-standalone.html → index.html)
+  is deployable. If the site ever serves ~13 KB of HTML instead of ~3.7 MB,
+  this setting is the first thing to check
+  (`GET /repos/SodoMita/f0/pages` → `build_type` must be `workflow`).
