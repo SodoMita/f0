@@ -10,6 +10,7 @@ import { ThreadView } from './board/threadView'
 import { Viewer } from './viewer/viewer'
 import { Studio } from './studio/studio'
 import { AssetCache } from './core/assets'
+import { publishModel, type PublishProgress } from './protocol/publish'
 import { configureDraco } from './model/draco'
 import { enforceOffline } from './model/offline'
 import { DEFAULTS, theme } from './theme'
@@ -74,6 +75,13 @@ async function boot(): Promise<void> {
   const topbar = $('topbar')
   const viewerBar = $('viewer-bar')
   const drawer = $('meta-drawer')
+  const studioBar = $('studio-bar')
+  const studioFilename = $('studio-filename')
+  const studioStatus = $('studio-status')
+  const btnStudioImport = $('btn-studio-import') as HTMLButtonElement
+  const btnStudioPublish = $('btn-studio-publish') as HTMLButtonElement
+  const fileInput = $('file-input') as HTMLInputElement
+  let publishing = false
   const netDot = $('net-dot')
   const btnPlay = $('btn-play') as HTMLButtonElement
   const camDots = $('cam-dots')
@@ -115,6 +123,72 @@ async function boot(): Promise<void> {
   netDot.addEventListener('click', () => router.go({ name: 'network' }))
   $('btn-add').addEventListener('click', () => router.go({ name: 'studio' }))
   $('btn-shuffle').addEventListener('click', () => board.shuffle(orderedRoots()))
+
+  // ---------- studio (import + publish) ----------
+  function setStudioStatus(text: string, cls = ''): void {
+    studioStatus.textContent = text
+    studioStatus.className = 'studio-status ' + cls
+  }
+
+  async function pickStudioFile(): Promise<void> {
+    fileInput.value = ''
+    fileInput.accept = '.glb'
+    fileInput.onchange = async () => {
+      const file = fileInput.files?.[0]
+      if (!file) return
+      try {
+        setStudioStatus('importing…', 'busy')
+        const imported = await studio.importGLB(file)
+        studioFilename.textContent = file.name
+        btnStudioPublish.disabled = false
+        setStudioStatus(`${imported.report.stats.meshes} mesh · ${(file.size / 1048576).toFixed(1)} MiB`)
+      } catch (err) {
+        setStudioStatus(err instanceof Error ? err.message : 'import failed', 'err')
+      }
+    }
+    // File dialog must open from a trusted click.
+    fileInput.click()
+  }
+
+  async function publishStudio(): Promise<void> {
+    if (publishing) return
+    const imported = studio.currentModel
+    if (!imported) return
+    publishing = true
+    btnStudioPublish.disabled = true
+    try {
+      setStudioStatus('poster…', 'busy')
+      const poster = await assets.renderPosterFor(imported.file)
+      const onProgress = (p: PublishProgress) => {
+        if (p.stage === 'blossom') setStudioStatus('upload…', 'busy')
+        else if (p.stage === 'relay') setStudioStatus('nostr…', 'busy')
+        else if (p.stage === 'done') setStudioStatus(`done · ${p.ok ?? 0}/${(p.ok ?? 0) + (p.failed ?? 0)}`, p.failed ? 'err' : 'ok')
+        else if (p.stage === 'error') setStudioStatus(p.detail ?? 'failed', 'err')
+      }
+      const result = await publishModel(
+        {
+          model: imported.file,
+          poster,
+          tint: studio.tintColor,
+          filename: imported.file.name,
+          sourceFormat: 'glb',
+          cameraCount: imported.report.stats.cameras,
+          hasAnimation: imported.report.stats.animations > 0,
+        },
+        { relays: pool.relayUrls, blossoms: blossoms.servers, pool, onProgress: onProgress },
+      )
+      // Open the freshly published model.
+      router.go({ name: 'viewer', id: result.eventId })
+    } catch (err) {
+      setStudioStatus(err instanceof Error ? err.message : 'publish failed', 'err')
+      btnStudioPublish.disabled = false
+    } finally {
+      publishing = false
+    }
+  }
+
+  btnStudioImport.addEventListener('click', () => void pickStudioFile())
+  btnStudioPublish.addEventListener('click', () => void publishStudio())
   $('btn-close').addEventListener('click', () => router.go({ name: 'board' }))
   $('btn-prev').addEventListener('click', () => void stepViewer(-1))
   $('btn-next').addEventListener('click', () => void stepViewer(1))
@@ -248,6 +322,7 @@ async function boot(): Promise<void> {
       setLoading('model', false)
       viewer.clear()
     }
+    studioBar.hidden = next !== 'studio'
     if (next === 'board') {
       engine.setActiveScene(board.scene)
       topbar.hidden = false
