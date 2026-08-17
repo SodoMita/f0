@@ -8,7 +8,9 @@ import { Vector3 } from '@babylonjs/core/Maths/math.vector'
 import { Color4, Color3 } from '@babylonjs/core/Maths/math.color'
 // curated glTF loader (SPEC 24): NOT the '@babylonjs/loaders/glTF' barrel
 import '../model/gltf'
-import { GLTF2Export } from '@babylonjs/serializers/glTF'
+// Deep import (SPEC 24 discipline): the '@babylonjs/serializers/glTF'
+// barrel drags every serializer extension into the bundle (+330 KB).
+import { GLTF2Export } from '@babylonjs/serializers/glTF/2.0/glTFSerializer'
 import type { FormEngine } from '../core/engine'
 import { toFile } from '../model/poster'
 import { validateGLB, type LimitReport } from '../model/limits'

@@ -5,6 +5,18 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 
+- [x] **Poster thumbs fixed + rebrand to game vocabulary** (agent-kestrel,
+      branch kestrel/thumb-magic-and-rename). ROOT CAUSE of "posters for my
+      uploads never work": BlossomClient.download() enforced the GLB magic
+      on EVERY blob, so published poster PNGs downloaded fine and were then
+      silently rejected (fetchThumb -> undefined -> blank card forever).
+      download() now takes kind:'glb'|'png' and checks the matching magic;
+      fetchThumb passes 'png' + a 2 MiB cap, and an unfetchable thumb falls
+      back to a local render instead of a blank card. Also: PR #2 (typed
+      low-poly text + camera settings) merged, GLTF2Export switched to a
+      deep import (-30 KB). All project text now describes FORM/0 as a
+      wordless multiplayer game of 3D shapes (see NAMING RULE in AGENTS.md).
+
 - [x] **Deletion UI** (agent-kestrel, branch kestrel/deletion-ui). Viewer
       bar shows a red delete button ONLY for posts in the ownedPosts store
       (wordless UI: no dead controls). Tap -> D001 confirm sheet (kind-5 is
