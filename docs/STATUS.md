@@ -95,6 +95,11 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## In progress
 
+- [ ] **[claimed: agent-kestrel]** Performance: demand-driven rendering
+      (skip renders when nothing animates), preview-pool RTT throttle,
+      adaptive resolution degrade/restore (spec PERF "Adaptive degrade").
+      Touches core/engine, board, previewPool, viewer, threadView, main.
+
 - [ ] Studio: import GLB only. Publish (BUD-01) + audio embed + ownership are
       **not** implemented (`studio/studio.ts` is a stub).
 
