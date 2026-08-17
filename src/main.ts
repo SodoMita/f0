@@ -167,7 +167,8 @@ async function boot(): Promise<void> {
     btnStudioPublish.disabled = true
     try {
       setStudioStatus('poster…', 'busy')
-      const poster = await assets.renderPosterFor(imported.file)
+      const { blob: poster, blank } = await assets.renderPosterFor(imported.file, studio.tintColor)
+      if (blank) setStudioStatus('poster placeholder', 'busy')
       const onProgress = (p: PublishProgress) => {
         if (p.stage === 'blossom') setStudioStatus('upload…', 'busy')
         else if (p.stage === 'relay') setStudioStatus('nostr…', 'busy')
