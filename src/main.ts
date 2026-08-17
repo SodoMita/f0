@@ -86,7 +86,6 @@ async function boot(): Promise<void> {
   const textBudget = $('text-budget')
   const symbolGrid = $('symbol-grid')
   const camTarget = (['cam-tx','cam-ty','cam-tz'] as const).map((id) => $(id) as HTMLInputElement)
-  const camRot = (['cam-rx','cam-ry','cam-rz'] as const).map((id) => $(id) as HTMLInputElement)
   const camFov = $('cam-fov') as HTMLInputElement
   const camRadius = $('cam-radius') as HTMLInputElement
   const fileInput = $('file-input') as HTMLInputElement
@@ -213,6 +212,24 @@ async function boot(): Promise<void> {
   btnStudioImport.addEventListener('click', () => void pickStudioFile())
   btnStudioPublish.addEventListener('click', () => void publishStudio())
 
+  // ---- Studio transform toolbar (move/rotate/scale/delete/free-cam) ----
+  let freeCamOn = false
+  document.querySelectorAll<HTMLButtonElement>('[data-xform]').forEach((b) =>
+    b.addEventListener('click', () => {
+      const mode = b.dataset.xform as 'position' | 'rotation' | 'scale'
+      studio.setTransformMode(mode)
+      document.querySelectorAll<HTMLButtonElement>('[data-xform]').forEach((x) => x.classList.toggle('active', x === b))
+      refreshCameraControls()
+    }))
+  const toolDelete = $('tool-delete') as HTMLButtonElement
+  toolDelete?.addEventListener('click', () => studio.deleteSelection())
+  const toolFree = $('tool-freecam') as HTMLButtonElement
+  toolFree?.addEventListener('click', () => {
+    freeCamOn = !freeCamOn
+    studio.setCameraState({ projection: freeCamOn ? 'free' : 'perspective' })
+    refreshCameraControls()
+  })
+
   // ---- Studio tabs ----
   type StudioTab = 'upload' | 'type' | 'paint' | 'symbols'
   let studioTab: StudioTab = 'upload'
@@ -254,9 +271,9 @@ async function boot(): Promise<void> {
   function refreshCameraControls(): void {
     const c = studio.getCameraState()
     c.target.forEach((v, i) => { camTarget[i].value = v.toFixed(2) })
-    c.rotationDeg.forEach((v, i) => { camRot[i].value = v.toFixed(0) })
     camFov.value = c.fovDeg.toFixed(0)
     camRadius.value = c.radius.toFixed(2)
+    document.querySelector<HTMLButtonElement>('#tool-freecam')?.classList.toggle('active', c.projection === 'free')
   }
   let textTimer = 0
   studioText.addEventListener('input', () => {
@@ -280,10 +297,6 @@ async function boot(): Promise<void> {
   camTarget.forEach((el, i) => el.addEventListener('change', () => {
     const t = studio.getCameraState().target.slice() as [number, number, number]
     t[i] = num(el); studio.setCameraState({ target: t }); refreshCameraControls()
-  }))
-  camRot.forEach((el) => el.addEventListener('change', () => {
-    studio.setCameraState({ rotationDeg: [num(camRot[0]), num(camRot[1]), num(camRot[2])] })
-    refreshCameraControls()
   }))
   camFov.addEventListener('change', () => studio.setCameraState({ fovDeg: num(camFov) }))
   camRadius.addEventListener('change', () => studio.setCameraState({ radius: num(camRadius) }))
@@ -504,7 +517,10 @@ async function boot(): Promise<void> {
       setMode('studio')
       studio.clearModel()
       studioFilename.textContent = ''
-      setStudioTab('upload')
+      setStudioTab('type')
+      studioText.value = '/0'
+      studio.setText('/0')
+      void studio.rebuildText()
       setStudioStatus(studioReply ? 'replying…' : '')
       refreshCameraControls()
     }
