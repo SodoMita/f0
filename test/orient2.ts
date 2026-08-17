@@ -1,114 +1,159 @@
-// Definitive flip matrix per texture kind: ?kind=raw|dyn|rtt
-// Four quads at fixed positions with flips (0,1),(0,0),(1,1),(1,0).
-// Pattern: RED top half, GREEN bottom half, BLUE left column.
-// CORRECT = RED top, GREEN bottom, BLUE left.
+// ORIENTATION PROOF for the card pipeline (open /test/orient2.html).
+//
+// Renders the SAME asymmetric probe through all three texture kinds the app
+// uses — RawTexture (posters), DynamicTexture (badges/backdrops) and
+// RenderTargetTexture (live previews) — through the production flat camera
+// (core/gfx.flatCamera) and the production card material, then reads the
+// framebuffer back at the four corners of each quad.
+//
+// Probe quadrants:   top-left RED   top-right GREEN
+//                    bottom-left BLUE   bottom-right WHITE
+//
+// A mirrored quad swaps left/right, an upside-down one swaps top/bottom.
+// Results are printed and exposed on `window.__orient` for scripts/orient.mjs.
 import { Engine } from '@babylonjs/core/Engines/engine'
 import { Scene } from '@babylonjs/core/scene'
-import { ArcRotateCamera } from '@babylonjs/core/Cameras/arcRotateCamera'
 import { Vector3 } from '@babylonjs/core/Maths/math.vector'
 import { Color4 } from '@babylonjs/core/Maths/math.color'
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder'
 import { RawTexture } from '@babylonjs/core/Materials/Textures/rawTexture'
 import { DynamicTexture } from '@babylonjs/core/Materials/Textures/dynamicTexture'
 import { RenderTargetTexture } from '@babylonjs/core/Materials/Textures/renderTargetTexture'
-import { makeCardMaterial, setCardFlip, setGlobalFlips } from '../src/board/cardMaterial'
+import { Texture } from '@babylonjs/core/Materials/Textures/texture'
+import { makeCardMaterial, setCardTexture, setCardFlip, type CardTextureKind } from '../src/board/cardMaterial'
+import { flatCamera } from '../src/core/gfx'
 
 const canvas = document.getElementById('c') as HTMLCanvasElement
-const out = document.getElementById('out') as HTMLDivElement
+const out = document.getElementById('out') as HTMLPreElement
 const log = (...a: unknown[]) => { out.textContent += a.join(' ') + '\n' }
-const kind = new URLSearchParams(location.search).get('kind') || 'raw'
-// deterministic test: pin the global X flip (production calibrates it at boot)
-setGlobalFlips({ flipX: { raw: 0, dyn: 0, rtt: 0 }, flipY: { raw: 0, dyn: 0, rtt: 0 } })
+
+const S = 64
+const KINDS: CardTextureKind[] = ['raw', 'dyn', 'rtt']
+const QUAD = 5 // world size of each probe quad
+const GAP = 1.6
 
 const engine = new Engine(canvas, true, { preserveDrawingBuffer: true })
 const scene = new Scene(engine)
 scene.clearColor = new Color4(0, 0, 0, 1)
-const cam = new ArcRotateCamera('cam', Math.PI / 2, Math.PI / 2, 10, Vector3.Zero(), scene)
-cam.mode = ArcRotateCamera.ORTHOGRAPHIC_CAMERA
-cam.orthoTop = 4.5; cam.orthoBottom = -4.5; cam.orthoLeft = -10; cam.orthoRight = 10
-scene.activeCamera = cam
+const cam = flatCamera(scene, 'orient-cam', 30)
+cam.orthoTop = 4; cam.orthoBottom = -4
+cam.orthoLeft = -(canvas.width / canvas.height) * 4
+cam.orthoRight = (canvas.width / canvas.height) * 4
 
-function patternCanvas(w: number, h: number): HTMLCanvasElement {
-  const c = document.createElement('canvas'); c.width = w; c.height = h
-  const ctx = c.getContext('2d')!
-  ctx.fillStyle = '#00ff00'; ctx.fillRect(0, 0, w, h)
-  ctx.fillStyle = '#ff0000'; ctx.fillRect(0, 0, w, h / 2)
-  ctx.fillStyle = '#0000ff'; ctx.fillRect(0, 0, w / 4, h)
-  return c
+/** top-left RED, top-right GREEN, bottom-left BLUE, bottom-right WHITE */
+function paint(ctx: CanvasRenderingContext2D): void {
+  ctx.fillStyle = '#ff0000'; ctx.fillRect(0, 0, S / 2, S / 2)
+  ctx.fillStyle = '#00ff00'; ctx.fillRect(S / 2, 0, S / 2, S / 2)
+  ctx.fillStyle = '#0000ff'; ctx.fillRect(0, S / 2, S / 2, S / 2)
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(S / 2, S / 2, S / 2, S / 2)
 }
 
-let texture: any
-if (kind === 'raw') {
-  texture = new RawTexture(patternCanvas(64, 64).getContext('2d')!.getImageData(0, 0, 64, 64).data, 64, 64, 5, scene, false, false)
-} else if (kind === 'dyn') {
-  texture = new DynamicTexture('dtc', { width: 64, height: 64 }, scene, false)
-  texture.getContext()!.drawImage(patternCanvas(64, 64), 0, 0)
-  texture.update()
-} else {
-  const stage = new Scene(engine)
-  const sc = new ArcRotateCamera('sc', Math.PI / 2, Math.PI / 2, 10, Vector3.Zero(), stage)
-  sc.mode = ArcRotateCamera.ORTHOGRAPHIC_CAMERA
-  sc.orthoTop = 1.5; sc.orthoBottom = -1.5; sc.orthoLeft = -1.5; sc.orthoRight = 1.5
-  stage.activeCamera = sc
-  const splane = MeshBuilder.CreatePlane('sp', { width: 3, height: 4 }, stage)
-  const smat = makeCardMaterial(stage)
-  const dt = new DynamicTexture('dt', patternCanvas(64, 64), stage, false)
-  dt.update()
-  smat.setTexture('tex', dt)
-  setCardFlip(smat, 'dyn')
-  splane.material = smat
-  const rtt = new RenderTargetTexture('rtt', { width: 64, height: 64 }, stage)
-  rtt.clearColor = new Color4(0, 0, 0, 0)
-  sc.outputRenderTarget = rtt
-  for (let i = 0; i < 5; i++) stage.render()
-  sc.outputRenderTarget = null
-  texture = rtt
-}
-
-const flips: boolean[] = [true, false, true, false]
-const cxs = [-6.5, -2.5, 1.5, 5.5]
-const quads: any[] = []
-for (let i = 0; i < 4; i++) {
-  const mesh = MeshBuilder.CreatePlane('q' + i, { width: 3, height: 4 }, scene)
-  mesh.position.x = cxs[i]
-  const mat = makeCardMaterial(scene)
-  mat.setTexture('tex', texture)
-  mat.setVector2('flip', new (await import('@babylonjs/core/Maths/math.vector')).Vector2(0, flips[i] ? 1 : 0))
-  mesh.material = mat
-  quads.push({ mesh, mat, flip: flips[i] })
-}
-
-for (let i = 0; i < 8; i++) scene.render()
-await new Promise((r) => setTimeout(r, 300))
-const view = await engine.readPixels(0, 0, canvas.width, canvas.height, true)
-const px = new Uint8Array(view.buffer, view.byteOffset, view.byteLength)
-
-const isRed = (v: number[]) => v[0] > 180 && v[1] < 90 && v[2] < 90
-const isGreen = (v: number[]) => v[1] > 180 && v[0] < 90 && v[2] < 90
-const isBlue = (v: number[]) => v[2] > 180 && v[0] < 90 && v[1] < 90
-const name = (v: number[]) => isRed(v) ? 'RED' : isGreen(v) ? 'GREEN' : isBlue(v) ? 'BLUE' : `(${v.join(',')})`
-
-log('kind:', kind)
-for (const q of quads) {
-  const cx = q.mesh.position.x
-  const at = (dx: number, dy: number) => {
-    const sx = Math.round(canvas.width / 2 + (cx + dx) * 45)
-    const sy = Math.round(200 - dy * 44.4)
-    const i = (sy * canvas.width + sx) * 4
-    return [px[i], px[i + 1], px[i + 2]]
+function rawProbe(): RawTexture {
+  // top-down RGBA rows, exactly like AssetCache's poster upload
+  const data = new Uint8Array(S * S * 4)
+  for (let y = 0; y < S; y++) {
+    for (let x = 0; x < S; x++) {
+      const i = (y * S + x) * 4
+      const top = y < S / 2
+      const left = x < S / 2
+      const c = top ? (left ? [255, 0, 0] : [0, 255, 0]) : (left ? [0, 0, 255] : [255, 255, 255])
+      data[i] = c[0]; data[i + 1] = c[1]; data[i + 2] = c[2]; data[i + 3] = 255
+    }
   }
-  const top = at(0.5, 1.3), bot = at(0.5, -1.3), left = at(-1, 1.3), right = at(1, 1.3)
-  log(`flipY=${q.flip}  top=${name(top)} bot=${name(bot)} left=${name(left)} right=${name(right)}`)
+  return RawTexture.CreateRGBATexture(data, S, S, scene, false, true, Texture.NEAREST_SAMPLINGMODE)
 }
-// 2D grid
-const L = (x: number, y: number) => {
-  const i = (y * canvas.width + x) * 4
-  const v = [px[i], px[i + 1], px[i + 2]]
-  return isRed(v) ? 'R' : isGreen(v) ? 'G' : isBlue(v) ? 'B' : v[0] + v[1] + v[2] > 60 ? '?' : '.'
+
+function dynProbe(): DynamicTexture {
+  const t = new DynamicTexture('dyn-probe', { width: S, height: S }, scene, false, Texture.NEAREST_SAMPLINGMODE)
+  paint(t.getContext() as CanvasRenderingContext2D)
+  t.update()
+  return t
 }
-for (let y = 30; y < 400; y += 25) {
-  let row = ''
-  for (let x = 30; x < 900; x += 10) row += L(x, y)
-  log(row)
+
+function rttProbe(): RenderTargetTexture {
+  // stage a dyn probe quad and render it through a flat camera into an RTT,
+  // i.e. the exact live-preview path
+  const stage = new Scene(engine)
+  stage.autoClear = true
+  stage.clearColor = new Color4(0, 0, 0, 0)
+  const sc = flatCamera(stage, 'stage-cam', 10)
+  sc.orthoTop = 1; sc.orthoBottom = -1; sc.orthoLeft = -1; sc.orthoRight = 1
+  const plane = MeshBuilder.CreatePlane('stage-quad', { width: 2, height: 2 }, stage)
+  const mat = makeCardMaterial(stage)
+  const t = new DynamicTexture('stage-probe', { width: S, height: S }, stage, false, Texture.NEAREST_SAMPLINGMODE)
+  paint(t.getContext() as CanvasRenderingContext2D)
+  t.update()
+  setCardTexture(mat, t)
+  setCardFlip(mat, 'dyn')
+  plane.material = mat
+  const rtt = new RenderTargetTexture('rtt-probe', { width: S, height: S }, stage)
+  rtt.samples = 1
+  sc.outputRenderTarget = rtt
+  stage.render()
+  stage.render()
+  sc.outputRenderTarget = null
+  return rtt
 }
-engine.dispose()
+
+const probes: Record<CardTextureKind, Texture> = {
+  raw: rawProbe(),
+  dyn: dynProbe(),
+  rtt: rttProbe() as unknown as Texture,
+}
+
+KINDS.forEach((kind, i) => {
+  const mesh = MeshBuilder.CreatePlane(`quad-${kind}`, { width: QUAD, height: QUAD }, scene)
+  const mat = makeCardMaterial(scene)
+  setCardTexture(mat, probes[kind])
+  setCardFlip(mat, kind)
+  mesh.material = mat
+  mesh.position.x = (i - 1) * (QUAD + GAP)
+})
+
+const name = (p: number[]): string => {
+  const [r, g, b] = p
+  if (r > 150 && g < 100 && b < 100) return 'RED'
+  if (g > 150 && r < 100 && b < 100) return 'GREEN'
+  if (b > 150 && r < 100 && g < 100) return 'BLUE'
+  if (r > 150 && g > 150 && b > 150) return 'WHITE'
+  return `(${r},${g},${b})`
+}
+
+async function run(): Promise<void> {
+  for (let i = 0; i < 8; i++) { scene.render(); await new Promise((r) => setTimeout(r, 50)) }
+  scene.render()
+
+  const w = engine.getRenderWidth()
+  const h = engine.getRenderHeight()
+  const toPx = (wx: number, wy: number): [number, number] => [
+    Math.round(((wx - cam.orthoLeft!) / (cam.orthoRight! - cam.orthoLeft!)) * w),
+    // engine.readPixels' origin is the BOTTOM-left of the framebuffer
+    Math.round(((wy - cam.orthoBottom!) / (cam.orthoTop! - cam.orthoBottom!)) * h),
+  ]
+  const read = async (wx: number, wy: number): Promise<number[]> => {
+    const [px, py] = toPx(wx, wy)
+    const v = await engine.readPixels(px, py, 1, 1, true, false)
+    const b = new Uint8Array(v.buffer, v.byteOffset, v.byteLength)
+    return [b[0], b[1], b[2]]
+  }
+
+  const results: Record<string, { tl: string; tr: string; bl: string; br: string; ok: boolean }> = {}
+  for (let i = 0; i < KINDS.length; i++) {
+    const kind = KINDS[i]
+    const cx = (i - 1) * (QUAD + GAP)
+    const q = QUAD / 4
+    const tl = name(await read(cx - q, q))
+    const tr = name(await read(cx + q, q))
+    const bl = name(await read(cx - q, -q))
+    const br = name(await read(cx + q, -q))
+    const ok = tl === 'RED' && tr === 'GREEN' && bl === 'BLUE' && br === 'WHITE'
+    results[kind] = { tl, tr, bl, br, ok }
+    log(`${ok ? 'PASS' : 'FAIL'}  ${kind}: TL=${tl} TR=${tr} BL=${bl} BR=${br}` +
+      (ok ? '' : '   (expected TL=RED TR=GREEN BL=BLUE BR=WHITE)'))
+  }
+  const allOk = KINDS.every((k) => results[k].ok)
+  log(allOk ? '\nALL KINDS ORIENTED CORRECTLY' : '\nORIENTATION BROKEN')
+  ;(window as unknown as { __orient: unknown }).__orient = { results, ok: allOk }
+}
+
+void run()

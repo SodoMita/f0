@@ -12,7 +12,7 @@ import { Color3, Color4 } from '@babylonjs/core/Maths/math.color'
 import type { AssetContainer } from '@babylonjs/core/assetContainer'
 import '@babylonjs/loaders/glTF'
 import { configureDraco } from './draco'
-import { dominantFacing, worldBounds, fitDistance } from './facing'
+import { dominantFacing, worldBox, frameDistance } from './facing'
 import { validateGLB } from './limits'
 
 export const POSTER_W = 512
@@ -24,7 +24,14 @@ export function toFile(blob: Blob, name: string): File {
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
-export interface PosterResult { blob: Blob; animated: boolean }
+/**
+ * Where the model actually sits inside the poster frame, in normalised card
+ * space (0..1, origin bottom-left). The board uses it to drop the contact
+ * shadow exactly under the model instead of guessing the card's centre.
+ */
+export interface Footprint { cx: number; bottom: number; w: number }
+
+export interface PosterResult { blob: Blob; animated: boolean; footprint: Footprint | null }
 
 /**
  * Local thumbnail pipeline (step 4): GLB -> one frame -> 512x320 PNG.
@@ -34,13 +41,20 @@ export interface PosterResult { blob: Blob; animated: boolean }
  */
 export class PosterRenderer {
   private scene: Scene
+  private headlight: DirectionalLight
   // Renders share one scene (shared activeCamera + env); a promise-chain mutex
   // serializes them so concurrent calls can never stomp each other's camera.
   private chain: Promise<unknown> = Promise.resolve()
   constructor(engine: AbstractEngine) {
     configureDraco()
     this.scene = new Scene(engine)
-    this.scene.autoClear = false
+    // Clear the render target to FULLY TRANSPARENT every frame. The old code
+    // set `autoClear = false` and only configured `rtt.clearColor`, but the
+    // camera.outputRenderTarget path clears through the SCENE — so the target
+    // was never cleared and every poster came out on an opaque black slab.
+    this.scene.autoClear = true
+    this.scene.autoClearDepthAndStencil = true
+    this.scene.clearColor = new Color4(0, 0, 0, 0)
     // Lights only. NO scene.environmentTexture: switching PBR materials to
     // IBL with a dark env cube rendered every model pitch black on this GL
     // driver (and the "black model" report was really a camera-framing bug).
@@ -51,6 +65,10 @@ export class PosterRenderer {
     key.intensity = 0.8
     const fill = new DirectionalLight('pf', new Vector3(0.5, 0.2, -0.6), this.scene)
     fill.intensity = 0.35
+    // Headlight aimed along the poster camera's view direction, re-aimed per
+    // model. Without it, dark models vanish completely on a transparent card.
+    this.headlight = new DirectionalLight('ph2', new Vector3(0, 0, 1), this.scene)
+    this.headlight.intensity = 0.55
   }
 
   render(blob: Blob): Promise<PosterResult> {
@@ -67,7 +85,7 @@ export class PosterRenderer {
     rtt.renderTargetOptions.generateDepthBuffer = true
     rtt.renderTargetOptions.generateMipMaps = false
     // Transparent background: posters composite over any page/board backdrop.
-    rtt.clearColor = new Color4(0.043, 0.043, 0.047, 0)
+    rtt.clearColor = new Color4(0, 0, 0, 0)
     try {
       // Enforce GLB limits before Babylon parses (07 §4).
       const bytes = new Uint8Array(await blob.arrayBuffer())
@@ -87,13 +105,17 @@ export class PosterRenderer {
       // own camera may point anywhere (it is an authored view, not a framing
       // hint), which produced blank posters. The model's cameras belong in
       // the detail viewer (camera dots), not the thumbnail.
-      const { center, radius } = worldBounds(container)
+      const { min, max, center, radius } = worldBox(container)
       const facing = dominantFacing(container)
-      ownCamera = new FreeCamera('poster-cam', center.add(facing.scale(fitDistance(radius, 0.7))), this.scene)
+      // Tight, aspect-aware framing: wide models must fill the 16:10 card.
+      const fov = 0.7
+      const dist = frameDistance(min, max, center, facing.scale(-1), fov, POSTER_W / POSTER_H, 0.86)
+      this.headlight.direction = facing.scale(-1)
+      ownCamera = new FreeCamera('poster-cam', center.add(facing.scale(dist)), this.scene)
       ownCamera.setTarget(center)
-      ownCamera.fov = 0.7
-      ownCamera.minZ = Math.max(0.001, radius * 0.01)
-      ownCamera.maxZ = fitDistance(radius, 0.7) * 8 + radius
+      ownCamera.fov = fov
+      ownCamera.minZ = Math.max(0.001, (dist - radius) * 0.2)
+      ownCamera.maxZ = dist + radius * 6
       const cam: Camera = ownCamera
       this.scene.activeCamera = cam
       // Render the scene into the RTT via the SAME path the detail viewer
@@ -105,12 +127,14 @@ export class PosterRenderer {
       for (let attempt = 0; attempt < 60; attempt++) {
         this.scene.render()
         pixels = await rtt.readPixels(0, 0, undefined, true)
-        if (pixels && !isBlank(pixels, rtt.clearColor)) break
+        if (pixels && !isBlank(pixels)) break
         await sleep(100)
       }
       cam.outputRenderTarget = null
       if (!pixels) throw new Error('readPixels returned null')
-      return { blob: await encodePng(pixels, POSTER_W, POSTER_H), animated }
+      if (isBlank(pixels)) throw new Error('poster rendered empty')
+      const footprint = projectFootprint(cam, min, max)
+      return { blob: await encodePng(pixels, POSTER_W, POSTER_H), animated, footprint }
     } finally {
       rtt.dispose()
       ownCamera?.dispose()
@@ -121,11 +145,32 @@ export class PosterRenderer {
   dispose(): void { this.scene.dispose() }
 }
 
-function isBlank(view: ArrayBufferView, clear: Color4): boolean {
+/** Normalised screen-space box of the model's AABB as the poster camera sees it. */
+function projectFootprint(cam: Camera, min: Vector3, max: Vector3): Footprint | null {
+  const m = cam.getTransformationMatrix()
+  let uMin = Infinity, uMax = -Infinity, vMin = Infinity
+  const p = new Vector3()
+  for (let i = 0; i < 8; i++) {
+    p.set(i & 1 ? max.x : min.x, i & 2 ? max.y : min.y, i & 4 ? max.z : min.z)
+    const q = Vector3.TransformCoordinates(p, m)
+    if (!isFinite(q.x) || !isFinite(q.y)) return null
+    const u = (q.x + 1) / 2
+    const v = (q.y + 1) / 2
+    uMin = Math.min(uMin, u); uMax = Math.max(uMax, u); vMin = Math.min(vMin, v)
+  }
+  if (!isFinite(uMin) || !isFinite(vMin)) return null
+  return {
+    cx: Math.max(0, Math.min(1, (uMin + uMax) / 2)),
+    bottom: Math.max(0, Math.min(1, vMin)),
+    w: Math.max(0.05, Math.min(1.2, uMax - uMin)),
+  }
+}
+
+/** Blank = nothing was drawn: every sampled pixel is still fully transparent. */
+function isBlank(view: ArrayBufferView): boolean {
   const bytes = new Uint8Array(view.buffer, view.byteOffset, view.byteLength)
-  const r = Math.round(clear.r * 255), g = Math.round(clear.g * 255), b = Math.round(clear.b * 255)
-  for (let i = 0; i < bytes.length; i += 4 * 997) {
-    if (bytes[i] !== r || bytes[i + 1] !== g || bytes[i + 2] !== b) return false
+  for (let i = 0; i < bytes.length; i += 4 * 397) {
+    if (bytes[i + 3] > 4) return false
   }
   return true
 }

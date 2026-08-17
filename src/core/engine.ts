@@ -18,9 +18,13 @@ export class FormEngine {
 
   private constructor(canvas: HTMLCanvasElement, engine: Engine) {
     this.engine = engine
+    // Render at the DEVICE pixel ratio (capped). The old code pinned this to
+    // 1.0 on phones / 1.25 on desktop, so on any HiDPI screen the canvas was
+    // upscaled by the browser and everything Babylon drew — cards, reply
+    // badges, thread nodes — came out soft.
     const isMobile = /Mobi|Android/i.test(navigator.userAgent)
-    const dpr = isMobile ? 1.0 : 1.25
-    engine.setHardwareScalingLevel(1 / dpr)
+    const ratio = Math.min(window.devicePixelRatio || 1, isMobile ? 2 : 2)
+    engine.setHardwareScalingLevel(1 / Math.max(1, ratio))
     engine.enableOfflineSupport = false
     engine.setDepthFunctionToLessOrEqual()
 

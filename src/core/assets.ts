@@ -4,7 +4,11 @@ import { Scene } from '@babylonjs/core/scene'
 import { get, put } from '../protocol/storage'
 import { sha256Hex, BlossomClient } from '../protocol/blossom'
 import type { ThreadMeta } from '../protocol/thread-index'
-import { PosterRenderer } from '../model/poster'
+import { PosterRenderer, type Footprint } from '../model/poster'
+
+// Bump when the poster pipeline changes visually (framing, transparency…):
+// cached PNGs from an older pipeline must not be reused.
+const POSTER_CACHE_V = 'p3:'
 
 const MAX_POSTER_CONCURRENT = 3 // concurrent downloads; the shared render scene serializes renders internally
 const AUTO_POSTER_MAX_BYTES = 8 * 1024 * 1024
@@ -16,6 +20,7 @@ export class AssetCache {
   private modelBlobs = new Map<string, Blob>()
   private byPostId = new Map<string, ThreadMeta>()
   private animatedBySha = new Map<string, boolean>()
+  private footprintBySha = new Map<string, Footprint | null>()
   private queue: Job[] = []
   private inflight = new Map<string, Promise<Texture | undefined>>()
   private active = 0
@@ -49,6 +54,11 @@ export class AssetCache {
 
   isAnimated(meta: ThreadMeta): boolean | undefined {
     return this.animatedBySha.get(meta.sha256)
+  }
+
+  /** Where the model sits inside its poster (for the card contact shadow). */
+  getFootprint(meta: ThreadMeta): Footprint | null | undefined {
+    return this.footprintBySha.get(meta.sha256)
   }
 
   private drain(): void {
@@ -89,22 +99,28 @@ export class AssetCache {
 
   private async renderLocal(meta: ThreadMeta): Promise<Blob | undefined> {
     if (meta.size > AUTO_POSTER_MAX_BYTES) return undefined // no auto-poster >8 MiB
-    const cached = await get<Blob>('posterCache', meta.sha256)
-    if (cached) return cached
+    const cached = await get<Blob>('posterCache', POSTER_CACHE_V + meta.sha256)
+    if (cached) {
+      const fp = await get<Footprint>('posterCache', POSTER_CACHE_V + meta.sha256 + ':fp')
+      this.footprintBySha.set(meta.sha256, fp ?? null)
+      return cached
+    }
     const model = await this.getModel(meta)
     if (!model) return undefined
     const result = await this.poster.render(model)
     this.animatedBySha.set(meta.sha256, result.animated)
-    void put('posterCache', meta.sha256, result.blob)
+    this.footprintBySha.set(meta.sha256, result.footprint)
+    void put('posterCache', POSTER_CACHE_V + meta.sha256, result.blob)
+    if (result.footprint) void put('posterCache', POSTER_CACHE_V + meta.sha256 + ':fp', result.footprint)
     return result.blob
   }
 
   private async fetchThumb(meta: ThreadMeta): Promise<Blob | undefined> {
     if (!meta.thumbUrl) return undefined
-    const cached = meta.thumbSha256 ? await get<Blob>('posterCache', meta.thumbSha256) : undefined
+    const cached = meta.thumbSha256 ? await get<Blob>('posterCache', POSTER_CACHE_V + meta.thumbSha256) : undefined
     if (cached) return cached
     const blob = await this.blossoms.download([meta.thumbUrl], meta.thumbSha256 ?? '', meta.thumbSize ?? 0)
-    if (meta.thumbSha256) void put('posterCache', meta.thumbSha256, blob)
+    if (meta.thumbSha256) void put('posterCache', POSTER_CACHE_V + meta.thumbSha256, blob)
     return blob
   }
 

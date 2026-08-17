@@ -110,9 +110,75 @@ export function worldBounds(container: AssetContainer): { center: Vector3; radiu
 /**
  * Camera distance that frames a bounding sphere of `radius` with margin for a
  * perspective camera with the given vertical fov.
+ *
+ * Prefer `frameDistance()` — this sphere fit wastes most of a 16:10 frame for
+ * wide/flat models (a wide sign has a huge bounding sphere, so it was pushed
+ * far away and rendered as a postage stamp in the middle of the card).
  */
 export function fitDistance(radius: number, fov: number): number {
   return Math.max(radius * 2, (radius / Math.tan(fov / 2)) * 1.25)
+}
+
+/** World-space AABB of the whole model. */
+export function worldBox(container: AssetContainer): { min: Vector3; max: Vector3; center: Vector3; radius: number } {
+  const min = new Vector3(Infinity, Infinity, Infinity)
+  const max = new Vector3(-Infinity, -Infinity, -Infinity)
+  let any = false
+  for (const mesh of container.meshes) {
+    mesh.computeWorldMatrix(true)
+    const info = mesh.getBoundingInfo()
+    if (!info) continue
+    const mi = info.boundingBox.minimumWorld
+    const ma = info.boundingBox.maximumWorld
+    min.x = Math.min(min.x, mi.x); min.y = Math.min(min.y, mi.y); min.z = Math.min(min.z, mi.z)
+    max.x = Math.max(max.x, ma.x); max.y = Math.max(max.y, ma.y); max.z = Math.max(max.z, ma.z)
+    any = true
+  }
+  if (!any) {
+    return { min: new Vector3(-1, -1, -1), max: new Vector3(1, 1, 1), center: Vector3.Zero(), radius: 1 }
+  }
+  const center = new Vector3((min.x + max.x) / 2, (min.y + max.y) / 2, (min.z + max.z) / 2)
+  const radius = Math.max(0.001, Vector3.Distance(min, max) / 2)
+  return { min, max, center, radius }
+}
+
+/**
+ * Tight camera distance for an oriented view: projects all eight AABB corners
+ * into the camera basis and solves for the smallest distance where every
+ * corner is still inside BOTH the horizontal and the vertical frustum planes.
+ * `fill` is how much of the frame the model should occupy (0..1).
+ *
+ * This is what makes a wide model actually fill a 16:10 card instead of being
+ * fitted as if it were a sphere.
+ */
+export function frameDistance(
+  min: Vector3,
+  max: Vector3,
+  center: Vector3,
+  forward: Vector3,
+  fovY: number,
+  aspect: number,
+  fill = 0.82,
+): number {
+  const f = forward.normalizeToNew()
+  let upRef = new Vector3(0, 1, 0)
+  if (Math.abs(Vector3.Dot(f, upRef)) > 0.95) upRef = new Vector3(0, 0, 1)
+  const r = Vector3.Cross(upRef, f).normalize()
+  const u = Vector3.Cross(f, r).normalize()
+  const tanY = Math.tan(fovY / 2)
+  const tanX = tanY * Math.max(0.2, aspect)
+  let d = 0
+  const p = new Vector3()
+  for (let i = 0; i < 8; i++) {
+    p.set(i & 1 ? max.x : min.x, i & 2 ? max.y : min.y, i & 4 ? max.z : min.z)
+    p.subtractInPlace(center)
+    const a = Math.abs(Vector3.Dot(p, r))
+    const b = Math.abs(Vector3.Dot(p, u))
+    const c = Vector3.Dot(p, f)
+    d = Math.max(d, a / tanX - c, b / tanY - c)
+  }
+  const radius = Vector3.Distance(min, max) / 2
+  return Math.max(radius * 1.15, d / Math.max(0.2, Math.min(1, fill)))
 }
 
 export { Matrix }

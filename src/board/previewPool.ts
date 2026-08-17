@@ -13,7 +13,7 @@ import type { AssetContainer } from '@babylonjs/core/assetContainer'
 import type { AnimationGroup } from '@babylonjs/core/Animations/animationGroup'
 import '@babylonjs/loaders/glTF'
 import { configureDraco } from '../model/draco'
-import { dominantFacing, worldBounds, fitDistance } from '../model/facing'
+import { dominantFacing, worldBox, frameDistance } from '../model/facing'
 import { toFile } from '../model/poster'
 import { validateGLB } from '../model/limits'
 
@@ -25,6 +25,7 @@ interface Slot {
   anims: AnimationGroup[]
   postId: string | null
   phase: number
+  facing: Vector3
 }
 
 export interface PreviewPoolOptions { maxSlots: number; rttWidth: number; rttHeight: number; slotsPerFrame: number }
@@ -36,6 +37,7 @@ export interface PreviewPoolOptions { maxSlots: number; rttWidth: number; rttHei
  */
 export class PreviewPool {
   private stage: Scene
+  private headlight: DirectionalLight
   private slots: Slot[] = []
   private byPost = new Map<string, Slot>()
   private rejected = new Map<string, 'STATIC' | 'FAILED'>()
@@ -48,12 +50,23 @@ export class PreviewPool {
     this.opts = { maxSlots: 6, rttWidth: 512, rttHeight: 320, slotsPerFrame: 2, ...opts }
     configureDraco()
     this.stage = new Scene(engine)
-    this.stage.autoClear = false
+    // Transparent clear per render (see model/poster.ts): the scene owns the
+    // clear when rendering through camera.outputRenderTarget, so `rtt.clearColor`
+    // alone left live previews sitting on an opaque black rectangle.
+    this.stage.autoClear = true
+    this.stage.autoClearDepthAndStencil = true
+    this.stage.clearColor = new Color4(0, 0, 0, 0)
     const hemi = new HemisphericLight('ph', new Vector3(0, 1, 0), this.stage)
     hemi.intensity = 1.0
     hemi.groundColor = new Color3(0.12, 0.12, 0.13)
     const key = new DirectionalLight('pk', new Vector3(-0.4, -0.6, 0.8), this.stage)
     key.intensity = 0.8
+    const fill = new DirectionalLight('pf', new Vector3(0.5, 0.2, -0.6), this.stage)
+    fill.intensity = 0.35
+    // Per-slot headlight (see model/poster.ts): dark models must still read
+    // on a transparent card.
+    this.headlight = new DirectionalLight('ph2', new Vector3(0, 0, 1), this.stage)
+    this.headlight.intensity = 0.55
   }
 
   get activeCount(): number { return this.byPost.size }
@@ -100,6 +113,8 @@ export class PreviewPool {
   }
 
   private renderSlot(slot: Slot): void {
+    // the headlight is shared by the stage, so aim it per slot before drawing
+    this.headlight.direction = slot.facing.scale(-1)
     this.stage.activeCamera = slot.camera
     slot.camera.outputRenderTarget = slot.rtt
     this.stage.render()
@@ -123,9 +138,9 @@ export class PreviewPool {
     // Transparent background: the card shows the board backdrop through the
     // model, so previews never sit in an opaque rectangle that mismatches the
     // page background. RGB keeps the poster blank-check comparable.
-    rtt.clearColor = new Color4(0.043, 0.043, 0.047, 0)
+    rtt.clearColor = new Color4(0, 0, 0, 0)
     const camera = new FreeCamera(`slot-cam-${index}`, Vector3.Zero(), this.stage)
-    const slot: Slot = { index, rtt, camera, container: null, anims: [], postId: null, phase: index }
+    const slot: Slot = { index, rtt, camera, container: null, anims: [], postId: null, phase: index, facing: new Vector3(0, 0, 1) }
     this.slots.push(slot)
     return slot
   }
@@ -144,7 +159,7 @@ export class PreviewPool {
         if (m.material) m.material.backFaceCulling = false
       }
 
-      const { center, radius } = worldBounds(container)
+      const { min, max, center, radius } = worldBox(container)
       const facing = dominantFacing(container)
 
       const offset = new Vector3(slot.index * 800, 0, 0)
@@ -153,12 +168,14 @@ export class PreviewPool {
       root.position = offset
       const wc = center.add(offset)
 
-      const dist = fitDistance(radius, 0.7)
+      slot.facing = facing.clone()
+      const fov = 0.7
+      const dist = frameDistance(min, max, center, facing.scale(-1), fov, this.opts.rttWidth / this.opts.rttHeight, 0.86)
       slot.camera.position = wc.add(facing.scale(dist))
       slot.camera.setTarget(wc)
-      slot.camera.fov = 0.7
-      slot.camera.minZ = Math.max(0.001, radius * 0.01)
-      slot.camera.maxZ = dist * 8 + radius
+      slot.camera.fov = fov
+      slot.camera.minZ = Math.max(0.001, (dist - radius) * 0.2)
+      slot.camera.maxZ = dist + radius * 6
 
       slot.container = container
       slot.anims = container.animationGroups.filter((g) => g.targetedAnimations.length > 0)

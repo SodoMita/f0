@@ -6,7 +6,6 @@ import { BlossomClient } from './protocol/blossom'
 import { parseModelEvent } from './protocol/events'
 import { ThreadIndex, type ThreadMeta } from './protocol/thread-index'
 import { Board } from './board/board'
-import { detectCardFlipsOnBoard, setGlobalFlips } from './board/cardMaterial'
 import { ThreadView } from './board/threadView'
 import { Viewer } from './viewer/viewer'
 import { Studio } from './studio/studio'
@@ -52,12 +51,8 @@ async function boot(): Promise<void> {
     onOpenModel: (meta) => router.go({ name: 'viewer', id: meta.eventId }),
     onOpenThread: (meta) => router.go({ name: 'thread', rootId: meta.refs.rootId ?? meta.eventId }),
   })
-  // Calibrate the horizontal orientation of the card pipeline per texture
-  // kind for THIS driver (left-right mirroring differs per GPU/kind). The
-  // probe is anchored to the real board (empty at boot, relays connect later)
-  // so it measures the exact framebuffer the user sees.
-  const flips = await detectCardFlipsOnBoard(engine.engine, board.scene)
-  setGlobalFlips(flips)
+  // Card orientation is deterministic now (flat cameras sit at -Z, see
+  // core/gfx.flatCamera) — no boot-time GPU probing, no guessing.
   const assets = new AssetCache(blossoms, board.scene)
   board.setAssets(assets)
   const viewer = new Viewer(engine)
@@ -107,6 +102,7 @@ async function boot(): Promise<void> {
   // ---------- settings (HTML) ----------
   const settingsPanel = $('settings-panel')
   function applyBackground(hex: string): void {
+    board.setBackground(hex)
     viewer.setBackground(hex)
     studio.setBackground(hex)
     threadView.setBackground(hex)
@@ -138,7 +134,8 @@ async function boot(): Promise<void> {
   }
 
   function syncPlay(): void {
-    btnPlay.textContent = viewer.isPlaying() ? '⏸' : '▶'
+    // the button holds both icons; CSS swaps them (no glyph swapping)
+    btnPlay.classList.toggle('playing', viewer.isPlaying())
   }
 
   function renderCamDots(): void {
@@ -212,6 +209,7 @@ async function boot(): Promise<void> {
   function setMode(next: Exclude<Mode, 'boot'>): void {
     if (mode === next) return
     mode = next
+    if (next !== 'thread') threadView.detach()
     if (next === 'board') {
       engine.setActiveScene(board.scene)
       topbar.hidden = false
@@ -232,6 +230,7 @@ async function boot(): Promise<void> {
       drawer.hidden = true
       viewer.detach()
       studio.detach()
+      threadView.attach()
     } else {
       engine.setActiveScene(studio.scene)
       topbar.hidden = false
@@ -301,6 +300,7 @@ async function boot(): Promise<void> {
   window.addEventListener('keydown', (e) => {
     if (mode === 'thread') {
       if (e.key === 'Escape') router.go({ name: 'board' })
+      if (e.key === '0') threadView.fit()
       return
     }
     if (mode !== 'viewer') return
@@ -317,9 +317,9 @@ async function boot(): Promise<void> {
     }
   })
 
-  window.addEventListener('resize', () => { engine.resize(); board.resize() })
+  window.addEventListener('resize', () => { engine.resize(); board.resize(); threadView.resize() })
 
-  ;(window as any).__form0 = { engine, pool, blossoms, index, board, viewer, studio, threadView, router, assets, flips }
+  ;(window as any).__form0 = { engine, pool, blossoms, index, board, viewer, studio, threadView, router, assets }
 }
 
 boot().catch((err) => console.error(err))

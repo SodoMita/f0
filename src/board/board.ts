@@ -1,24 +1,30 @@
 import { Scene } from '@babylonjs/core/scene'
-import { ArcRotateCamera } from '@babylonjs/core/Cameras/arcRotateCamera'
+import type { ArcRotateCamera } from '@babylonjs/core/Cameras/arcRotateCamera'
 import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight'
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder'
 import { Texture } from '@babylonjs/core/Materials/Textures/texture'
 import { DynamicTexture } from '@babylonjs/core/Materials/Textures/dynamicTexture'
 import { RenderTargetTexture } from '@babylonjs/core/Materials/Textures/renderTargetTexture'
 import { Vector3 } from '@babylonjs/core/Maths/math.vector'
-import { Color3 } from '@babylonjs/core/Maths/math.color'
+import { Color3, Color4 } from '@babylonjs/core/Maths/math.color'
 import { PointerEventTypes, PointerInfo } from '@babylonjs/core/Events/pointerEvents'
 import { KeyboardEventTypes } from '@babylonjs/core/Events/keyboardEvents'
 // Side-effect import: scene.pick uses createPickingRay, which throws
 // _WarnImport("Ray") unless the Ray module is loaded (spec 00 §3.7).
 import '@babylonjs/core/Culling/ray'
 import type { Mesh } from '@babylonjs/core/Meshes/mesh'
+import type { LinesMesh } from '@babylonjs/core/Meshes/linesMesh'
 import type { FormEngine } from '../core/engine'
 import type { ThreadMeta } from '../protocol/thread-index'
 import type { AssetCache } from '../core/assets'
 import { PreviewPool } from './previewPool'
-import { makeCardMaterial, setCardTexture, setCardTint, setCardWhite, setCardFlip } from './cardMaterial'
+import {
+  makeCardMaterial, setCardTexture, setCardTint, setCardWhite, setCardFlip, setCardOpacity,
+} from './cardMaterial'
 import type { ShaderMaterial } from '@babylonjs/core/Materials/shaderMaterial'
+import {
+  flatCamera, makeBackdropTexture, paintBackdrop, makeContactShadow, roundRect, luminance, shade,
+} from '../core/gfx'
 import { theme, LIMITS } from '../theme'
 
 export interface BoardCallbacks {
@@ -32,7 +38,13 @@ interface CardSlot {
   mat: ShaderMaterial
   poster: Texture | null
   live: RenderTargetTexture | null
-  // reply badge (Babylon — same space as the cards): "↩ N" pill that opens the thread
+  // soft elliptical contact shadow under the model (models float on the
+  // backdrop now that cards are transparent — the shadow gives them ground).
+  // Placed from the poster's measured footprint, not guessed.
+  shadow: Mesh
+  shadowMat: ShaderMaterial
+  footprint: { cx: number; bottom: number; w: number } | null
+  // reply badge (Babylon — same space as the cards): "↩ N" pill -> thread
   badge: Mesh
   badgeMat: ShaderMaterial
   badgeTex: DynamicTexture
@@ -49,15 +61,11 @@ interface Row {
 // All cards share the poster aspect (512x320 = 16:10) so nothing is stretched.
 const CARD_W = 16
 const CARD_H = 10
-const GAP = 2.4
-const MARGIN = 2
-const BADGE_W = 3.2
-const BADGE_H = 1.1
-
-// Board background: subtle vertical gradient (keeps the scene readable
-// without the pitch-black void the first VLM critique flagged).
-const BG_TOP = '#22222c'
-const BG_BOTTOM = '#141419'
+const GAP_X = 3.0
+const GAP_Y = 3.4
+const MARGIN = 2.4
+const BADGE_W = 3.4
+const BADGE_H = 1.25
 
 export class Board {
   readonly scene: Scene
@@ -75,8 +83,12 @@ export class Board {
   private scrollY = 0
   private maxScroll = 0
   private backdrop: Mesh
-  private seps: Mesh[] = []
+  private backdropTex: DynamicTexture
+  private shadowTex: DynamicTexture
+  private seps: LinesMesh[] = []
   private sepTops: number[] = []
+  private background: string = theme.background
+  private isDark = true
   // tap vs drag + inertia
   private dragging = false
   private downPointerY = 0
@@ -84,44 +96,33 @@ export class Board {
   private moved = 0
   private velocity = 0
   private inertia = 0.7
+  private activePointers = new Set<number>()
 
   constructor(engine: FormEngine, cb: BoardCallbacks) {
-    const ua = navigator.userAgent
-    const isMobile = /Mobi|Android/i.test(ua)
+    const isMobile = /Mobi|Android/i.test(navigator.userAgent)
 
     this.scene = new Scene(engine.engine)
-    this.scene.clearColor = Color3.FromHexString(BG_BOTTOM).toColor4(1)
+    this.scene.clearColor = Color3.FromHexString(this.background).toColor4(1)
     this.scene.skipPointerMovePicking = true
 
-    // Ortho camera on +Z; card planes lie in the XY plane (front-on).
-    this.camera = new ArcRotateCamera('board-cam', Math.PI / 2, Math.PI / 2, 30, Vector3.Zero(), this.scene)
-    this.camera.mode = ArcRotateCamera.ORTHOGRAPHIC_CAMERA
-    this.camera.inputs.clear()
-    this.camera.detachControl()
-    this.scene.activeCamera = this.camera
+    // Ortho camera parked at -Z (see core/gfx.flatCamera): world +X is screen
+    // right and card planes are seen from the front, so nothing is mirrored.
+    this.camera = flatCamera(this.scene, 'board-cam', 30)
     new HemisphericLight('l', new Vector3(0, 1, 0), this.scene)
 
-    // Gradient backdrop behind the cards.
+    // Gradient backdrop behind the cards (opaque -> renders in the opaque
+    // pass, so the alpha-blended cards always composite on top of it).
     this.backdrop = MeshBuilder.CreatePlane('board-bg', { width: 4, height: 4 }, this.scene)
     this.backdrop.isPickable = false
-    this.backdrop.position.z = -1
-    const bgMat = makeCardMaterial(this.scene)
-    bgMat.backFaceCulling = false
+    this.backdrop.position.z = 2
+    const bgMat = makeCardMaterial(this.scene, false)
     this.backdrop.material = bgMat
-    const bgTex = new DynamicTexture('board-bg-tex', { width: 1, height: 64 }, this.scene, false)
-    {
-      const ctx = bgTex.getContext() as CanvasRenderingContext2D
-      const g = ctx.createLinearGradient(0, 0, 0, 64)
-      g.addColorStop(0, BG_TOP)
-      g.addColorStop(1, BG_BOTTOM)
-      ctx.fillStyle = g
-      ctx.fillRect(0, 0, 1, 64)
-      bgTex.update()
-    }
-    setCardTexture(bgMat, bgTex)
+    this.backdropTex = makeBackdropTexture(this.scene, 'board-bg-tex', this.background)
+    setCardTexture(bgMat, this.backdropTex)
     setCardWhite(bgMat)
     setCardFlip(bgMat, 'dyn')
 
+    this.shadowTex = makeContactShadow(this.scene, 'card-shadow-tex')
 
     this.cb = cb
     this.previewPool = new PreviewPool(
@@ -135,6 +136,7 @@ export class Board {
       slot.live = rtt
       setCardTexture(slot.mat, rtt)
       setCardWhite(slot.mat)
+      setCardOpacity(slot.mat, 1)
       setCardFlip(slot.mat, 'rtt')
     }
     this.scene.onBeforeRenderObservable.add(() => this.tick())
@@ -142,6 +144,21 @@ export class Board {
     this.buildPool()
     this.resize()
     this.bindInput()
+  }
+
+  /** Background colour follows the settings panel (viewer/thread/board). */
+  setBackground(hex: string): void {
+    this.background = hex
+    this.isDark = luminance(hex) < 0.5
+    this.scene.clearColor = Color4.FromHexString(hex + 'FF')
+    paintBackdrop(this.backdropTex, hex)
+    for (const slot of this.cards) {
+      setCardTint(slot.shadowMat, this.isDark ? '#000000' : '#1b1b22')
+      setCardOpacity(slot.shadowMat, this.isDark ? 0.55 : 0.22)
+      this.drawBadge(slot)
+    }
+    const sepColor = Color3.FromHexString(shade(hex, this.isDark ? 0.16 : -0.16))
+    for (const s of this.seps) s.color = sepColor
   }
 
   setAssets(assets: AssetCache): void {
@@ -195,39 +212,59 @@ export class Board {
   }
 
   private colX(col: number): number {
-    return (col - (this.cols - 1) / 2) * (CARD_W + GAP)
+    return (col - (this.cols - 1) / 2) * (CARD_W + GAP_X)
   }
 
   private buildPool(): void {
     for (let i = 0; i < this.pool; i++) {
+      // contact shadow (behind the card plane, still visible through it)
+      const shadow = MeshBuilder.CreatePlane(`shadow-${i}`, { width: 4, height: 4 }, this.scene)
+      shadow.setEnabled(false)
+      shadow.isPickable = false
+      shadow.position.z = 0.5
+      const shadowMat = makeCardMaterial(this.scene)
+      shadow.material = shadowMat
+      setCardTexture(shadowMat, this.shadowTex)
+      setCardTint(shadowMat, '#000000')
+      setCardOpacity(shadowMat, 0.55)
+      setCardFlip(shadowMat, 'dyn')
+
       const mesh = MeshBuilder.CreatePlane(`card-${i}`, { width: 4, height: 4 }, this.scene)
       mesh.setEnabled(false)
       mesh.isPickable = false
+      mesh.position.z = 0
       const mat = makeCardMaterial(this.scene)
       mesh.material = mat
 
       const badge = MeshBuilder.CreatePlane(`badge-${i}`, { width: 4, height: 4 }, this.scene)
       badge.setEnabled(false)
       badge.isPickable = false
-      badge.position.z = 0.05
+      badge.position.z = -0.05
       const badgeMat = makeCardMaterial(this.scene)
       badge.material = badgeMat
-      const badgeTex = new DynamicTexture(`badge-tex-${i}`, { width: 128, height: 44 }, this.scene, false)
+      const badgeTex = new DynamicTexture(`badge-tex-${i}`, { width: 320, height: 118 }, this.scene, true, Texture.TRILINEAR_SAMPLINGMODE)
       badgeTex.hasAlpha = true // pill shape comes from canvas alpha
       setCardTexture(badgeMat, badgeTex)
       setCardWhite(badgeMat)
       setCardFlip(badgeMat, 'dyn')
 
-      const slot: CardSlot = { mesh, mat, poster: null, live: null, badge, badgeMat, badgeTex, replyCount: 0 }
+      const slot: CardSlot = {
+        mesh, mat, poster: null, live: null, shadow, shadowMat, badge, badgeMat, badgeTex,
+        replyCount: 0, footprint: null,
+      }
       this.cards.push(slot)
       mesh.metadata = { card: slot }
       badge.metadata = { card: slot, badge: true }
     }
   }
 
+  /**
+   * Reply badge. The arrow is drawn as vector strokes, never a font glyph:
+   * "↩" is missing from most default UI fonts, so the old badge fell back to
+   * a blurry substitute glyph (or a tofu box) at a different baseline.
+   */
   private drawBadge(slot: CardSlot): void {
-    const w = slot.badgeTex.getSize().width
-    const h = slot.badgeTex.getSize().height
+    const { width: w, height: h } = slot.badgeTex.getSize()
     const ctx = slot.badgeTex.getContext() as CanvasRenderingContext2D
     ctx.clearRect(0, 0, w, h)
     if (slot.replyCount <= 0) {
@@ -235,49 +272,62 @@ export class Board {
       slot.badge.setEnabled(false)
       return
     }
-    // pill
-    const r = h / 2 - 1
-    ctx.fillStyle = 'rgba(16,16,18,0.55)'
-    ctx.strokeStyle = 'rgba(255,255,255,0.42)'
-    ctx.lineWidth = 2
-    ctx.beginPath()
-    ctx.moveTo(2 + r, 2)
-    ctx.lineTo(w - 2 - r, 2)
-    ctx.arcTo(w - 2, 2, w - 2, 2 + r, r)
-    ctx.lineTo(w - 2, h - 2 - r)
-    ctx.arcTo(w - 2, h - 2, w - 2 - r, h - 2, r)
-    ctx.lineTo(2 + r, h - 2)
-    ctx.arcTo(2, h - 2, 2, h - 2 - r, r)
-    ctx.lineTo(2, 2 + r)
-    ctx.arcTo(2, 2, 2 + r, 2, r)
-    ctx.closePath()
+    const dark = this.isDark
+    const pad = Math.round(h * 0.07)
+    const bw = w - pad * 2
+    const bh = h - pad * 2
+    ctx.fillStyle = dark ? 'rgba(12,12,14,0.62)' : 'rgba(250,250,252,0.72)'
+    ctx.strokeStyle = dark ? 'rgba(255,255,255,0.30)' : 'rgba(0,0,0,0.28)'
+    ctx.lineWidth = Math.max(2, h * 0.028)
+    roundRect(ctx, pad, pad, bw, bh, bh / 2)
     ctx.fill()
     ctx.stroke()
-    ctx.fillStyle = theme.ink
-    ctx.font = `bold ${Math.floor(h * 0.52)}px ui-monospace, monospace`
-    ctx.textAlign = 'center'
+
+    const ink = dark ? theme.ink : '#101014'
+    // ↩ arrow, vector-drawn
+    const cy = h / 2
+    const ax = pad + bh * 0.52
+    const s = bh * 0.30
+    ctx.strokeStyle = ink
+    ctx.lineWidth = Math.max(2.5, h * 0.045)
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
+    ctx.beginPath()
+    ctx.moveTo(ax + s, cy - s * 0.85)
+    ctx.lineTo(ax + s * 0.15, cy - s * 0.85)
+    ctx.quadraticCurveTo(ax - s * 0.75, cy - s * 0.85, ax - s * 0.75, cy + s * 0.05)
+    ctx.lineTo(ax - s * 0.75, cy + s * 0.5)
+    ctx.stroke()
+    ctx.beginPath()
+    ctx.moveTo(ax - s * 0.75 - s * 0.5, cy + s * 0.05)
+    ctx.lineTo(ax - s * 0.75, cy + s * 0.6)
+    ctx.lineTo(ax - s * 0.75 + s * 0.5, cy + s * 0.05)
+    ctx.stroke()
+
+    ctx.fillStyle = ink
+    ctx.font = `600 ${Math.round(h * 0.42)}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`
+    ctx.textAlign = 'left'
     ctx.textBaseline = 'middle'
-    ctx.fillText(`\u21A9 ${slot.replyCount}`, w / 2, h / 2 + 1)
+    ctx.fillText(String(slot.replyCount), ax + s * 1.7, cy + h * 0.015)
     slot.badgeTex.update()
     slot.badge.setEnabled(true)
   }
 
   private layout(): void {
-    // Responsive columns: 1 on phones, up to 3 on wide screens. This fills
-    // the horizontal dead space the single-column layout left unused.
+    // Responsive columns: 1 on phones, up to 3 on wide screens.
     const viewW = 2 * this.halfH * this.aspect
-    this.cols = Math.max(1, Math.min(3, Math.floor((viewW - MARGIN * 2) / (CARD_W + GAP))))
+    this.cols = Math.max(1, Math.min(3, Math.floor((viewW - MARGIN * 2) / (CARD_W + GAP_X))))
     let top = 0
     for (let i = 0; i < this.rows.length; i++) {
       const row = this.rows[i]
       row.top = top
       row.col = i % this.cols
-      if (i % this.cols === this.cols - 1) top += CARD_H + GAP
+      if (i % this.cols === this.cols - 1) top += CARD_H + GAP_Y
     }
-    if (this.rows.length % this.cols !== 0) top += CARD_H + GAP
-    const contentBottom = top - GAP
+    if (this.rows.length % this.cols !== 0) top += CARD_H + GAP_Y
+    const contentBottom = top - GAP_Y
     const viewportH = 2 * this.halfH - 2 * MARGIN
-    this.maxScroll = Math.max(0, contentBottom - viewportH + GAP)
+    this.maxScroll = Math.max(0, contentBottom - viewportH + GAP_Y)
     if (this.scrollY > this.maxScroll) this.scrollY = this.maxScroll
 
     for (let i = 0; i < this.cards.length; i++) {
@@ -288,6 +338,7 @@ export class Board {
         slot.meta = undefined
         slot.mesh.setEnabled(false)
         slot.badge.setEnabled(false)
+        slot.shadow.setEnabled(false)
         slot.mesh.isPickable = false
         continue
       }
@@ -298,56 +349,69 @@ export class Board {
         slot.poster = null
         slot.live = null
         slot.replyCount = 0
+        // Placeholder: a barely-there plate, not an opaque slab.
         setCardTexture(slot.mat, null)
         setCardTint(slot.mat, row.meta.tint || theme.panel)
+        setCardOpacity(slot.mat, 0.14)
         setCardFlip(slot.mat, 'raw')
+        slot.footprint = null
+        slot.shadow.setEnabled(false)
         this.drawBadge(slot)
       }
       slot.mesh.setEnabled(true)
       slot.mesh.isPickable = true
       slot.mesh.scaling.set(CARD_W / 4, CARD_H / 4, 1)
       slot.mesh.position.set(this.colX(row.col), this.worldY(row), 0)
-      this.positionBadge(slot)
+      this.positionExtras(slot)
       if (changed) this.drive(slot)
     }
     this.buildSeparators()
   }
 
-  private positionBadge(slot: CardSlot): void {
+  private positionExtras(slot: CardSlot): void {
     slot.badge.scaling.set(BADGE_W / 4, BADGE_H / 4, 1)
-    slot.badge.position.x = slot.mesh.position.x + CARD_W / 2 - BADGE_W / 2 - 0.4
-    slot.badge.position.y = slot.mesh.position.y - CARD_H / 2 + BADGE_H / 2 + 0.4
-    slot.badge.position.z = 0.05
+    slot.badge.position.x = slot.mesh.position.x + CARD_W / 2 - BADGE_W / 2 - 0.5
+    slot.badge.position.y = slot.mesh.position.y - CARD_H / 2 + BADGE_H / 2 + 0.5
+    slot.badge.position.z = -0.05
     slot.badge.setEnabled(slot.replyCount > 0 && slot.mesh.isEnabled())
-  }
 
+    const fp = slot.footprint
+    if (fp) {
+      const w = Math.max(CARD_W * 0.18, Math.min(CARD_W * 1.05, fp.w * CARD_W * 1.35))
+      const h = Math.min(CARD_H * 0.34, w * 0.34)
+      slot.shadow.scaling.set(w / 4, h / 4, 1)
+      slot.shadow.position.x = slot.mesh.position.x + (fp.cx - 0.5) * CARD_W
+      slot.shadow.position.y = slot.mesh.position.y + (fp.bottom - 0.5) * CARD_H - h * 0.18
+      slot.shadow.position.z = 0.5
+    }
+  }
 
   private applyScroll(): void {
     for (let i = 0; i < this.rows.length; i++) {
       const slot = this.rows[i].slot
       slot.mesh.position.x = this.colX(this.rows[i].col)
       slot.mesh.position.y = this.worldY(this.rows[i])
-      this.positionBadge(slot)
+      this.positionExtras(slot)
     }
     for (let i = 0; i < this.seps.length; i++) {
-      this.seps[i].position.y = this.halfH - MARGIN - (this.sepTops[i] - GAP / 2) + this.scrollY
+      this.seps[i].position.y = this.halfH - MARGIN - (this.sepTops[i] - GAP_Y / 2) + this.scrollY
     }
   }
 
-  /** Thin horizontal separator lines between rows (no card frames). */
+  /** Full-bleed hairline between rows (no card frames — models float). */
   private buildSeparators(): void {
     for (const l of this.seps) l.dispose()
     this.seps = []
     this.sepTops = []
     const tops = [...new Set(this.rows.map((r) => r.top))].filter((t) => t > 0)
-    const gridW = this.cols * CARD_W + (this.cols - 1) * GAP
+    const halfW = this.halfH * this.aspect
     for (const top of tops) {
       const line = MeshBuilder.CreateLines(`sep-${top}`, {
-        points: [new Vector3(0, 0, -0.02), new Vector3(gridW, 0, -0.02)],
+        points: [new Vector3(-halfW, 0, 0.2), new Vector3(halfW, 0, 0.2)],
       }, this.scene)
-      line.color = Color3.FromHexString('#3d3d4a')
-      line.position.x = -gridW / 2
-      line.position.y = this.halfH - MARGIN - (top - GAP / 2) + this.scrollY
+      line.color = Color3.FromHexString(shade(this.background, this.isDark ? 0.16 : -0.16))
+      line.isPickable = false
+      line.position.y = this.halfH - MARGIN - (top - GAP_Y / 2) + this.scrollY
       this.seps.push(line)
       this.sepTops.push(top)
     }
@@ -355,9 +419,12 @@ export class Board {
 
   private bindInput(): void {
     this.scene.onPointerObservable.add((info: PointerInfo) => {
+      const ev = info.event as PointerEvent
       switch (info.type) {
         case PointerEventTypes.POINTERDOWN: {
-          if ((info.event as PointerEvent).button !== 0) return
+          if (ev.button !== 0) return
+          this.activePointers.add(ev.pointerId)
+          if (this.activePointers.size > 1) { this.dragging = false; return }
           this.dragging = true
           this.downPointerY = this.scene.pointerY
           this.downScrollY = this.scrollY
@@ -366,14 +433,16 @@ export class Board {
           break
         }
         case PointerEventTypes.POINTERMOVE: {
-          if (!this.dragging) return
+          if (!this.dragging || this.activePointers.size > 1) return
           const dy = this.scene.pointerY - this.downPointerY
           this.moved = Math.max(this.moved, Math.abs(dy))
+          const prev = this.scrollY
           this.setScroll(this.downScrollY - dy / this.pxPerUnit)
-          this.velocity = -dy / this.pxPerUnit
+          this.velocity = this.scrollY - prev
           break
         }
         case PointerEventTypes.POINTERUP: {
+          this.activePointers.delete(ev.pointerId)
           if (!this.dragging) return
           this.dragging = false
           if (this.inertia === 0) this.velocity = 0
@@ -423,8 +492,7 @@ export class Board {
   private tapAt(x: number, y: number): void {
     const pick = this.scene.pick(x, y, (m) => Boolean(m.metadata?.card))
     if (!pick?.hit || !pick.pickedMesh?.metadata?.card) return
-    const meta = pick.pickedMesh.metadata.card
-    const slot = meta as CardSlot
+    const slot = pick.pickedMesh.metadata.card as CardSlot
     if (!slot.meta) return
     // badge = reply button (opens the thread); card body opens the viewer
     if (pick.pickedMesh.metadata.badge) this.cb.onOpenThread(slot.meta)
@@ -440,7 +508,11 @@ export class Board {
       slot.poster = tex
       setCardTexture(slot.mat, tex)
       setCardWhite(slot.mat)
+      setCardOpacity(slot.mat, 1)
       setCardFlip(slot.mat, 'raw')
+      slot.footprint = assets.getFootprint(meta) ?? null
+      slot.shadow.setEnabled(!!slot.footprint)
+      this.positionExtras(slot)
       const animated = assets.isAnimated(meta)
       if (animated ?? (meta.animHint || meta.cameraCount > 0)) this.previewPool.request(meta.eventId)
     })
@@ -450,8 +522,11 @@ export class Board {
     if (slot.meta) this.previewPool.release(slot.meta.eventId)
     if (slot.live) {
       slot.live = null
-      if (slot.poster) { setCardTexture(slot.mat, slot.poster); setCardWhite(slot.mat); setCardFlip(slot.mat, 'raw') }
-      else { setCardTexture(slot.mat, null); setCardTint(slot.mat, slot.meta?.tint || theme.panel); setCardFlip(slot.mat, 'raw') }
+      if (slot.poster) {
+        setCardTexture(slot.mat, slot.poster); setCardWhite(slot.mat); setCardOpacity(slot.mat, 1); setCardFlip(slot.mat, 'raw')
+      } else {
+        setCardTexture(slot.mat, null); setCardTint(slot.mat, slot.meta?.tint || theme.panel); setCardOpacity(slot.mat, 0.14); setCardFlip(slot.mat, 'raw')
+      }
     }
   }
 
@@ -468,7 +543,7 @@ export class Board {
     this.camera.orthoLeft = -this.halfH * this.aspect
     this.camera.orthoRight = this.halfH * this.aspect
     this.backdrop.scaling.set((this.halfH * this.aspect * 2 + 1) / 4, (this.halfH * 2 + 1) / 4, 1)
-    this.backdrop.position.set(0, 0, -1)
+    this.backdrop.position.set(0, 0, 2)
     this.layout()
   }
 

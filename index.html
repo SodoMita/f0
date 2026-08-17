@@ -10,32 +10,49 @@
     <canvas id="engine"></canvas>
 
     <!-- HUD: settings / navigation / toolbars / metadata are plain HTML.
-         Only the 3D models and the board stay on canvas. -->
+         Only the 3D models, the board, the reply badges and the thread map
+         are Babylon.
+
+         ICONS ARE INLINE SVG, never font glyphs. Symbols like ⤨ ⏃ ⤓ are
+         absent from the default UI fonts, so they used to fall back to a
+         substitute face and rendered blurry / off-baseline / as tofu.
+         Every icon below is a 24x24 stroked path at 1.6 units, snapped to
+         the pixel grid by `shape-rendering: geometricPrecision`. -->
     <div id="topbar" class="hud">
-      <button id="btn-home" class="hbtn" title="FORM/0 — board">◼</button>
+      <button id="btn-home" class="hbtn" title="board" aria-label="board">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg>
+      </button>
       <span id="brand" class="brand">FORM<span class="brand-zero">/0</span></span>
       <div class="spacer"></div>
       <span id="net-dot" class="net-dot" title="relays"></span>
-      <button id="btn-shuffle" class="hbtn" title="shuffle">⤨</button>
-      <button id="btn-add" class="hbtn primary" title="create">+</button>
-      <button id="btn-settings" class="hbtn" title="settings">⚙</button>
+      <button id="btn-shuffle" class="hbtn" title="shuffle" aria-label="shuffle">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5h3.6c1.4 0 2.2.7 3 1.8l4.8 7c.8 1.1 1.6 1.8 3 1.8H21"/><path d="M3 17.5h3.6c1.4 0 2.2-.7 3-1.8l1.3-1.9"/><path d="M13.6 8.4l.8-1.1c.8-1.1 1.6-1.8 3-1.8H21"/><path d="M18.4 3.4L21 5.5l-2.6 2.1"/><path d="M18.4 15L21 17.1l-2.6 2.1"/></svg>
+      </button>
+      <button id="btn-add" class="hbtn primary" title="create" aria-label="create">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+      </button>
+      <button id="btn-settings" class="hbtn" title="settings" aria-label="settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7h11"/><path d="M18.5 7H21"/><path d="M3.5 17h5"/><path d="M12.5 17H21"/><circle cx="16.5" cy="7" r="2.4"/><circle cx="10.5" cy="17" r="2.4"/></svg>
+      </button>
     </div>
 
     <div id="settings-panel" class="hud" hidden>
       <div class="drawer-head">
         <span>SETTINGS</span>
-        <button id="btn-settings-close" class="hbtn small" title="close">✕</button>
+        <button id="btn-settings-close" class="hbtn small" title="close" aria-label="close">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12"/><path d="M18 6L6 18"/></svg>
+        </button>
       </div>
       <div class="setting-row">
         <span class="setting-label">background</span>
         <div class="swatches" id="bg-swatches">
-          <button class="swatch" data-bg="#0B0B0C" title="dark"></button>
-          <button class="swatch" data-bg="#1d1d22" title="graphite"></button>
-          <button class="swatch" data-bg="#3a3a42" title="grey"></button>
-          <button class="swatch" data-bg="#101820" title="navy"></button>
-          <button class="swatch" data-bg="#ffffff" title="light"></button>
+          <button class="swatch" data-bg="#0B0B0C" style="background:#0B0B0C" title="dark"></button>
+          <button class="swatch" data-bg="#1d1d22" style="background:#1d1d22" title="graphite"></button>
+          <button class="swatch" data-bg="#3a3a42" style="background:#3a3a42" title="grey"></button>
+          <button class="swatch" data-bg="#101820" style="background:#101820" title="navy"></button>
+          <button class="swatch" data-bg="#ffffff" style="background:#ffffff" title="light"></button>
+          <input type="color" id="bg-custom" value="#0B0B0C" title="custom" />
         </div>
-        <input type="color" id="bg-custom" value="#0B0B0C" title="custom" />
       </div>
       <div class="setting-row">
         <span class="setting-label">scroll inertia</span>
@@ -44,21 +61,41 @@
     </div>
 
     <div id="viewer-bar" class="hud" hidden>
-      <span class="vbtn"><button id="btn-close" class="hbtn" title="close (Esc)">✕</button><span class="vlabel">close</span></span>
-      <span class="vbtn"><button id="btn-prev" class="hbtn" title="previous (←)">‹</button><span class="vlabel">prev</span></span>
-      <span class="vbtn"><button id="btn-next" class="hbtn" title="next (→)">›</button><span class="vlabel">next</span></span>
-      <span class="vbtn"><button id="btn-play" class="hbtn" title="play/pause (A)">▶</button><span class="vlabel">play</span></span>
-      <span id="cam-dots"></span>
-      <div class="spacer"></div>
-      <span class="vbtn"><button id="btn-thread" class="hbtn" title="thread (T)">⏃</button><span class="vlabel">thread</span></span>
-      <span class="vbtn"><button id="btn-download" class="hbtn" title="download GLB">⤓</button><span class="vlabel">save</span></span>
-      <span class="vbtn"><button id="btn-meta" class="hbtn" title="metadata (M)">≡</button><span class="vlabel">info</span></span>
+      <div class="rail">
+        <span class="vbtn"><button id="btn-close" class="hbtn" title="close (Esc)" aria-label="close">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12"/><path d="M18 6L6 18"/></svg>
+        </button><span class="vlabel">close</span></span>
+        <span class="vbtn"><button id="btn-prev" class="hbtn" title="previous (←)" aria-label="previous">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 5L8 12l6.5 7"/></svg>
+        </button><span class="vlabel">prev</span></span>
+        <span class="vbtn"><button id="btn-next" class="hbtn" title="next (→)" aria-label="next">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 5L16 12l-6.5 7"/></svg>
+        </button><span class="vlabel">next</span></span>
+        <span class="vbtn"><button id="btn-play" class="hbtn" title="play/pause (A)" aria-label="play or pause">
+          <svg class="i-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5l10 6.5-10 6.5z"/></svg>
+          <svg class="i-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5.5v13"/><path d="M15 5.5v13"/></svg>
+        </button><span class="vlabel">play</span></span>
+        <span class="rail-sep"></span>
+        <span id="cam-dots"></span>
+        <span class="rail-sep"></span>
+        <span class="vbtn"><button id="btn-thread" class="hbtn" title="thread (T)" aria-label="thread">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="2.3"/><circle cx="6" cy="19" r="2.3"/><circle cx="18" cy="19" r="2.3"/><path d="M12 7.3v3.2M6 16.7v-2.4h12v2.4M6 14.3h12"/></svg>
+        </button><span class="vlabel">thread</span></span>
+        <span class="vbtn"><button id="btn-download" class="hbtn" title="download GLB" aria-label="download">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v10"/><path d="M8 10.5l4 4 4-4"/><path d="M4.5 18.5h15"/></svg>
+        </button><span class="vlabel">save</span></span>
+        <span class="vbtn"><button id="btn-meta" class="hbtn" title="metadata (M)" aria-label="metadata">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16"/><path d="M4 12h16"/><path d="M4 17h10"/></svg>
+        </button><span class="vlabel">info</span></span>
+      </div>
     </div>
 
     <div id="meta-drawer" class="hud" hidden>
       <div class="drawer-head">
         <span>MODEL</span>
-        <button id="btn-meta-close" class="hbtn" title="close">✕</button>
+        <button id="btn-meta-close" class="hbtn small" title="close" aria-label="close">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12"/><path d="M18 6L6 18"/></svg>
+        </button>
       </div>
       <pre id="meta-text"></pre>
     </div>
