@@ -388,8 +388,9 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     buffers/accessors/depth/images and OBJ geometry/materials are preflighted.
     Every glTF/OBJ/MTL dependency must resolve to an unambiguous selected
     basename (safe glTF `data:` is the only exception); remote, absolute,
-    missing and ambiguous URIs fail closed. The exported GLB is validated
-    again before preview/publish.
+    missing and ambiguous URIs fail closed. The importer uses the curated
+    loader (never the barrel that registers `KHR_interactivity`/FlowGraph).
+    The exported GLB is validated again before preview/publish.
 
 47. SECURITY: all embedded image paths—including `data:` image URIs—count
     decoded RGBA bytes before decode. PNG, JPEG, WebP, GIF, BMP, TGA and KTX2

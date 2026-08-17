@@ -198,7 +198,9 @@ limited to 128 files / 20 MiB total; glTF structure, buffers, accessors, scene
 depth and texture dimensions are preflighted; OBJ vertices/faces/materials are
 bounded. Every dependency must be a selected local basename (or a safe `data:`
 URI for glTF), remote/absolute/missing/ambiguous references fail closed, and
-the global OBJ hook only intercepts `file:` dependencies.
+the global OBJ hook only intercepts `file:` dependencies. The importer uses the
+curated glTF loader rather than the barrel, so it does not globally re-enable
+`KHR_interactivity`/FlowGraph for remote posts.
 
 ---
 

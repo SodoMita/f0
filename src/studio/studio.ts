@@ -19,7 +19,7 @@ import { worldCenter, worldRadius } from '../model/facing'
 import { theme } from '../theme'
 
 export interface CameraState {
-  projection: 'perspective' | 'ortho'
+  projection: 'perspective' | 'ortho' | 'free'
   target: [number, number, number]
   /** euler XYZ in degrees */
   rotationDeg: [number, number, number]
@@ -33,6 +33,12 @@ const rad2deg = (r: number): number => (r * 180) / Math.PI
 
 import { buildTextMesh, type TextMeshResult } from './textTool'
 import { importModelFiles } from '../model/importSidecar'
+import { UtilityLayerRenderer } from '@babylonjs/core/Rendering/utilityLayerRenderer'
+import { GizmoManager } from '@babylonjs/core/Gizmos/gizmoManager'
+import type { AbstractMesh } from '@babylonjs/core/Meshes/abstractMesh'
+import { PointerEventTypes } from '@babylonjs/core/Events/pointerEvents'
+import { FreeCamera } from '@babylonjs/core/Cameras/freeCamera'
+import { Vector3 as V3 } from '@babylonjs/core/Maths/math.vector'
 
 export interface ImportedModel {
   file: File
@@ -55,9 +61,14 @@ export class Studio {
   private imported: ImportedModel | null = null
   private tint: string = theme.accent
   private textMesh: TextMeshResult | null = null
+  private textBuildToken = 0
   private textValue = '/0'
   private textAlign: 'left' | 'center' | 'right' = 'center'
   private form: FormEngine
+  private gizmoLayer: UtilityLayerRenderer
+  private gizmos: GizmoManager
+  private selection: AbstractMesh | null = null
+  private freeCam: FreeCamera | null = null
 
   constructor(engine: FormEngine) {
     this.form = engine
@@ -77,6 +88,21 @@ export class Studio {
     const key = new DirectionalLight('sl-key', new Vector3(-0.4, -1, -0.6), this.scene)
     key.intensity = 0.8
     key.diffuse = Color3.White()
+
+    // Gizmos for moving/rotating/scaling the selected object (SPEC editor).
+    this.gizmoLayer = new UtilityLayerRenderer(this.scene)
+    this.gizmos = new GizmoManager(this.scene, 1.2, this.gizmoLayer)
+    this.gizmos.positionGizmoEnabled = true
+    this.gizmos.rotationGizmoEnabled = true
+    this.gizmos.scaleGizmoEnabled = true
+    this.gizmos.usePointerToAttachGizmos = false
+    ;(this.gizmos as any).onAttachedToMeshObservable?.add((m: AbstractMesh | null) => { if (m) this.kick(2000) })
+    // Tap a mesh to select it; tap empty space to deselect.
+    this.scene.onPointerObservable.add((info) => {
+      if (info.type !== PointerEventTypes.POINTERTAP) return
+      const picked = info.pickInfo?.pickedMesh ?? null
+      this.select(picked && this.isEditable(picked) ? picked : null)
+    })
   }
 
   setBackground(hex: string): void {
@@ -86,6 +112,9 @@ export class Studio {
 
   /** Render-on-demand probe: camera inertia glide (drags arrive as kicks). */
   isAnimating(): boolean {
+    // Pointer input already kicks frames while a gizmo is dragged; merely
+    // having a selected mesh must not latch the demand loop on forever.
+    if (this.scene.activeCamera !== this.camera) return false
     return Math.abs(this.camera.inertialAlphaOffset) > 1e-5
       || Math.abs(this.camera.inertialBetaOffset) > 1e-5
       || Math.abs(this.camera.inertialRadiusOffset) > 1e-4
@@ -98,8 +127,71 @@ export class Studio {
   /** Request a render (render-on-demand engine). */
   kick(ms?: number): void { this.form.kick(ms) }
 
-  attach(): void { this.camera.attachControl(true) }
-  detach(): void { this.camera.detachControl() }
+  attach(): void {
+    if (this.freeCam) this.freeCam.attachControl(true, false)
+    else this.camera.attachControl(true)
+  }
+  detach(): void {
+    this.camera.detachControl()
+    this.freeCam?.detachControl()
+  }
+
+  private isEditable(m: AbstractMesh): boolean {
+    // The root __root__ container and gizmo-layer meshes are not selectable.
+    if (m.name === '__root__') return false
+    if (m.getScene() !== this.scene) return false
+    return true
+  }
+
+  select(mesh: AbstractMesh | null): void {
+    this.selection = mesh
+    this.gizmos.attachToMesh(mesh)
+    this.kick(2000)
+  }
+  get selected(): AbstractMesh | null { return this.selection }
+
+  setTransformMode(mode: 'position' | 'rotation' | 'scale' | 'none'): void {
+    this.gizmos.positionGizmoEnabled = mode === 'position'
+    this.gizmos.rotationGizmoEnabled = mode === 'rotation'
+    this.gizmos.scaleGizmoEnabled = mode === 'scale'
+    this.kick(400)
+  }
+
+  /** Delete the currently selected mesh (text or part of an imported model). */
+  deleteSelection(): void {
+    if (!this.selection) return
+    const m = this.selection
+    this.select(null)
+    if (this.textMesh?.mesh === m) {
+      this.textBuildToken++
+      this.textMesh = null
+      this.textValue = ''
+    }
+    m.dispose(false, true)
+    this.kick(500)
+  }
+
+  /** Toggle between orbit (ArcRotate) and a free fly camera. */
+  toggleFreeCamera(on: boolean): void {
+    if (on && !this.freeCam) {
+      this.freeCam = new FreeCamera('studio-free', this.camera.position.clone(), this.scene)
+      this.freeCam.setTarget(this.camera.getTarget().clone())
+      this.freeCam.minZ = 0.01
+      this.freeCam.speed = 0.4
+      this.scene.activeCamera = this.freeCam
+      this.camera.detachControl()
+      this.freeCam.attachControl(true, false)
+    } else if (!on && this.freeCam) {
+      this.camera.position.copyFrom(this.freeCam.position)
+      this.camera.setTarget(this.freeCam.getTarget())
+      this.scene.activeCamera = this.camera
+      this.freeCam.detachControl()
+      this.freeCam.dispose()
+      this.freeCam = null
+      this.camera.attachControl(true)
+    }
+    this.kick(2000)
+  }
 
   get currentModel(): ImportedModel | null { return this.imported }
 
@@ -108,6 +200,8 @@ export class Studio {
 
   /** Clear the current preview so a new import does not stack meshes. */
   clearModel(): void {
+    this.textBuildToken++
+    this.select(null)
     this.form?.kick()
     if (this.container) {
       this.container.removeAllFromScene()
@@ -137,17 +231,24 @@ export class Studio {
   get text(): string { return this.textValue }
 
   /** Build/rebuild the text geometry and frame it. */
-  rebuildText(): void {
+  async rebuildText(): Promise<void> {
+    const token = ++this.textBuildToken
     if (this.textMesh) {
       this.textMesh.mesh.dispose()
       this.textMesh = null
     }
     if (!this.textValue.trim()) return
-    const result = buildTextMesh(this.scene, this.textValue, this.tint, this.textAlign)
+    const result = await buildTextMesh(this.scene, this.textValue, this.tint, this.textAlign)
+    if (token !== this.textBuildToken) {
+      result.mesh.dispose()
+      return
+    }
     this.textMesh = result
     const dist = Math.max(result.width, result.height, 1) * 2.4 + 1
     this.camera.radius = dist
     this.camera.setTarget(Vector3.Zero())
+    this.select(result.mesh)
+    this.form.kick(300)
   }
 
   // ---- camera settings ----
@@ -159,7 +260,7 @@ export class Studio {
     const yaw = -this.camera.alpha - Math.PI / 2
     const pitch = Math.PI / 2 - this.camera.beta
     return {
-      projection: this.camera.mode === 1 ? 'ortho' : 'perspective',
+      projection: this.freeCam ? 'free' : (this.camera.mode === 1 ? 'ortho' : 'perspective'),
       target: this.camera.target.asArray() as [number, number, number],
       rotationDeg: [0, rad2deg(yaw), rad2deg(pitch)],
       radius: this.camera.radius,
@@ -168,10 +269,12 @@ export class Studio {
   }
 
   setCameraState(patch: Partial<CameraState>): void {
-    if (patch.projection === 'perspective') {
-      this.camera.mode = 0
-    } else if (patch.projection === 'ortho') {
-      this.camera.mode = 1
+    if (patch.projection === 'free') {
+      this.toggleFreeCamera(true)
+    } else {
+      if (this.freeCam) this.toggleFreeCamera(false)
+      if (patch.projection === 'perspective') this.camera.mode = 0
+      else if (patch.projection === 'ortho') this.camera.mode = 1
     }
     if (patch.target) {
       this.camera.setTarget(new Vector3(patch.target[0], patch.target[1], patch.target[2]))
@@ -238,6 +341,8 @@ export class Studio {
     this.camera.radius = Math.max(0.6, radius * 2.6)
     const imported: ImportedModel = { file, bytes, report, sourceFormat: result.sourceFormat }
     this.imported = imported
+    const first = result.container.meshes.find((m) => m.name !== '__root__') ?? null
+    if (first) this.select(first as AbstractMesh)
     this.form.kick(1000)
     return imported
   }
@@ -258,8 +363,8 @@ export class Studio {
       filename: this.imported.file.name,
       sourceFormat: this.imported.sourceFormat,
     }
-    // Text mode: make sure the geometry exists.
-    if (!this.textMesh) this.rebuildText()
+    // Text mode: make sure asynchronous font geometry exists before export.
+    if (!this.textMesh) await this.rebuildText()
     const res = await GLTF2Export.GLBAsync(this.scene, 'text', {
       shouldExportNode: (n) => n === this.textMesh?.mesh,
     })
@@ -270,6 +375,9 @@ export class Studio {
 
   dispose(): void {
     this.clearModel()
+    this.gizmos.dispose()
+    this.gizmoLayer.dispose()
+    if (this.freeCam) { this.freeCam.dispose(); this.freeCam = null }
     this.scene.dispose()
   }
 }
