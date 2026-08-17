@@ -192,6 +192,13 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Incident log
 
+- 2026-08-17 (~18:25 UTC): GitHub **Pages** returned 503 for every deployment
+  attempt (`Failed to create deployment … Server error, is githubstatus.com
+  reporting a Pages outage?`, 10 internal retries) on commit `3e2cbed`. The
+  `build` job succeeded — only `actions/deploy-pages@v4` failed, so the
+  artifact is good. Re-run the workflow (or just push again) once Pages
+  recovers; nothing in the repo needs changing.
+
 - 2026-08-17: `main` was force-pushed away (replaced by an unrelated 3-commit
   rewrite: "Babylon shell", IME textarea fix, Blossom auth fix). Restored by
   agent-kestrel from the last deployed CI SHA `dcb4d06` (the dangling merge
