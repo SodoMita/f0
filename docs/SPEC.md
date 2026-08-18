@@ -505,3 +505,26 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
       metered end-to-end, determinate totals, return-to-idle, session totals,
       and the upload readouts) plus the existing offline-verify (39) and
       verify-publish (7, exercising the new XHR upload path) suites.
+
+51. THE NETWORK PANEL IS AN OVERLAY, NOT A PAGE (2026-08-18):
+    Opening `#/network` used to run `setMode('board')`, so tapping the network
+    button from the viewer, the thread map or the studio tore that view down;
+    closing the panel then always landed on the board (and re-entering the
+    studio route wipes an imported model, so work in progress was lost).
+    - `#/network` now leaves the current mode alone — the panel simply draws
+      over the viewer / thread / studio, which keep rendering behind it. Only
+      a cold load straight into `#/network` falls back to the board, because
+      there is nothing behind the panel.
+    - `main.ts` records the last non-overlay route (`networkReturn`) and, on
+      close (X button, Escape, or the route callback), rewrites the hash back
+      to it. That rewrite sets `skipNextApply` so `applyRoute` does NOT
+      rebuild the view: the view was never replaced, and re-applying `studio`
+      would clear the imported model while `viewer`/`thread` would reload the
+      model / rebuild the tree for nothing.
+    - Navigating away while the panel is open (home button, any route change)
+      still closes it, unchanged.
+    - Verified by `scripts/network-panel.mjs` (16 checks): opens over and
+      returns to board / viewer / thread / studio, the viewer's meshes and the
+      studio's in-progress text survive the round trip, Escape behaves like
+      the close button, a cold `#/network` load closes to the board, and
+      navigating away while open still closes the panel.

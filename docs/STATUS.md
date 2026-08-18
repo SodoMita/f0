@@ -5,6 +5,16 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 
+- [x] **Network panel closes back to the current page** (agent arena,
+      2026-08-18, SPEC AMENDMENT 51): `#/network` no longer forces
+      `setMode('board')`, so the panel draws over the viewer / thread /
+      studio instead of destroying them, and closing it (X, Escape, route
+      callback) returns to the route it was opened from. The return path only
+      rewrites the hash (`skipNextApply`) so the studio's imported model and
+      the viewer's loaded meshes survive. Verified by the new
+      `scripts/network-panel.mjs` (16 checks) plus offline-verify (40),
+      verify-publish, transfer, interact, settings, smoke, features, orient.
+
 - [x] **Network button hit target + live download/upload speeds**
       (agent arena, 2026-08-18, SPEC AMENDMENT 50):
       - The topbar network control is a real 42x42 button (was an 8x8 dot —

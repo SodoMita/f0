@@ -17,7 +17,8 @@
     "perf": "node scripts/perf.mjs",
     "boot-ab": "node scripts/boot-ab.mjs",
     "check:settings": "node scripts/settings.mjs",
-    "check:transfer": "node scripts/transfer.mjs"
+    "check:transfer": "node scripts/transfer.mjs",
+    "check:network-panel": "node scripts/network-panel.mjs"
   },
   "dependencies": {
     "@babylonjs/core": "8.10.1",

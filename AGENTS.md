@@ -130,6 +130,14 @@ bun run build:standalone  # ONE self-contained form-zero-standalone.html
    `advance(delta)` -> `end()` in a `finally`) so the HUD can show a real
    speed instead of an opaque spinner. Upload progress needs XHR — `fetch`
    reports nothing about request-body progress.
+9l. **Overlays must not be pages.** A HUD surface that sits ON TOP of a view
+   (network panel, settings, legend, error sheet) must leave the view behind
+   it mounted and return to it on close. `#/network` used to call
+   `setMode('board')`, so opening it from the viewer/thread/studio destroyed
+   that view and closing dumped the player on the board. `main.ts` keeps the
+   last non-overlay route in `networkReturn` and rewrites the hash on close
+   WITHOUT re-applying it (`skipNextApply`) — re-applying `studio` clears the
+   imported model, and `viewer`/`thread` would reload from scratch.
 9k. **Touch targets are >= 42px.** HUD controls are 42x42 (`.hbtn`) with a
    10px gap; a small *visual* (a status dot, a badge) must still sit inside a
    full-size button, never be the button. The network dot shipped as a
@@ -159,6 +167,7 @@ bun scripts/perf.mjs                # PERF: boot, per-view frame cost, 48-card s
 bun scripts/shaders.mjs             # shader recompiles (repeat model opens must compile 0 programs)
 bun scripts/settings.mjs            # every setting must reach real engine state (20 checks)
 bun scripts/transfer.mjs            # network button hit target + live download/upload speed readouts (needs the rig)
+bun scripts/network-panel.mjs       # network panel is an overlay: opens over / returns to the current page (needs the rig)
 PHASE=load bun scripts/profile.mjs  # CPU profile of a board load, aggregated by self time
 CPU=4 bun scripts/perf.mjs          #   …the same, throttled to emulate a phone
 python3 scripts/visual_critique.py  # orientation + composition on those shots

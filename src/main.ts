@@ -1,6 +1,6 @@
 import './style.css'
 import { FormEngine } from './core/engine'
-import { Router } from './core/router'
+import { Router, type Route } from './core/router'
 import { RelayPool } from './protocol/nostr'
 import { BlossomClient } from './protocol/blossom'
 import { parseModelEvent } from './protocol/events'
@@ -878,7 +878,23 @@ async function boot(): Promise<void> {
     }
   }
 
+  // The network panel is an OVERLAY, not a page. `#/network` used to force
+  // setMode('board'), so opening it from the viewer/thread/studio tore that
+  // view down and closing it dumped you on the board. Now the view behind it
+  // is left alone and closing returns to the route it was opened from.
+  let networkReturn: Route | null = null
+  // Leaving #/network only rewrites the hash — the view underneath was never
+  // replaced, so re-applying the route would be destructive (applying
+  // 'studio' clears the imported model; 'viewer'/'thread' would reload).
+  let skipNextApply = false
+
   function applyRoute(route = router.current): void {
+    if (skipNextApply) {
+      skipNextApply = false
+      if (networkPanel.isOpen) networkPanel.close()
+      return
+    }
+    if (route.name !== 'network') networkReturn = route
     if (route.name === 'board') setMode('board')
     else if (route.name === 'thread') {
       setMode('thread')
@@ -909,8 +925,14 @@ async function boot(): Promise<void> {
       updateTextBudget()
     }
     else if (route.name === 'network') {
-      setMode('board')
-      networkPanel.open(() => { if (router.current.name === 'network') router.go({ name: 'board' }) })
+      // Keep whatever is on screen; only a cold boot straight into
+      // #/network has nothing behind the panel.
+      if (mode === 'boot') setMode('board')
+      networkPanel.open(() => {
+        if (router.current.name !== 'network') return
+        skipNextApply = true
+        router.go(networkReturn ?? { name: 'board' })
+      })
     }
     if (route.name !== 'network' && networkPanel.isOpen) networkPanel.close()
   }
@@ -1020,6 +1042,9 @@ async function boot(): Promise<void> {
     // transfer meter: lets scripts/loading-shot.mjs fake a slow transfer and
     // capture the speed readouts without waiting for a real 40 MiB model
     transfers, setLoading,
+    // which view is actually on screen (the network panel is an overlay, so
+    // the route alone no longer tells you) — scripts/network-panel.mjs
+    __mode: () => mode,
   }
 }
 
