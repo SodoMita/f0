@@ -86,6 +86,7 @@ input change works:
 | `node scripts/capture.mjs` | screenshots incl. light theme + phone viewport |
 | `node scripts/facing.mjs <url>` | which side of a model is the readable one |
 | `node scripts/offline-verify.mjs` | deterministic pixel/state checks of the poster camera policy, live-slot reuse, thread animation, card crossfades and studio view tools (runs against `scripts/offline-rig.mjs`, no real relays needed) |
+| `node scripts/verify-publish.mjs` | publish round-trip on the rig: export → poster → Blossom upload → relay OK → live feed event → SHA-verified re-download → kind-5 delete → live tombstone |
 
 When relays/CDNs are unreachable (sandboxes), see `docs/SANDBOX-VERIFY.md`:
 how to obtain a headless Chromium from the npm registry alone (NSS libs from

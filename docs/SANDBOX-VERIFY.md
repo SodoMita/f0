@@ -115,6 +115,35 @@ Run: terminal 1 `bun run dev`, terminal 2 `node scripts/offline-rig.mjs`,
 then point every suite at the proxy: `TARGET_URL=http://localhost:4173/ node
 scripts/….mjs`.
 
+## Measured results (this round, dev + production preview build)
+
+`TARGET_URL=http://localhost:4173/ node scripts/perf.mjs` (headless SwiftShader,
+single-core sandbox — the absolute numbers run ~8x slower than the repo CI
+baseline, the RATIO gates are what matter):
+
+| Gate | Budget | Measured (dev / prod) |
+|---|---|---|
+| `idleBoard.rendersPerSec` (static board) | 0 | **0 / 0** |
+| heap growth board → end of session | flat | 54.2 → 54.2 MB |
+| shader recompiles on repeat model opens | +0 | **+0** (rounds 2/3) |
+| `boot.firstCardMs` (production) | < 1.5 s | 2.18 s (env-bound) |
+| `stress.scrolling.p95` | < 120 ms | 278 ms (pure-raster baseline 104 ms — the sandbox GPU is the bottleneck, adaptive resolution bottomed at 0.7×) |
+
+`node scripts/shaders.mjs` — 6 total GL compiles, repeat opens +0.
+`node scripts/memcheck.mjs` (standalone file://) — boots alive, 0 events,
+no crash, 20.7 MB heap. `node scripts/facing.mjs <models>` — flat wordmark
+facing=(0,0,1) (+axis fallback holds), cubes any axis.
+
+## Publish round-trip verification
+
+`scripts/verify-publish.mjs` (11 checks, green on the production preview
+build) covers the whole publish path the rig can now host:
+studio text export → poster render → `PUT /upload` (kind-24242 auth, CORS
+preflight) → relay publish (NIP-20 OK) → **live feed event** → SHA-256
+verified re-download → kind-5 deletion → live tombstone. It also checks the
+camera-model pass-through (no re-export) and pixels the publish poster:
+100% red / 0% green, i.e. the authored camera view, not auto-fit.
+
 ## Deterministic bug-regression suite
 
 `scripts/offline-verify.mjs` checks the five fixed bugs with pixel and state

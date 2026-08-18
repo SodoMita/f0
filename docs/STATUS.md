@@ -26,10 +26,17 @@ move it to **Done** with a commit reference. One agent per area.
         in this sandbox; scripts/offline-rig.mjs serves a local wss relay +
         models through a CSP-safe proxy; scripts/offline-verify.mjs has 25
         deterministic checks, all green, plus orient/interact/settings/
-        smoke/features/pages suites green against the rig). The verification
-        round caught and fixed two more pool bugs: the runtime-null
+        smoke/features/pages suites green against the rig, on BOTH the dev
+        and the production preview builds). The verification round caught
+        and fixed two more pool bugs: the runtime-null
         `rotationQuaternion` crash for camera'd models, and the stale
         `slot.visible` eviction deadlock/churn.
+      - Publish round-trip verified on the rig (scripts/verify-publish.mjs,
+        11 checks green): export → poster (pixel-checked authored camera) →
+        Blossom upload → relay OK → live feed event → SHA-verified
+        re-download → kind-5 delete → live tombstone. Perf gates hold
+        (static board 0 renders/s, flat heap, +0 shader recompiles); p95
+        numbers are environment-bound here (see docs/SANDBOX-VERIFY.md).
 
 - [x] **Branch integration + remaining security hardening** (agent arena,
       2026-08-17). Merged the sidecar-import work and then synced main's
