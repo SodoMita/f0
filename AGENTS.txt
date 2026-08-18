@@ -11,12 +11,16 @@ ARCHITECTURE.md · STATUS.md (claim a task) · CONVENTIONS.md ·
 RESEARCH-EDITORS.md (before Studio/editor work).
 
 NON-NEGOTIABLE (each cost real debugging):
+ 0 commit-and-push every ~60s of active work — sandbox resets discard
+   unpushed commits AND the local .git; only the remote branch is safe
+   (see docs/SANDBOX-VERIFY.md § Sandbox resets for the recovery playbook)
  1 deep imports only (never the @babylonjs/core barrel)
  2 one engine/context; engine must not reset scene.clearColor on swap
  3 validate GLBs before Babylon loads (model/limits.ts) — crash guard
  4 offscreen renders via scene.render(), never rtt.render()+renderList
  5 no scene.environmentTexture (IBL blackened PBR) — lights-only
- 6 posters ALWAYS auto-fit; authored cameras only in the viewer
+ 6 posters use the model's authored camera when it has one; auto-fit is
+   only the fallback (authored cameras also drive live previews + viewer)
  7 display double-sided; never modify source GLB
  8 side-effect imports: Culling/ray (pick), screenshotTools, loaders glTF
  9 per-path texture flip matrix (posters flip Y; RTT + badges don't)

@@ -59,6 +59,16 @@ bun scripts/capture.mjs && python3 scripts/visual_critique.py
 
 - Branch: `main` (shared). `git fetch && git rebase origin/main` before
   pushing; small atomic commits.
+- **Commit-and-push cadence: every ~60 seconds of active work.** Sandbox
+  sessions can reset at any moment (2026-08-18 incident: the workspace was
+  replaced by a fresh clone mid-task). Only pushed commits are guaranteed to
+  survive — uncommitted edits survive only as a working-tree snapshot, and
+  local-only commits die with the discarded `.git`. Small atomic commits are
+  already the convention; the new part is the *frequency* and the immediate
+  `git push` after each commit. Recovery playbook after a reset:
+  `git fetch` → remote tip → `git diff <tip>` (surviving working-tree delta)
+  → reapply on top of the tip → commit → push. See
+  `docs/SANDBOX-VERIFY.md` § Sandbox resets.
 - Message: `area: what changed (and why if non-obvious)`.
 - Never commit: `node_modules/`, `release/`, `form-zero-standalone.html`,
   `shots/`, secrets, `*.tsbuildinfo` (`.gitignore` covers these).

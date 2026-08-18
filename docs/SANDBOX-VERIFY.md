@@ -189,3 +189,48 @@ All 25 checks pass against the rig.
 - AssetContainer cleanup after reparenting root nodes under the slot's stage
   root produced "hierarchy is not valid" warnings — un-reparent before
   `removeAllFromScene()`.
+
+## Sandbox resets: what survives and how to recover
+
+2026-08-18 incident (this verification round): the sandbox was reset
+mid-task. The whole workspace was replaced by a FRESH CLONE of the repo,
+all processes killed, `/tmp` wiped.
+
+What SURVIVED:
+
+| State | Survived? |
+|---|---|
+| Pushed commits (remote branch) | ✅ intact — `git fetch` brings them back |
+| Uncommitted file edits (tracked files) | ✅ the workspace snapshot preserved the file contents — they reappeared in the fresh clone as working-tree modifications against the old base |
+| New untracked files (e.g. the rig scripts) | ✅ same snapshot mechanism |
+| Local-only commits (not pushed) | ❌ the reset discarded the old `.git` — the new clone's branch pointed at main |
+| `/tmp` (Chromium, certs, NSS libs), `node_modules/`, `shots/` (ignored), running processes, attached upload files | ❌ all gone |
+
+Recovery procedure that worked:
+
+```bash
+git fetch origin <branch>                 # the branch may have moved: other
+                                          # agents push to the same branch
+git log --oneline HEAD..FETCH_HEAD        # what the remote has that I don't
+git rev-parse HEAD FETCH_HEAD             # the local branch may have been
+                                          # re-cloned to main's tip!
+git diff FETCH_HEAD --stat                # ← the surviving working-tree
+                                          #   delta, if any
+git diff FETCH_HEAD > /tmp/recovered.patch
+cp <untracked files> /tmp/                # untracked files are NOT in the diff
+git reset --hard FETCH_HEAD               # re-anchor on the real remote tip
+git apply /tmp/recovered.patch            # reapply the surviving delta
+cp /tmp/<untracked files> back
+git commit -am "…" && git push            # persist IMMEDIATELY
+```
+
+Then rebuild the environment (Chromium + NSS libs + certs + `node_modules`)
+with the steps in this document — that part is mechanical, the source edits
+are the irreplaceable part.
+
+**The rule this incident produced** (also in `AGENTS.md` + `CONVENTIONS.md`):
+commit small self-contained changes at least every **~60 seconds** of active
+work and **`git push` immediately after each commit** — only pushed commits
+survive a reset for certain. Local-only commits are NOT enough: they live in
+the `.git` that the reset discards. Uncommitted working-tree edits survived
+ONCE as a snapshot; do not bet the session on that.

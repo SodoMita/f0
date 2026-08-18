@@ -46,6 +46,17 @@ bun run build:standalone  # ONE self-contained form-zero-standalone.html
 
 ## Non-negotiable rules (each one previously cost real debugging)
 
+> **SESSION SAFETY: commit and push as you go.** Sandbox sessions can be
+> reset at any moment (2026-08-18: the whole workspace was replaced by a
+> fresh clone mid-task). Only **pushed** commits are guaranteed to survive;
+> uncommitted edits survive only as a working-tree snapshot, and local-only
+> commits live in a `.git` that the reset discards. Commit small,
+> self-contained changes at least every ~60 seconds of active work and
+> `git push` immediately after each commit. After a reset: `git fetch`,
+> find the remote tip, `git diff <tip>` to see what survived as working-tree
+> delta, reapply it on top of the tip, commit, push. (Full playbook:
+> `docs/SANDBOX-VERIFY.md` § Sandbox resets.)
+
 1. **Deep imports only.** `import { Scene } from '@babylonjs/core/scene'`, never
    the `@babylonjs/core` barrel — the barrel is 6 MB and untree-shakable.
 2. **One engine, one context.** Scenes swap via `engine.setActiveScene()`; never
