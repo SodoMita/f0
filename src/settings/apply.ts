@@ -99,6 +99,15 @@ export function applySettings(w: Wiring, v: SettingsValues, changed: string[] | 
     // the thread map gets a small share of the same budget
     w.threadView.setLivePreviewSlots(Math.max(0, Math.min(3, slots)))
   }
+  if (touched('previewWidth')) {
+    // Width is the only knob the user sees; height is locked to the poster
+    // aspect (5:8 = 0.625) so previews never stretch the model. The flag is
+    // `deferred` — newly-rendered slots pick it up; existing ones are
+    // resized in place by setPreviewSize.
+    const width = Math.max(32, Math.round(Number(v.previewWidth ?? 448)))
+    w.board.setPreviewSize(width)
+    w.threadView.setPreviewSize(width)
+  }
   if (touched('prefetch', 'keepOffscreen')) {
     w.board.setPrefetch(v.keepOffscreen ? 4 : Number(v.prefetch ?? 100) / 100)
   }

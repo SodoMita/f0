@@ -150,6 +150,20 @@ export class ThreadView {
       this.showNodePoster(n)
       this.form.kick()
     }
+    // Pool rebuilt its RTTs (settings → Textures → "Card / preview width"):
+    // swap the node material's texture handle in place, no fade.
+    this.previewPool.onResize = (postId, newRtt) => {
+      const n = this.nodes.get(postId)
+      if (!n || !n.live || n.mesh.isDisposed()) return
+      n.live = newRtt
+      if (n.fadeStart) this.finishNodeFade(n)
+      setCardTexture(n.mat, newRtt)
+      setCardWhite(n.mat)
+      setCardTexture2(n.mat, null)
+      setCardTint2(n.mat, '#FFFFFF')
+      setCardFlip(n.mat, 'rtt')
+      this.form.kick()
+    }
     this.previewPool.onLoadDone = () => {
       this.syncPreviews()
       this.form.kick()
@@ -185,6 +199,14 @@ export class ThreadView {
   setLivePreviewSlots(n: number): void {
     this.previewPool.setMaxSlots(n)
     this.syncPreviews()
+  }
+
+  /** Settings → Textures: card / preview width. Height is fixed at the
+   *  node rect aspect (16:10 = 0.625), same as the poster. */
+  setPreviewSize(width: number): void {
+    const w = Math.max(16, Math.round(width))
+    const h = Math.max(16, Math.round(w * (10 / 16)))
+    this.previewPool.setRttSize(w, h)
   }
 
   /** Render-on-demand probe: pointers down, a crossfade, a spinner, or a live node. */

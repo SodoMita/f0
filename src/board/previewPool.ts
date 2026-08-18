@@ -82,6 +82,9 @@ export class PreviewPool {
   onLive: ((postId: string, rtt: RenderTargetTexture) => void) | null = null
   /** A live slot was evicted (or scrolled away) — drop the card back to its poster. */
   onRelease: ((postId: string) => void) | null = null
+  /** The RTT backing a live slot was just resized — card material must rebind
+   *  to the new handle, otherwise it samples a disposed texture. */
+  onResize: ((postId: string, rtt: RenderTargetTexture) => void) | null = null
   /** A load finished (success or not) — callers may retry queued requests. */
   onLoadDone: (() => void) | null = null
 
@@ -115,6 +118,33 @@ export class PreviewPool {
   get scene(): Scene { return this.stage }
 
   get activeCount(): number { return this.byPost.size }
+
+  /** Settings → Textures: rebuild all slot RTTs at a new size.
+   *  Disposes the old RenderTargetTextures (which the card shader was sampling)
+   *  and creates new ones at (w,h); the slot's loaded model is kept in the
+   *  scene (its handle doesn't change), so cards rebind to a fresh RTT without
+   *  re-parsing the GLB. Posts that were waiting for a free slot don't move
+   *  — setMaxSlots/load handle that ordering. */
+  setRttSize(width: number, height: number): void {
+    const w = Math.max(16, Math.round(width))
+    const h = Math.max(16, Math.round(height))
+    if (w === this.opts.rttWidth && h === this.opts.rttHeight) return
+    this.opts.rttWidth = w
+    this.opts.rttHeight = h
+    for (const slot of this.slots) {
+      if (slot.rtt && !slot.rtt.isDisposed?.()) slot.rtt.dispose()
+      slot.rtt = new RenderTargetTexture(`slot-${slot.index}`, { width: w, height: h }, this.stage)
+      slot.rtt.renderTargetOptions.generateDepthBuffer = true
+      slot.rtt.renderTargetOptions.generateMipMaps = false
+      slot.rtt.wrapU = Texture.CLAMP_ADDRESSMODE
+      slot.rtt.wrapV = Texture.CLAMP_ADDRESSMODE
+      // Transparent background: see comment in makeSlot().
+      slot.rtt.clearColor = new Color4(0, 0, 0, 0)
+      // Card material still holds the OLD RTT handle; tell the board to swap
+      // immediately. Empty slots (no live post) need no notification.
+      if (slot.postId) this.onResize?.(slot.postId, slot.rtt)
+    }
+  }
 
   /** Settings → Memory: how many cards may animate at once. */
   setMaxSlots(n: number): void {
