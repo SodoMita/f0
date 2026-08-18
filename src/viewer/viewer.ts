@@ -200,36 +200,69 @@ export class Viewer {
         return
       }
       this.pending = false
-      container.addAllToScene()
-      for (const m of container.meshes) {
-        if (m.material) m.material.backFaceCulling = false
-      }
-      this.container = container
-      graphics.trackContainer(container)
-      graphics.applyToContainer(container)
-      graphics.setShadowCasters(this.scene, container.meshes.filter((m) => m.getTotalVertices() > 0))
-      this.imported = container.cameras.slice()
-      this.anims = container.animationGroups
-
-      let verts = 0
-      for (const m of container.meshes) verts += m.getTotalVertices() || 0
-      this.counts = { meshes: container.meshes.length, vertices: verts }
-
-      // Camera policy (04 §5): preview-camera index -> first imported -> orbit.
-      let idx = -1
-      if (meta.previewCamera !== undefined && meta.previewCamera >= 0 && meta.previewCamera < this.imported.length) idx = meta.previewCamera
-      else if (this.imported.length > 0) idx = 0
-      this.applyCamera(idx)
-
-      this.form.kick()
-      if (this.anims.length) {
-        const a = meta.previewAnimation ?? 0
-        this.active = this.anims[Math.min(a, this.anims.length - 1)]
-        this.active.start(true)
-      }
+      this.adopt(container, meta)
     } catch (err) {
       if (token === this.loadToken) { this.pending = false; this.clear() }
       throw new Error('model failed to load: ' + (err as Error)?.message)
+    }
+  }
+
+  /**
+   * Take ownership of an ALREADY-PARSED AssetContainer bound to THIS viewer's
+   * scene (the caller — the board's preview pool — runs `handoffContainer`
+   * which clones meshes/materials/animationGroups from previewScene into
+   * viewer.scene and disposes the source). Bypasses LoadAssetContainerAsync,
+   * so the viewer opens instantly on a model that was already live-previewing.
+   *
+   * Falls back to the byte-loading path silently if anything looks off: a
+   * stale loadToken, a disposed container, or a stage that is no longer the
+   * active scene — the user still gets a working viewer, just with the parse.
+   */
+  loadFromContainer(container: import('@babylonjs/core/assetContainer').AssetContainer, meta: ThreadMeta): void {
+    this.clear()
+    const token = ++this.loadToken
+    if (container.scene !== this.scene || container.isDisposed?.()) {
+      // Defensive: only adopt containers already bound to our scene.
+      this.loadToken++
+      return
+    }
+    try {
+      this.pending = false
+      this.adopt(container, meta)
+    } catch (err) {
+      if (token === this.loadToken) { this.pending = false; this.clear() }
+      throw new Error('model handoff failed: ' + (err as Error)?.message)
+    }
+  }
+
+  /** Wire a parsed container into the viewer state (camera, anims, glow, lights). */
+  private adopt(container: import('@babylonjs/core/assetContainer').AssetContainer, meta: ThreadMeta): void {
+    container.addAllToScene()
+    for (const m of container.meshes) {
+      if (m.material) m.material.backFaceCulling = false
+    }
+    this.container = container
+    graphics.trackContainer(container)
+    graphics.applyToContainer(container)
+    graphics.setShadowCasters(this.scene, container.meshes.filter((m) => m.getTotalVertices() > 0))
+    this.imported = container.cameras.slice()
+    this.anims = container.animationGroups
+
+    let verts = 0
+    for (const m of container.meshes) verts += m.getTotalVertices() || 0
+    this.counts = { meshes: container.meshes.length, vertices: verts }
+
+    // Camera policy (04 §5): preview-camera index -> first imported -> orbit.
+    let idx = -1
+    if (meta.previewCamera !== undefined && meta.previewCamera >= 0 && meta.previewCamera < this.imported.length) idx = meta.previewCamera
+    else if (this.imported.length > 0) idx = 0
+    this.applyCamera(idx)
+
+    this.form.kick()
+    if (this.anims.length) {
+      const a = meta.previewAnimation ?? 0
+      this.active = this.anims[Math.min(a, this.anims.length - 1)]
+      this.active.start(true)
     }
   }
 
