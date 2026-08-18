@@ -132,7 +132,12 @@ export class PreviewPool {
     this.opts.rttWidth = w
     this.opts.rttHeight = h
     for (const slot of this.slots) {
-      slot.rtt.dispose()
+      // Allocate the new RTT FIRST so the caller can bind it to the card
+      // material BEFORE we release the GPU handle the material currently
+      // samples. (Disposing then re-assigning in the same tick is fine in
+      // JS, but the caller's setCardTexture may run a render immediately
+      // via invalidate(2) — we must not be holding a disposed handle.)
+      const oldRtt = slot.rtt
       slot.rtt = new RenderTargetTexture(`slot-${slot.index}`, { width: w, height: h }, this.stage)
       slot.rtt.renderTargetOptions.generateDepthBuffer = true
       slot.rtt.renderTargetOptions.generateMipMaps = false
@@ -143,6 +148,7 @@ export class PreviewPool {
       // Card material still holds the OLD RTT handle; tell the board to swap
       // immediately. Empty slots (no live post) need no notification.
       if (slot.postId) this.onResize?.(slot.postId, slot.rtt)
+      oldRtt.dispose()
     }
   }
 
