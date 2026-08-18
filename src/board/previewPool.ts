@@ -264,41 +264,71 @@ export class PreviewPool {
   }
 
   /**
-   * Hand off the LIVE container for a post without disposing it. The slot
-   * becomes free (so a new request() can re-use it) but the parsed
-   * AssetContainer is left intact — the caller (the model viewer) takes
-   * ownership and re-binds it to its own scene via handoffContainer.
+   * Hand off the LIVE container for a post atomically. The caller MUST
+   * invoke either `commit()` (the handoff succeeded — release the slot)
+   * or `rollback()` (the handoff failed — restore the slot to its live,
+   * animating state). Calling neither leaks the parsed container in
+   * previewScene; calling both is a no-op. Returns null when the post
+   * is not live (caller falls back to a fresh parse).
    *
-   * Returns null when the post is not currently live (caller falls back
-   * to a fresh LoadAssetContainerAsync).
+   * Why a transaction instead of a one-shot handoff: the parse result
+   * already lives in previewScene, so a "soft" reservation (slot stays in
+   * byPost, anims paused, slot.root detached) lets the caller either keep
+   * the slot free post-handoff OR put everything back if the hand-off
+   * throws. Without the rollback path, a parse error in handoffContainer
+   * would silently strand the meshes in previewScene with no slot to
+   * bind them to.
    */
-  acquire(postId: string): { container: AssetContainer; anims: AnimationGroup[]; offset: Vector3 } | null {
+  acquire(postId: string): {
+    container: AssetContainer
+    offset: Vector3
+    anims: AnimationGroup[]
+    commit(): void
+    rollback(): void
+  } | null {
     const slot = this.byPost.get(postId)
     if (!slot || !slot.container) return null
     const container = slot.container
-    const anims = slot.anims.slice()
-    // The pool stages each slot 800 units along +X so they sit outside one
-    // another's frustum — the caller (the viewer) wants the model at the
-    // origin of its own scene, NOT at that staging offset.
     const offset = slot.root ? slot.root.position.clone() : new Vector3(0, 0, 0)
-    // Pause the slot's anims so a parallel view doesn't keep ticking them
-    // while the caller rebinds. handoffContainer clones AnimationGroups
-    // and remaps their targets, so the caller restarts playback.
+    const anims = slot.anims.slice()
     for (const a of slot.anims) a.stop()
-    // Un-reparent rootNodes from the slot's offset TransformNode so
-    // removeAllFromScene in handoffContainer does not warn about a stale
-    // parent (the offset root will be disposed below).
+    // Detach rootNodes from slot.root so handoffContainer's
+    // instantiateModelsToScene finds them at the root level and the move
+    // does not warn about the soon-to-be-disposed offset root.
     for (const n of container.rootNodes) n.parent = null
-    // Drop slot bookkeeping; KEEP the container — the caller owns it now.
-    this.byPost.delete(postId)
-    this.onRelease?.(postId)
-    slot.anims = []
-    slot.container = null
-    slot.root?.dispose()
-    slot.root = null
-    slot.postId = null
-    slot.visible = false
-    return { container, anims, offset }
+
+    type State = 'open' | 'committed' | 'rolledback'
+    let state: State = 'open'
+    const self = this
+    const reservation = {
+      container,
+      offset,
+      anims,
+      commit(): void {
+        if (state !== 'open') return
+        state = 'committed'
+        slot.root?.dispose()
+        slot.root = null
+        slot.container = null
+        slot.anims = []
+        slot.postId = null
+        slot.visible = false
+        // Tell the board/thread this post is no longer live - their cards
+        // fall back to posters. byPost is removed last so the slot is still
+        // "intact" until every local ref is cleared.
+        self.byPost.delete(postId)
+        self.onRelease?.(postId)
+      },
+      rollback(): void {
+        if (state !== 'open') return
+        state = 'rolledback'
+        // The model is still in previewScene with parent=null (we detached
+        // above). The slot stays in byPost, so tick() will re-render it
+        // once the anims spin back up.
+        for (const a of anims) a.start(true)
+      },
+    }
+    return reservation
   }
 
   /** Advance one frame; render only the slots whose turn it is.

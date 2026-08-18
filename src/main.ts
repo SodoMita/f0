@@ -810,16 +810,33 @@ async function boot(): Promise<void> {
     if (live) {
       try {
         const container = handoffContainer(live.container, board.previewPool.scene, viewer.scene, live.offset, 'viewer')
-        if (nav !== viewerNav) return
+        // At this point the clones live in viewer.scene and the source
+        // container is disposed. ANY return below this point MUST commit
+        // (otherwise the preview slot stays bound to a now-empty source).
+        if (nav !== viewerNav) {
+          // The user navigated away while we were cloning (unlikely but
+          // possible across async boundaries). The viewer is about to be
+          // cleared by the next setMode anyway; just commit to release the
+          // preview slot and let the viewer tear-down dispose the clones.
+          live.commit()
+          return
+        }
         viewer.loadFromContainer(container, meta)
-        if (nav !== viewerNav) return
+        if (nav !== viewerNav) {
+          live.commit()
+          return
+        }
         renderCamDots()
         syncPlay()
+        live.commit()
         return
       } catch (err) {
-        // Hand-off failed (e.g. parse result lost a mesh). Fall through to
-        // the bytes path — the user still gets a working viewer.
+        // Hand-off failed (e.g. parse result lost a mesh). Rollback the
+        // reservation so the slot is back to live-animating, then fall
+        // through to the bytes path — the user still gets a working
+        // viewer (with a re-parse).
         console.warn('viewer handoff failed, falling back to parse:', err)
+        live.rollback()
       }
     }
     setLoading('model', true, 'loading model')
