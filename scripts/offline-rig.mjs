@@ -39,7 +39,8 @@ const KEY = readFileSync('/tmp/rig-certs/key.pem')
 const CERT = readFileSync('/tmp/rig-certs/cert.pem')
 const RELAY_PORT = 8443
 const PROXY_PORT = 4173
-const VITE = 'http://localhost:5173'
+// Upstream dev/preview server (5173 = vite dev; 5174 = production preview).
+const VITE = process.env.VITE_UPSTREAM || 'http://localhost:5173'
 
 // ------------------------------------------------------------------ GLB
 
