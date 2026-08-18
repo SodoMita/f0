@@ -272,11 +272,15 @@ export class PreviewPool {
    * Returns null when the post is not currently live (caller falls back
    * to a fresh LoadAssetContainerAsync).
    */
-  acquire(postId: string): { container: AssetContainer; anims: AnimationGroup[] } | null {
+  acquire(postId: string): { container: AssetContainer; anims: AnimationGroup[]; offset: Vector3 } | null {
     const slot = this.byPost.get(postId)
     if (!slot || !slot.container) return null
     const container = slot.container
     const anims = slot.anims.slice()
+    // The pool stages each slot 800 units along +X so they sit outside one
+    // another's frustum — the caller (the viewer) wants the model at the
+    // origin of its own scene, NOT at that staging offset.
+    const offset = slot.root ? slot.root.position.clone() : new Vector3(0, 0, 0)
     // Pause the slot's anims so a parallel view doesn't keep ticking them
     // while the caller rebinds. handoffContainer clones AnimationGroups
     // and remaps their targets, so the caller restarts playback.
@@ -294,7 +298,7 @@ export class PreviewPool {
     slot.root = null
     slot.postId = null
     slot.visible = false
-    return { container, anims }
+    return { container, anims, offset }
   }
 
   /** Advance one frame; render only the slots whose turn it is.

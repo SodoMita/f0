@@ -1,4 +1,5 @@
 import { Scene } from '@babylonjs/core/scene'
+import { Vector3 } from '@babylonjs/core/Maths/math.vector'
 import { Mesh } from '@babylonjs/core/Meshes/mesh'
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode'
 import { AssetContainer } from '@babylonjs/core/assetContainer'
@@ -31,12 +32,18 @@ import { AssetContainer } from '@babylonjs/core/assetContainer'
  *     is re-pointed at the cloned meshes by Babylon, so playback
  *     continues on the same pose from the same frame.
  *
+ * The `worldOffset` is subtracted from every rootNode's local position so
+ * the model ends up at the target scene's origin instead of wherever the
+ * source pool staged it (the preview pool stages each slot 800 units along
+ * +X so the slots' frustums don't overlap).
+ *
  * Returns a new AssetContainer (not yet added to `targetScene`).
  */
 export function handoffContainer(
   source: AssetContainer,
   sourceScene: Scene,
   targetScene: Scene,
+  worldOffset: Vector3 = new Vector3(0, 0, 0),
   nameHint = 'viewer',
 ): AssetContainer {
   // Cloning happens IN the source scene (Babylon's instantiateModelsToScene
@@ -51,6 +58,18 @@ export function handoffContainer(
   // anything so the source scene's frame doesn't briefly render a
   // half-moved mesh set.
   source.removeAllFromScene()
+
+  // The clones inherit the slot's staging offset in their local position
+  // (setParent(null) inside acquire() preserved the world matrix into
+  // local). Subtract the offset so the model lands at the origin in
+  // viewer.scene, where the orbit camera expects it.
+  if (worldOffset.x !== 0 || worldOffset.y !== 0 || worldOffset.z !== 0) {
+    for (const root of entries.rootNodes) {
+      if ('position' in root && (root as TransformNode).position) {
+        (root as TransformNode).position.subtractInPlace(worldOffset)
+      }
+    }
+  }
 
   // ----- meshes + transform nodes -----
   for (const node of entries.rootNodes) {

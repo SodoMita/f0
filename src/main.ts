@@ -809,7 +809,7 @@ async function boot(): Promise<void> {
     const live = board.previewPool.acquire(id)
     if (live) {
       try {
-        const container = handoffContainer(live.container, board.previewPool.scene, viewer.scene, 'viewer')
+        const container = handoffContainer(live.container, board.previewPool.scene, viewer.scene, live.offset, 'viewer')
         if (nav !== viewerNav) return
         viewer.loadFromContainer(container, meta)
         if (nav !== viewerNav) return
