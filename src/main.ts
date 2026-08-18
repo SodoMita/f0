@@ -147,6 +147,7 @@ async function boot(): Promise<void> {
       .sort((a, b) => b.createdAt - a.createdAt)
 
   $('btn-home').addEventListener('click', () => router.go({ name: 'board' }))
+  $('btn-studio-close')?.addEventListener('click', () => router.go({ name: 'board' }))
   netDot.addEventListener('click', () => router.go({ name: 'network' }))
   $('btn-add').addEventListener('click', () => router.go({ name: 'studio' }))
   $('btn-shuffle').addEventListener('click', () => { board.shuffle(orderedRoots()); engine.kick() })
@@ -213,6 +214,14 @@ async function boot(): Promise<void> {
         { relays: pool.relayUrls, blossoms: blossoms.servers, pool, onProgress: onProgress },
       )
       void deletion.refresh().then(syncDeleteButton)
+      // The new post enters the index via the relay echo. Routing to its
+      // viewer immediately races that echo: openViewer bails to the board
+      // when the meta is not in the index yet (publish -> board flash +
+      // delete button never armed). Wait briefly for the echo instead.
+      const t0 = performance.now()
+      while (!index.byId.has(result.eventId) && performance.now() - t0 < 8000) {
+        await new Promise((r) => setTimeout(r, 40))
+      }
       if (studioReply) router.go({ name: 'thread', rootId: studioReply.rootId, focusId: result.eventId })
       else router.go({ name: 'viewer', id: result.eventId })
       studioReply = null
@@ -256,6 +265,9 @@ async function boot(): Promise<void> {
     })
     if (tab === 'type' && !studio.text) {
       studio.setText('/0'); studio.rebuildText()
+      // seeding text IS content: publish must enable (it only listened to
+      // the textarea's input event, so the seeded '/0' left it dead)
+      btnStudioPublish.disabled = !studio.hasContent()
     }
     studio.kick(120)
   }
@@ -817,16 +829,19 @@ async function boot(): Promise<void> {
       setMode('studio')
       studio.clearModel()
       studioFilename.textContent = ''
-      setStudioTab('type')
-      studioText.value = '/0'
-      studio.setText('/0')
+      // Upload tab first: the import drop zone must be visible immediately.
+      // (Opening on TYPE hid "choose model" behind a tab switch; the text
+      // tab still seeds '/0' the first time it is opened.)
+      setStudioTab('upload')
+      studioText.value = ''
+      studio.setText('')
+      btnStudioPublish.disabled = true
       // reset text settings UI to defaults
       const opts = studio.textOptions
       ;(document.getElementById('text-scale') as HTMLInputElement).value = String(opts.scale)
       ;(document.getElementById('text-tracking') as HTMLInputElement).value = String(opts.letterSpacing)
       ;(document.getElementById('text-leading') as HTMLInputElement).value = String(opts.lineSpacing)
       ;(document.getElementById('text-extrude') as HTMLInputElement).value = String(opts.depth)
-      void studio.rebuildText()
       setStudioStatus(studioReply ? 'replying…' : '')
       refreshCameraControls()
       updateTextBudget()
@@ -932,7 +947,7 @@ async function boot(): Promise<void> {
     }
   })
 
-  window.addEventListener('resize', () => { engine.resize(); board.resize(); threadView.resize() })
+  window.addEventListener('resize', () => { engine.resize(); board.resize(); threadView.resize(); viewer.resize() })
 
   ;(window as any).__form0 = {
     engine, pool, blossoms, index, board, viewer, studio, threadView, router, assets,

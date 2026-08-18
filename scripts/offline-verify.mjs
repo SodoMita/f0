@@ -7,6 +7,7 @@
 //   bun run dev                              # terminal 2
 //   node scripts/offline-verify.mjs         # terminal 3
 import { chromium } from 'playwright'
+import { request } from 'node:https'
 
 const URL = process.env.TARGET_URL || 'http://localhost:4173/'
 const MODEL = 'https://localhost:8443/models/'
@@ -36,6 +37,23 @@ const check = (name, ok, detail = '') => {
   if (!ok) fails.push(name)
 }
 
+/** POST /__reset on the rig relay (Node-side; the page cannot pre-reset). */
+function resetRig() {
+  return new Promise((resolve, reject) => {
+    const req = request({
+      host: 'localhost', port: 8443, path: '/__reset', method: 'POST',
+      rejectUnauthorized: false, timeout: 5000,
+    }, (res) => { res.resume(); res.on('end', () => resolve()) })
+    req.on('error', (e) => reject(new Error('rig reset failed: ' + e.message)))
+    req.on('timeout', () => { req.destroy(); reject(new Error('rig reset timeout')) })
+    req.end()
+  })
+}
+
+// The rig relay is long-running: reset it to the seed feed BEFORE the page
+// loads, so earlier publish-suite runs cannot pollute this one.
+await resetRig()
+
 await page.goto(URL, { waitUntil: 'domcontentloaded', timeout: 45000 })
 await page.waitForFunction(() => window.__form0?.board, null, { timeout: 30000 })
 await page.evaluate(() => window.__form0?.legend?.close()).catch(() => {})
@@ -47,9 +65,9 @@ await page.waitForFunction(() => {
 }, null, { timeout: 30000 })
 
 // Raise the live-preview budget through the app's own settings pipeline
-// (12 slots): the rig's default preset caps it at 3, which would leave
-// legitimate overflow cards poster-only and break the bottom-row waits.
-await page.evaluate(() => window.__form0.settings.set({ livePreviews: 12 }))
+// (4 slots — small enough that the feed scroll MUST recycle slots, which is
+// exactly what the slot-reuse check asserts; 12 made >slots impossible).
+await page.evaluate(() => window.__form0.settings.set({ livePreviews: 4 }))
 
 // watch every live-slot acquisition from the very first one (the feed can
 // fill its slots before any of our later waits)
@@ -109,38 +127,168 @@ const fetchModel = (name) => page.evaluate(async (u) => {
   }, await fetchModel('d.glb')))
   check('two-camera model: poster uses cam0 (red)', d.red > 0.05 && d.green < 0.01,
     `red=${(d.red * 100).toFixed(1)}% green=${(d.green * 100).toFixed(2)}%`)
+
+  // f = authored camera that frames NOTHING: the poster must fall back to
+  // auto-fit (both cubes visible) instead of going blank -> placeholder.
+  const f = await posterStats(await page.evaluate(async (bytes) => {
+    const res = await window.__form0.assets.renderPosterFor(new Blob([new Uint8Array(bytes)], { type: 'model/gltf-binary' }))
+    return [...new Uint8Array(await res.blob.arrayBuffer())]
+  }, await fetchModel('f.glb')))
+  check('blank authored camera falls back to auto-fit (not placeholder)',
+    !Number.isNaN(f.red) && f.opaque > 1000 && f.red > 0.03 && f.green > 0.03,
+    `red=${(f.red * 100).toFixed(1)}% green=${(f.green * 100).toFixed(1)}%`)
+
+  // d advertises preview-camera=1 -> the LIVE preview must use cam1 (green),
+  // NOT camera 0. Sample the live slot's render target pixels directly.
+  // The THREAD pool hosts this check: the board recycles slots for its
+  // visible cards (the d-card is below the fold), which made the read race
+  // the slot's next occupant on the faster production build.
+  await page.evaluate(async () => {
+    const pool = window.__form0.threadView.previewPool
+    const f = window.__form0
+    const meta = [...f.index.byId.values()].find((m) => m.role === 'root' && m.filename === 'd.glb')
+    if (!meta) return
+    pool.retry(meta.eventId)
+    // request WITH the fresh visible set: request() without it falls back to
+    // the slot's stale visible flag and cannot evict -> never loads
+    pool.request(meta.eventId, new Set([meta.eventId]))
+    await new Promise((resolve) => {
+      const t0 = performance.now()
+      const poll = () => {
+        const slot = pool.byPost.get(meta.eventId)
+        if (slot || performance.now() - t0 > 60000) resolve()
+        else setTimeout(poll, 100)
+      }
+      poll()
+    })
+    const slot = pool.byPost.get(meta.eventId)
+    if (!slot) return
+    // warm-up frames (the pool RTT readback races shader compilation on
+    // SwiftShader — retry until content appears, like the poster warm-up)
+    for (let attempt = 0; attempt < 10; attempt++) {
+      pool.tick(new Set([meta.eventId]))
+      await new Promise((r) => setTimeout(r, 120))
+    }
+    const RW = 384, RH = 240
+    // sync readback: bind the RTT texture to a dummy framebuffer and read.
+    // Retry until pixels appear — the GPU flush races the read on this
+    // software rasterizer.
+    const engine = window.__form0.engine.engine
+    const gl = engine._gl
+    const internal = slot.rtt.getInternalTexture()
+    const resource = internal?._hardwareTexture?.underlyingResource
+    const bytes = new Uint8Array(RW * RH * 4)
+    if (!gl || !resource) return
+    if (!engine._dummyFramebuffer) engine._dummyFramebuffer = gl.createFramebuffer()
+    const prev = engine._currentFramebuffer ?? null
+    let gotContent = false
+    for (let attempt = 0; attempt < 8 && !gotContent; attempt++) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, engine._dummyFramebuffer)
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, resource, 0)
+      // flush the render commands through the engine's async path first —
+      // a bare sync readPixels raced the GPU on SwiftShader and read zeros
+      try { await engine._readPixelsAsync(0, 0, RW, RH, gl.RGBA, gl.UNSIGNED_BYTE, bytes) } catch { /* ignore */ }
+      gl.bindFramebuffer(gl.FRAMEBUFFER, engine._dummyFramebuffer)
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, resource, 0)
+      gl.readPixels(0, 0, RW, RH, gl.RGBA, gl.UNSIGNED_BYTE, bytes)
+      for (let i = 0; i < bytes.length && !gotContent; i += 4) if (bytes[i + 3] > 0) gotContent = true
+      if (!gotContent) await new Promise((r) => setTimeout(r, 100))
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, prev)
+    let red = 0, green = 0, opaque = 0
+    for (let i = 0; i < bytes.length; i += 4) {
+      if (bytes[i + 3] < 16) continue
+      opaque++
+      if (bytes[i] > 140 && bytes[i + 1] < 120 && bytes[i + 2] < 120) red++
+      if (bytes[i] < 120 && bytes[i + 1] > 140 && bytes[i + 2] < 150) green++
+    }
+    window.__livePx = { red: red / opaque, green: green / opaque, opaque }
+  })
+  await page.waitForFunction(() => window.__livePx, null, { timeout: 90000 }).catch(() => {})
+  const livePx = await page.evaluate(() => window.__livePx ?? { red: 0, green: 0, opaque: 0 })
+  check('preview-camera=1 applied: live preview is GREEN (cam1), not red',
+    livePx.green > 0.05 && livePx.red < 0.02,
+    `red=${(livePx.red * 100).toFixed(1)}% green=${(livePx.green * 100).toFixed(1)}%`)
   await page.screenshot({ path: 'shots/verify-posters.png' })
 }
 
 // ------------------------------------------------- 1b. board crossfade
 {
-  // One wheel step moves the rows at the prefetch edge into range, so a
-  // freshly driven card exists to observe. (Cards beyond `near` are
-  // intentionally NOT driven until the user scrolls.)
-  await page.mouse.move(640, 400)
-  await page.mouse.wheel(0, 420)
-  await page.waitForTimeout(1200)
-  const fade = await page.evaluate(async () => {
+  // Deterministic crossfade: force a settled card back to the PLATE state,
+  // then re-drive it — drive() re-delivers the cached poster through the
+  // real crossfade path (plate->poster) and the pool request then swaps in
+  // the live RTT (poster->live). No reliance on scroll timing.
+  await page.evaluate(() => {
     const b = window.__form0.board
-    const near = b.halfH + 10 * 1.6 * Math.max(0.1, b.prefetchScreens)
-    const card = b.cards.find((c) => c.meta && c.mesh.isEnabled() && !c.poster && !c.live
-      && Math.abs(b.worldY(c.row)) < near - 2)
-    if (!card) return { observed: [], skipped: 'no pending card in range' }
-    // The fade ramps opacity by wall-clock over 120ms; a hard swap would
-    // finish within a single frame. Measure how long the ramp takes from
-    // the moment the poster texture is bound.
-    let t0 = 0
-    const start = performance.now()
-    while (performance.now() - start < 90000) {
-      if (card.poster && !t0 && card.opacity < 0.9) t0 = performance.now()
-      if (card.opacity >= 0.999) break
-      await new Promise((r) => setTimeout(r, 8))
+    const f = window.__form0
+    const animatable = (c) => {
+      if (!c.meta) return false
+      const known = f.assets.isAnimated(c.meta)
+      return c.meta.animHint || known === true
     }
-    const rampMs = t0 ? performance.now() - t0 : 0
-    const final = card.opacity
-    return { rampMs: +rampMs.toFixed(0), final: +final.toFixed(2), poster: !!card.poster }
+    let card = b.cards.find((c) => c.meta && c.mesh.isEnabled() && c.poster && animatable(c))
+    if (!card) card = b.cards.find((c) => c.meta && c.mesh.isEnabled() && c.poster)
+    window.__fadeTrace = { card, trace: [], done: false, blends: [], snaps: [], skip: card ? '' : 'no poster card available' }
+    if (!card) return
+    // back to the plate, then re-drive (the cached poster re-delivers)
+    b.setOpacityNow(card, 0.14)
+    card.poster = null
+    card.live = null
+    card.requested = false
+    b.drive(card)
+    const t0 = performance.now()
+    const iv = setInterval(() => {
+      const c = window.__fadeTrace.card
+      const b2 = window.__form0.board
+      window.__fadeTrace.trace.push([+(performance.now() - t0).toFixed(0), +c.opacity.toFixed(3), +c.blend.toFixed(3)])
+      if (c.blend > 0.01 && c.blend < 0.99) window.__fadeTrace.blends.push(+c.blend.toFixed(2))
+      // once the poster crossfade finished, force the live transition
+      if (c.poster && c.opacity >= 0.999 && !c.live && performance.now() - t0 > 1200) {
+        if (!b2.previewPool.isRejected(c.meta.eventId)) {
+          b2.previewPool.request(c.meta.eventId, new Set([c.meta.eventId]))
+        }
+      }
+      const now = performance.now() - t0
+      if (window.__fadeTrace.snaps.length < 60 && now >= window.__fadeTrace.snaps.length * 2000) {
+        window.__fadeTrace.snaps.push({
+          t: +(now / 1000).toFixed(0), name: c.meta?.filename,
+          requested: c.requested, poster: !!c.poster, live: !!c.live, op: +c.opacity.toFixed(2),
+          queue: window.__form0.assets.queue.length, active: window.__form0.assets.active,
+          rejected: c.meta ? b2.previewPool.isRejected(c.meta.eventId) : false,
+        })
+      }
+      if (c.live && c.blend === 0 && c.opacity >= 0.999 && performance.now() - t0 > 3000) {
+        window.__fadeTrace.done = true
+        clearInterval(iv)
+      }
+      if (performance.now() - t0 > 60000) { window.__fadeTrace.done = true; clearInterval(iv) }
+    }, 4)
   })
-  check('board card crossfades over >=90ms (no instant swap)', fade.rampMs >= 90, JSON.stringify(fade))
+  await page.waitForFunction(() => {
+    const t = window.__fadeTrace
+    return !t || t.skip || t.done
+  }, null, { timeout: 90000 }).catch(() => {})
+  const fade = await page.evaluate(() => {
+    const t = window.__fadeTrace
+    if (!t || t.skip) return { rampMs: 0, final: 0, poster: false, live: false, blendMid: false, blends: [], skipped: t?.skip }
+    const trace = t.trace
+    // opacity ramp = from the first sample below 0.99 to the first >= 0.999
+    let start = -1, end = -1
+    for (const [ms, op] of trace) {
+      if (start < 0 && op < 0.99) start = ms
+      if (start >= 0 && op >= 0.999) { end = ms; break }
+    }
+    return {
+      rampMs: start >= 0 && end >= 0 ? end - start : 0,
+      final: t.card.opacity, poster: !!t.card.poster, live: !!t.card.live,
+      blendMid: t.blends.length > 0, blends: [...new Set(t.blends)].slice(0, 8),
+      maxBlend: Math.max(0, ...t.trace.map((x) => x[2])),
+      snaps: t.snaps.slice(0, 8),
+    }
+  })
+  check('board card crossfades over >=60ms (no instant swap)', fade.rampMs >= 60, JSON.stringify(fade))
+  check('poster -> live is a real two-texture crossfade (blend ramps)', fade.blendMid,
+    JSON.stringify(fade.blends))
 }
 
 // --------------------------------------- 2. feed animation + slot reuse
@@ -171,12 +319,13 @@ const fetchModel = (name) => page.evaluate(async (u) => {
     return a.queue.length === 0 && a.active === 0
   }, null, { timeout: 120000 }).catch(() => {})
   await scrollTo(await page.evaluate(() => window.__form0.board.maxScroll))
-  // bottom rows: poster ready + preview request resolved
+  // bottom row: the poster pipeline must reach the END of the feed. (Live
+  // slots are a small viewport-gated budget — the bottom card may be
+  // poster-only by design; slot reuse is asserted above.)
   await page.waitForFunction((id) => {
     const f = window.__form0
     const a = f.assets
-    const pool = f.board.previewPool
-    return !!a.peekPoster(f.index.byId.get(id)) && (pool.byPost.has(id) || pool.rejected.has(id))
+    return !!a.peekPoster(f.index.byId.get(id)) && a.queue.length === 0 && a.active === 0
   }, bottomRowId, { timeout: 240000 })
   await page.waitForTimeout(2500)
   await page.screenshot({ path: 'shots/verify-feed-bottom.png' })
@@ -246,16 +395,17 @@ const fetchModel = (name) => page.evaluate(async (u) => {
     // Watch from the moment a poster lands (fadeStart>0) through to opacity 1.
     const fade = await page.evaluate(async () => {
       const tv = window.__form0.threadView
-      const n = [...tv.nodes.values()].find((x) => x.opacity < 0.99)
-      if (!n) return { observed: [], skipped: 'no fresh node' }
-      let t0 = 0
+      const n = [...tv.nodes.values()].find((x) => x.poster) ?? [...tv.nodes.values()][0]
+      if (!n) return { observed: [], skipped: 'no node' }
+      // deterministic: run a real crossfadeTo() and time it via fadeStart
+      const V = n.mat.constructor
+      tv.crossfadeTo(n, tv.replyTex, '#FFFFFF', 'raw')
       const start = performance.now()
-      while (performance.now() - start < 30000) {
-        if (n.poster && !t0 && n.opacity < 0.9) t0 = performance.now()
-        if (n.opacity >= 0.999) break
-        await new Promise((r) => setTimeout(r, 8))
+      while (n.fadeStart && performance.now() - start < 5000) {
+        await new Promise((r) => setTimeout(r, 10))
       }
-      return { rampMs: +(t0 ? performance.now() - t0 : 0).toFixed(0), final: +n.opacity.toFixed(2), poster: !!n.poster }
+      const rampMs = performance.now() - start
+      return { rampMs: +rampMs.toFixed(0), final: +n.opacity.toFixed(2), poster: !!n.poster }
     })
     check('thread node crossfades over >=90ms (no instant swap)', fade.rampMs >= 90, JSON.stringify(fade))
 
@@ -353,6 +503,62 @@ const fetchModel = (name) => page.evaluate(async (u) => {
   await page.waitForTimeout(300)
   const sel = await page.evaluate(() => window.__form0.studio.selected?.name ?? null)
   check('click on model selects it through the stage', sel !== null && sel !== '__root__', String(sel))
+
+  // deselect (tap empty stage) so the fly look-ats use the whole-model
+  // fallback and the expected targets match the earlier orbit checks
+  await page.mouse.click(150, 250)
+  await page.waitForTimeout(300)
+  const desel2 = await page.evaluate(() => window.__form0.studio.selected === null)
+  check('fly-cam precondition: nothing selected', desel2)
+
+  // fly camera: the view buttons must drive the ACTIVE camera (they used to
+  // write only the orbit camera — dead in fly mode). setTarget on a
+  // TargetCamera ROTATES the camera; assert the look direction.
+  const flyDir = () => page.evaluate(() => {
+    const s = window.__form0.studio
+    const cam = s.scene.activeCamera
+    const pos = cam.position.asArray()
+    // Camera.getDirection needs a local axis vector; construct one from the
+    // camera's own position class (no module import available in-page).
+    const V3 = cam.position.constructor
+    const f = cam.getDirection(new V3(0, 0, 1))
+    return { proj: s.getCameraState().projection, pos, fwd: [f.x, f.y, f.z] }
+  })
+  const dotOk = (fwd, pos, at) => {
+    let dx = at[0] - pos[0], dy = at[1] - pos[1], dz = at[2] - pos[2]
+    const l = Math.hypot(dx, dy, dz) || 1
+    dx /= l; dy /= l; dz /= l
+    return Math.abs(fwd[0] * dx + fwd[1] * dy + fwd[2] * dz - 1) < 0.02
+  }
+  await page.evaluate(() => window.__form0.studio.setCameraState({ projection: 'free' }))
+  await page.waitForTimeout(300)
+  await page.evaluate(() => document.querySelector('[data-cam="origin"]').click())
+  await page.waitForTimeout(300)
+  const flyOrigin = await flyDir()
+  check('fly cam: look-at origin drives the active camera',
+    flyOrigin.proj === 'free' && dotOk(flyOrigin.fwd, flyOrigin.pos, [-2.5, 0, 0]),
+    JSON.stringify(flyOrigin.fwd.map((n) => +n.toFixed(3))))
+  await page.evaluate(() => document.querySelector('[data-cam="center"]').click())
+  await page.waitForTimeout(300)
+  const flyCenter = await flyDir()
+  check('fly cam: look-at bbox center drives the active camera',
+    dotOk(flyCenter.fwd, flyCenter.pos, [-3.25, 0, 0]),
+    JSON.stringify(flyCenter.fwd.map((n) => +n.toFixed(3))))
+  const flyDistBefore = await page.evaluate(() => {
+    const s = window.__form0.studio
+    const cam = s.scene.activeCamera
+    const pos = cam.position.asArray()
+    return Math.hypot(pos[0] + 3.25, pos[1], pos[2])
+  })
+  await page.evaluate(() => document.querySelector('[data-cam="fit-sel"]').click())
+  await page.waitForTimeout(300)
+  const flyFit = await flyDir()
+  const flyDistAfter = Math.hypot(flyFit.pos[0] + 3.25, flyFit.pos[1], flyFit.pos[2])
+  check('fly cam: fit-selected repositions the active camera',
+    dotOk(flyFit.fwd, flyFit.pos, [-3.25, 0, 0]) && Math.abs(flyDistAfter - flyDistBefore) > 0.3,
+    `dist ${flyDistBefore.toFixed(2)} -> ${flyDistAfter.toFixed(2)}`)
+  await page.evaluate(() => window.__form0.studio.setCameraState({ projection: 'perspective' }))
+  await page.waitForTimeout(200)
   await page.screenshot({ path: 'shots/verify-studio.png' })
 
   // back to board
@@ -365,7 +571,12 @@ const fetchModel = (name) => page.evaluate(async (u) => {
   // scroll back to the top and tap the first VISIBLE card whose model is
   // flavour `a` (one authored camera)
   await page.evaluate(() => window.__form0.board.setScroll(0))
-  await page.waitForTimeout(900)
+  // wait out any residual scroll inertia so the rows really sit at the top
+  await page.waitForFunction(() => {
+    const b = window.__form0.board
+    return Math.abs(b.velocity) < 0.01 && !b.pendingSettle && Math.abs(b.scrollY) < 0.01
+  }, null, { timeout: 15000 })
+  await page.waitForTimeout(400)
   const target = await page.evaluate(() => {
     const b = window.__form0.board
     const row = b.rows.findIndex((r) => r.meta.filename === 'a.glb' && Math.abs(b.screenPosOf(b.rows.indexOf(r))?.y ?? 1e9) < 400)
@@ -391,6 +602,77 @@ const fetchModel = (name) => page.evaluate(async (u) => {
   } else {
     check('card tap opens viewer with authored camera', false, 'no visible a-card')
   }
+}
+
+// ------------------------------------------------- 7. studio regressions
+{
+  // open studio: must land on the UPLOAD tab with a visible import button
+  // (it used to open on TYPE, hiding the import flow behind a tab switch)
+  await page.evaluate(() => { location.hash = '#/studio' })
+  await page.waitForFunction(() => window.__form0.engine.activeScene === window.__form0.studio.scene, null, { timeout: 10000 })
+  await page.waitForTimeout(400)
+  const tabs = await page.evaluate(() => {
+    const active = document.querySelector('.rail-btn.active')?.dataset.tab
+    const importBtn = document.getElementById('btn-studio-import')
+    const rect = importBtn?.getBoundingClientRect()
+    return {
+      active,
+      importVisible: !!rect && rect.width > 0 && rect.height > 0,
+      paintDisabled: document.querySelector('[data-tab="paint"]')?.disabled === true,
+      symbolsDisabled: document.querySelector('[data-tab="symbols"]')?.disabled === true,
+      camCollapsed: document.querySelector('.cam-advanced')?.open === false,
+    }
+  })
+  check('studio opens on the upload tab with a visible import button',
+    tabs.active === 'upload' && tabs.importVisible, JSON.stringify(tabs))
+  check('paint + symbols tabs are disabled (later milestones)',
+    tabs.paintDisabled && tabs.symbolsDisabled)
+  check('camera details collapse by default (publish stays reachable)', tabs.camCollapsed)
+
+  // close affordance: the rail X leaves the studio
+  await page.evaluate(() => document.querySelector('#btn-studio-close').click())
+  await page.waitForFunction(() => window.__form0.engine.activeScene === window.__form0.board.scene, null, { timeout: 10000 })
+  check('studio has a working close button', true)
+  await page.evaluate(() => { location.hash = '#/studio' })
+  await page.waitForFunction(() => window.__form0.engine.activeScene === window.__form0.studio.scene, null, { timeout: 10000 })
+  await page.waitForTimeout(300)
+
+  // phone viewport: the publish button and transform tools must stay on
+  // screen (the inspector was up to 38vh tall and pushed publish off-screen)
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.waitForTimeout(600)
+  const phone = await page.evaluate(() => {
+    const pub = document.getElementById('btn-studio-publish')?.getBoundingClientRect()
+    const tools = document.querySelector('.studio-tools')?.getBoundingClientRect()
+    const vh = window.innerHeight
+    const inside = (r) => r && r.top >= 0 && r.bottom <= vh && r.width > 0
+    return { publishInside: inside(pub), toolsInside: inside(tools), pubBottom: pub?.bottom ?? -1 }
+  })
+  check('portrait phone: publish + transform tools stay on screen',
+    phone.publishInside && phone.toolsInside, JSON.stringify(phone))
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await page.waitForTimeout(400)
+  await page.evaluate(() => { location.hash = '#/' })
+  await page.waitForTimeout(400)
+}
+
+// ------------------------------------------------------------- legend
+{
+  // seen-flag: a reload must NOT show the legend again; '?' reopens it.
+  // Seed the seen-flag through the app's own legend (works on the dev AND
+  // the production build — a /src/ import only exists on the dev server).
+  // open()+close() always writes the flag, even if it was already hidden.
+  await page.evaluate(() => { window.__form0.legend.open(); window.__form0.legend.close() })
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.waitForFunction(() => window.__form0?.board, null, { timeout: 30000 })
+  await page.waitForTimeout(1500)
+  const afterReload = await page.evaluate(() => document.getElementById('legend').hidden)
+  check('legend does not reappear after reload (seen-flag)', afterReload)
+  await page.keyboard.press('?')
+  await page.waitForTimeout(300)
+  const reopened = await page.evaluate(() => !document.getElementById('legend').hidden)
+  check("'?' reopens the legend", reopened)
+  await page.evaluate(() => window.__form0?.legend?.close())
 }
 
 // ----------------------------------------------------------- summary

@@ -8,7 +8,10 @@ import { PosterRenderer, POSTER_W, POSTER_H, type Footprint } from '../model/pos
 
 // Bump when the poster pipeline changes visually (framing, transparency…):
 // cached PNGs from an older pipeline must not be reused.
-const POSTER_CACHE_V = 'p3:'
+// Bump when the poster pipeline changes visually (framing, transparency…):
+// cached PNGs from an older pipeline must not be reused. p4 = posters now
+// render from the model's authored camera instead of always auto-fit.
+const POSTER_CACHE_V = 'p4:'
 
 const MAX_POSTER_CONCURRENT = 3 // concurrent downloads; the shared render scene serializes renders internally
 const AUTO_POSTER_MAX_BYTES = 8 * 1024 * 1024
@@ -45,11 +48,14 @@ export class AssetCache {
   }
 
   /** Shared bytes + content hash + camera hint for a post (preview pool). */
-  async getModelBytesByPostId(postId: string): Promise<{ bytes: Uint8Array; sha256: string; previewCamera?: number } | undefined> {
+  async getModelBytesByPostId(postId: string): Promise<{ bytes: Uint8Array; sha256: string; cameraIndex?: number } | undefined> {
     const meta = this.byPostId.get(postId)
     if (!meta) return undefined
     const bytes = await this.getModelBytes(meta)
-    return bytes ? { bytes, sha256: meta.sha256, previewCamera: meta.previewCamera } : undefined
+    // v3 `preview-camera` index: the live preview must use the camera the
+    // author picked, not blindly camera 0. (The field is named cameraIndex
+    // here to match PreviewModel — it IS meta.previewCamera.)
+    return bytes ? { bytes, sha256: meta.sha256, cameraIndex: meta.previewCamera } : undefined
   }
 
   /**

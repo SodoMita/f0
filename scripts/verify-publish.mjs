@@ -1,11 +1,13 @@
-// Publish round-trip against the offline rig: studio export -> poster ->
-// Blossom PUT /upload -> relay publish -> live feed event -> SHA-verified
-// re-download -> delete (kind-5 tombstone). The rig's relay speaks NIP-20 OK
-// and live-pushes new events to matching subscriptions.
+// Publish round-trip against the offline rig, driven through the REAL UI so
+// it runs identically on the dev server AND the production preview build
+// (no /src/ module imports — those only exist on the dev server):
+// studio text -> publish button -> Blossom PUT /upload -> relay publish ->
+// live feed event -> SHA-verified re-download -> kind-5 delete -> tombstone.
 //
 //   node scripts/offline-rig.mjs   + dev/preview server, then:
 //   node scripts/verify-publish.mjs
 import { chromium } from 'playwright'
+import { request } from 'node:https'
 
 const URL = process.env.TARGET_URL || 'http://localhost:4173/'
 const browser = await chromium.launch({
@@ -28,85 +30,90 @@ const check = (name, ok, detail = '') => {
   if (!ok) fails.push(name)
 }
 
+/** POST /__reset on the rig relay (Node-side; the page cannot pre-reset). */
+function resetRig() {
+  return new Promise((resolve, reject) => {
+    const req = request({
+      host: 'localhost', port: 8443, path: '/__reset', method: 'POST',
+      rejectUnauthorized: false, timeout: 5000,
+    }, (res) => { res.resume(); res.on('end', () => resolve()) })
+    req.on('error', (e) => reject(new Error('rig reset failed: ' + e.message)))
+    req.on('timeout', () => { req.destroy(); reject(new Error('rig reset timeout')) })
+    req.end()
+  })
+}
+
+// reset the rig relay to the seed feed BEFORE the page ingests anything
+await resetRig()
 await page.goto(URL, { waitUntil: 'domcontentloaded', timeout: 45000 })
 await page.waitForFunction(() => window.__form0?.board, null, { timeout: 30000 })
 await page.evaluate(() => window.__form0?.legend?.close()).catch(() => {})
 await page.waitForFunction(() => window.__form0.index.byId.size >= 52, null, { timeout: 30000 })
+// NOTE: resetRig() runs BEFORE goto (the page must never see earlier
+// publishes; a mid-run reset cannot remove them from the app's index).
 
 // ------------------------------------------------- publish a text model
 {
   await page.evaluate(() => { location.hash = '#/studio' })
   await page.waitForFunction(() => window.__form0.engine.activeScene === window.__form0.studio.scene, null, { timeout: 10000 })
+  // the studio opens on the UPLOAD tab with EMPTY text (by design since the
+  // upload-tab regression fix) — switch to the type tab, which seeds '/0'
+  await page.evaluate(() => document.querySelector('[data-tab="type"]').click())
   await page.waitForFunction(() => window.__form0.studio.hasContent(), null, { timeout: 20000 })
 
-  const published = await page.evaluate(async () => {
+  // point the app's blossom client at the rig's upload endpoint
+  await page.evaluate(() => window.__form0.blossoms.setServers(['https://localhost:8443']))
+  const before = await page.evaluate(() => window.__form0.index.byId.size)
+
+  // the REAL publish flow: the studio's publish button (export -> poster ->
+  // blossom -> relays) and the app routes to the new post's viewer
+  await page.evaluate(() => document.querySelector('#btn-studio-publish').click())
+  await page.waitForFunction(() => location.hash.startsWith('#/viewer/'), null, { timeout: 120000 })
+  const published = await page.evaluate((beforeCount) => {
     const f = window.__form0
-    f.blossoms.setServers(['https://localhost:8443'])
-    const content = await f.studio.getContentForPublish()
-    const poster = await f.assets.renderPosterFor(content.blob, f.studio.tintColor)
-    const { publishModel } = await import('/src/protocol/publish.ts')
-    const result = await publishModel(
-      {
-        model: content.blob,
-        poster: poster.blob,
-        tint: f.studio.tintColor,
-        filename: content.filename,
-        sourceFormat: content.sourceFormat,
-        role: 'root',
-      },
-      { relays: ['wss://localhost:8443'], blossoms: ['https://localhost:8443'], pool: f.pool },
-    )
-    return { eventId: result.eventId, ok: result.ok.length, failed: result.failed.length, posterBlank: poster.blank }
-  })
-  check('publish resolves with event id', !!published.eventId, published.eventId?.slice(0, 8))
-  check('relay accepted the event (NIP-20 OK)', published.ok === 1 && published.failed === 0,
-    `ok=${published.ok} failed=${published.failed}`)
-  check('publish poster is not blank', !published.posterBlank)
+    const newest = [...f.index.byId.values()].filter((m) => m.role === 'root')
+      .sort((a, b) => b.createdAt - a.createdAt)[0]
+    return {
+      grew: f.index.byId.size > beforeCount,
+      eventId: newest?.eventId,
+      urls: newest?.urls,
+      thumb: newest?.thumbUrl,
+      size: newest?.size,
+      sha: newest?.sha256,
+      filename: newest?.filename,
+    }
+  }, before)
+  check('publish button completes and routes to the new post', !!published.eventId && published.grew,
+    published.eventId?.slice(0, 8))
+  check('event advertises a localhost replica + thumb',
+    (published.urls ?? []).every((u) => u.startsWith('https://localhost:8443/')) && !!published.thumb,
+    JSON.stringify({ urls: published.urls, thumb: published.thumb }))
 
-  // live relay push -> the event lands in the app's feed without resubscribe
-  await page.waitForFunction((id) => window.__form0.index.byId.has(id), published.eventId, { timeout: 30000 })
-  const meta = await page.evaluate((id) => {
-    const m = window.__form0.index.byId.get(id)
-    return { urls: m?.urls, thumb: m?.thumbUrl, size: m?.size, sha: m?.sha256, role: m?.role }
-  }, published.eventId)
-  check('published event appears in the live feed', !!meta.sha,
-    JSON.stringify(meta && { urls: meta.urls, thumb: meta.thumb }))
-  check('event advertises a localhost replica + thumb', (meta.urls ?? []).every((u) => u.startsWith('https://localhost:8443/')) && !!meta.thumb,
-    JSON.stringify({ urls: meta.urls, thumb: meta.thumb }))
-
-  // SHA-verified re-download of the published model through the blossom client
+  // SHA-verified re-download of the published model via the app's client
   const roundtrip = await page.evaluate(async (m) => {
     const f = window.__form0
     f.blossoms.setServers(['https://localhost:8443'])
     const blob = await f.blossoms.download(m.urls, m.sha, m.size)
     if (!blob) return { ok: false, reason: 'download failed' }
     const bytes = new Uint8Array(await blob.arrayBuffer())
-    const { sha256Hex } = await import('/src/protocol/blossom.ts')
-    const got = await sha256Hex(bytes)
+    const digest = await crypto.subtle.digest('SHA-256', bytes)
+    const got = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('')
     return { ok: got === m.sha, size: bytes.length, expected: m.size }
-  }, meta)
-  check('published model re-downloads byte-for-byte (SHA-256)', roundtrip.ok && roundtrip.size === roundtrip.expected,
-    JSON.stringify(roundtrip))
+  }, published)
+  check('published model re-downloads byte-for-byte (SHA-256)',
+    roundtrip.ok && roundtrip.size === roundtrip.expected, JSON.stringify(roundtrip))
 
-  // delete it (kind-5) — the rig accepts EVENT; the tombstone must then
-  // arrive back through the app's own kind-5 subscription (NIP-09 author
-  // check included) and hide the post without any local shortcut.
-  const del = await page.evaluate(async (id) => {
-    const { DeletionService } = await import('/src/protocol/deletion.ts')
-    const d = new DeletionService(window.__form0.pool)
-    await d.refresh()
-    if (!d.canDelete(id)) return { ok: 0, failed: 1, reason: 'not owned' }
-    const res = await d.delete(id)
-    return { ok: res.ok.length, failed: res.failed.length }
-  }, published.eventId)
-  check('deletion publishes a kind-5 tombstone', del.ok === 1, JSON.stringify(del))
+  // delete via the REAL viewer delete button + error-sheet confirmation
+  await page.waitForFunction(() => !document.getElementById('btn-delete').closest('#vbtn-delete').hidden
+    || !document.getElementById('vbtn-delete').hidden, null, { timeout: 30000 })
+  await page.evaluate(() => document.querySelector('#btn-delete').click())
+  await page.waitForFunction(() => !document.getElementById('error-sheet').hidden, null, { timeout: 10000 })
+  await page.evaluate(() => document.querySelector('#btn-error-action').click())
   const hidden = await page.waitForFunction((id) => {
     const m = window.__form0.index.byId.get(id)
     return m?.tombstoned === true
-  }, published.eventId, { timeout: 20000 }).then(() => true).catch(() => false)
-  check('tombstone arrives live and hides the post', hidden)
-  await page.evaluate(() => { location.hash = '#/' })
-  await page.waitForTimeout(600)
+  }, published.eventId, { timeout: 30000 }).then(() => true).catch(() => false)
+  check('kind-5 delete hides the post (live tombstone)', hidden)
 }
 
 // --------------------------- publish an imported camera model (bug 1 path)

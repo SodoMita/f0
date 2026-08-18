@@ -5,6 +5,31 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 
+- [x] **Bugfix round 2 — audit + REGRESSIONS.txt, all verified headlessly**
+      (agent arena, 2026-08-18, SPEC AMENDMENT 49, docs/SANDBOX-VERIFY.md):
+      - THE live-preview root cause found and fixed: the pool never called
+        `container.addAllToScene()` — live RTTs had been blank forever
+        (pixel-verified now: live slots show the model).
+      - `preview-camera` plumbing actually wired (assets -> pool field),
+        pixel check: preview-camera=1 animates GREEN not red.
+      - Authored-camera slot copy force-recomputes the parent chain (the
+        800-unit slot offset was missing from the camera pose).
+      - Real two-texture crossfade (shader blends tex/tex2) + the blend
+        uniform now resets on completion (all-white-card regression).
+      - POSTER_CACHE_V p4, blank-authored-camera -> auto-fit fallback,
+        cancellable pending loads, pool prune on thread detach, studio
+        look-at/fit drive the ACTIVE camera, publish waits for the relay
+        echo before routing (delete button arm race), and the whole
+        REGRESSIONS.txt UI list (upload tab, close X, toolbar in the
+        inspector foot, collapsed camera panel, disabled paint/symbols,
+        SVG rail glyphs, 22vh portrait inspector, consolidated studio CSS,
+        aspect-aware viewer spotlight).
+      - Verification: 39 offline-verify checks + 11 publish checks green on
+        the dev AND the production preview builds; orient/interact/
+        settings/smoke/features/pages/shaders/facing/memcheck green. The
+        rig now resets its feed per run, proxies gzip HTML correctly, and
+        injects the relay hook CSP-aware (inline for the standalone CSP).
+
 - [x] **Feed/tree/studio bugfix round** (agent arena, 2026-08-18, SPEC
       AMENDMENT 48):
       - Posters and live previews render from the model's authored camera

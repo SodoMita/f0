@@ -15,7 +15,8 @@ import type { AssetCache } from '../core/assets'
 import type { ThreadIndex, ThreadMeta } from '../protocol/thread-index'
 import { PreviewPool } from './previewPool'
 import {
-  makeCardMaterial, setCardTexture, setCardTint, setCardWhite, setCardFlip, setCardOpacity,
+  makeCardMaterial, setCardTexture, setCardTexture2, setCardTint, setCardTint2, setCardWhite,
+  setCardFlip, setCardOpacity, setCardBlend, type CardTextureKind,
 } from './cardMaterial'
 import type { ShaderMaterial } from '@babylonjs/core/Materials/shaderMaterial'
 import { flatCamera, makeBackdropTexture, paintBackdrop, makeSpinnerTexture, roundRect, luminance, shade } from '../core/gfx'
@@ -41,12 +42,20 @@ interface TNode {
   w: number
   h: number
   depth: number
-  // 120ms crossfade plate -> poster -> live (SPEC CARD "Crossfade 120ms"):
-  // hard swaps made loading nodes FLASH black while the map built.
+  // 120ms two-texture crossfade plate -> poster -> live (SPEC CARD
+  // "Crossfade 120ms"): the shader mixes tex/tex2 by `blend`, so node
+  // transitions are real crossfades — hard swaps were the black-flicker
+  // regression while the map built.
   opacity: number
   fadeFrom: number
   fadeTo: number
   fadeStart: number
+  blend: number
+  fadeFromBlend: number
+  fadeToBlend: number
+  fadeTex2: TextureT | null
+  fadeTint2Hex: string
+  fadeFlip: CardTextureKind
 }
 
 interface TEdge { parent: string; child: string }
@@ -131,10 +140,7 @@ export class ThreadView {
       if (!n || n.mesh.isDisposed()) return
       n.live = rtt
       n.spinner.setEnabled(false)
-      setCardTexture(n.mat, rtt)
-      setCardWhite(n.mat)
-      this.fadeTo(n, 1)
-      setCardFlip(n.mat, 'rtt')
+      this.crossfadeTo(n, rtt, '#FFFFFF', 'rtt')
       this.form.kick()
     }
     this.previewPool.onRelease = (postId) => {
@@ -229,18 +235,50 @@ export class ThreadView {
     }
   }
 
-  /** Set node card opacity right now (rebinding/teardown paths). */
+  /** Snap the node to its current crossfade target (mid-fade interrupt). */
+  private finishNodeFade(n: TNode): void {
+    n.fadeStart = 0
+    n.opacity = n.fadeTo
+    setCardOpacity(n.mat, n.opacity)
+    n.blend = 0
+    // reset the material uniform too (same all-white regression as the board)
+    setCardBlend(n.mat, 0)
+    if (n.fadeTex2) {
+      setCardTexture(n.mat, n.fadeTex2)
+      setCardTint(n.mat, n.fadeTint2Hex)
+      setCardTexture2(n.mat, null)
+      setCardTint2(n.mat, '#FFFFFF')
+      setCardFlip(n.mat, n.fadeFlip)
+      n.fadeTex2 = null
+    }
+  }
+
+  /** Set node card state right now, dropping any in-flight crossfade. */
   private setNodeOpacityNow(n: TNode, v: number): void {
     n.opacity = v
     n.fadeStart = 0
+    n.blend = 0
+    setCardBlend(n.mat, 0)
+    if (n.fadeTex2) {
+      setCardTexture2(n.mat, null)
+      setCardTint2(n.mat, '#FFFFFF')
+      n.fadeTex2 = null
+    }
     setCardOpacity(n.mat, v)
   }
 
-  /** Ramp node card opacity to v over 120ms (content arriving — never flash). */
-  private fadeTo(n: TNode, v: number): void {
-    if (n.fadeStart === 0 && n.opacity === v) return
+  /** Crossfade the node to a NEW texture over 120ms (SPEC CARD crossfade). */
+  private crossfadeTo(n: TNode, tex2: TextureT | null, tint2Hex: string, flip: CardTextureKind, toOpacity = 1): void {
+    if (n.fadeStart) this.finishNodeFade(n)
+    setCardTexture2(n.mat, tex2)
+    setCardTint2(n.mat, tint2Hex)
+    n.fadeTex2 = tex2
+    n.fadeTint2Hex = tint2Hex
+    n.fadeFlip = flip
     n.fadeFrom = n.opacity
-    n.fadeTo = v
+    n.fadeTo = toOpacity
+    n.fadeFromBlend = 0
+    n.fadeToBlend = 1
     n.fadeStart = performance.now()
     this.form.kick()
   }
@@ -248,15 +286,17 @@ export class ThreadView {
   /** Show the node's poster texture (fallback after its live preview is released). */
   private showNodePoster(n: TNode): void {
     if (n.poster) {
-      setCardTexture(n.mat, n.poster)
-      setCardWhite(n.mat)
-      this.fadeTo(n, 1)
-      setCardFlip(n.mat, 'raw')
+      this.crossfadeTo(n, n.poster, '#FFFFFF', 'raw')
     } else {
       setCardTexture(n.mat, null)
       setCardTint(n.mat, n.meta.tint || theme.panel)
-      this.fadeTo(n, 0.16)
       setCardFlip(n.mat, 'raw')
+      n.fadeFrom = n.opacity
+      n.fadeTo = 0.16
+      n.fadeFromBlend = 0
+      n.fadeToBlend = 0
+      n.fadeStart = performance.now()
+      this.form.kick()
     }
   }
 
@@ -374,7 +414,9 @@ export class ThreadView {
             const t = Math.min(1, (now - n.fadeStart) / 120)
             n.opacity = n.fadeFrom + (n.fadeTo - n.fadeFrom) * t
             setCardOpacity(n.mat, n.opacity)
-            if (t >= 1) { n.opacity = n.fadeTo; n.fadeStart = 0 }
+            n.blend = n.fadeFromBlend + (n.fadeToBlend - n.fadeFromBlend) * t
+            setCardBlend(n.mat, n.blend)
+            if (t >= 1) this.finishNodeFade(n)
           }
         }
         this.syncPreviews()
@@ -444,6 +486,7 @@ export class ThreadView {
         meta, mesh, mat, frame, frameMat, spinner, spinnerMat, reply, replyMat,
         poster: null, live: null, x: p.x, y: p.y, w, h, depth: p.depth,
         opacity: 0.16, fadeFrom: 0.16, fadeTo: 0.16, fadeStart: 0,
+        blend: 0, fadeFromBlend: 0, fadeToBlend: 1, fadeTex2: null, fadeTint2Hex: '#FFFFFF', fadeFlip: 'raw',
       }
       this.setNodeOpacityNow(node, 0.16)
       const gen = this.generation
@@ -451,9 +494,7 @@ export class ThreadView {
         // the map may have been cleared/reopened while the poster rendered
         if (!tex || gen !== this.generation || mesh.isDisposed()) return
         node.poster = tex
-        setCardTexture(mat, tex)
-        setCardWhite(mat)
-        this.fadeTo(node, 1)
+        this.crossfadeTo(node, tex, '#FFFFFF', 'raw')
         spinner.setEnabled(false)
         this.syncPreviews()
         this.form.kick()
@@ -652,6 +693,11 @@ export class ThreadView {
   }
 
   detach(): void {
+    // Leaving the thread route: stop the live node previews AND dispose
+    // their idle RTTs (the pool is capped by the shared livePreviews
+    // budget; its slots are re-created lazily when the map reopens).
+    this.previewPool.releaseAll()
+    this.previewPool.prune()
     const canvas = this.canvas
     if (!canvas) { this.attached = false; return }
     canvas.removeEventListener('pointerdown', this.onDown)

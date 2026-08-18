@@ -162,6 +162,9 @@ check('editing a setting switches the preset to Custom', custom === 'custom', St
 
 // ------------------------------------------------------------ persistence
 await set({ volMusic: 33, fov: 71 })
+// set() persists fire-and-forget (void put); give IndexedDB a beat so the
+// reload cannot race the write (that flaked on the fast production build)
+await page.waitForTimeout(500)
 await page.reload({ waitUntil: 'domcontentloaded' })
 await page.waitForFunction(() => window.__form0?.settings, { timeout: 30000 })
 await page.waitForTimeout(1500)

@@ -20,6 +20,8 @@
 //      carries preview-camera=1 — poster uses cam0 (red), live preview
 //      must use cam1 (green).
 //   e  camera, NOT animated — poster from camera; feed must STATIC-reject.
+//   f  camera that frames NOTHING — poster must fall back to auto-fit
+//      (blank authored camera), never to the publish placeholder.
 //   x  animated text-ish wordmark (flat planes) for extra churn volume.
 //
 // The feed: 48 roots cycling those flavours + a reply tree on root #1
@@ -31,6 +33,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { createHash } from 'node:crypto'
+import zlib from 'node:zlib'
 import { WebSocketServer } from 'ws'
 import { finalizeEvent, generateSecretKey } from 'nostr-tools'
 
@@ -40,7 +43,17 @@ const CERT = readFileSync('/tmp/rig-certs/cert.pem')
 const RELAY_PORT = 8443
 const PROXY_PORT = 4173
 // Upstream dev/preview server (5173 = vite dev; 5174 = production preview).
+// The env var is PARSED, not just printed: the proxy and the HMR upgrade
+// below must follow it, or VITE_UPSTREAM=http://localhost:5174 silently
+// talks to the dev server on 5173 (that mismatch invalidated a whole
+// verification pass once).
 const VITE = process.env.VITE_UPSTREAM || 'http://localhost:5173'
+const UPSTREAM = (() => {
+  try {
+    const u = new URL(VITE)
+    return { host: u.hostname, port: Number(u.port || (u.protocol === 'https:' ? 443 : 80)) }
+  } catch { return { host: 'localhost', port: 5173 } }
+})()
 
 // ------------------------------------------------------------------ GLB
 
@@ -201,6 +214,15 @@ function makeModel(flavour) {
     const q0 = quatLookNegZ(sub([0, 0, 0], [-1.5, 0.5, 2.5]))
     nodes.push({ camera: 0, name: 'cam0', translation: [-1.5, 0.5, 2.5], rotation: q0 })
   }
+  if (flavour === 'f') {
+    // f = a camera that frames NOTHING: parked far away, tiny fov, looking
+    // away from the model. The poster must fall back to auto-fit instead of
+    // going blank -> publish placeholder.
+    cameras.push({ name: 'cam-void', type: 'perspective', perspective: { yfov: 0.05, znear: 0.01, zfar: 100 } })
+    const away = norm([1, 1, 1])
+    const qf = quatLookNegZ(away)
+    nodes.push({ camera: 0, name: 'cam0', translation: [40, 40, 40], rotation: qf })
+  }
   if (flavour === 'd') {
     cameras.push(camGreen)
     const gx = 14
@@ -227,7 +249,7 @@ const align4 = (n) => (n + 3) & ~3
 
 // ------------------------------------------------------------------ feed
 
-const FLAVOURS = ['a', 'a', 'a', 'a', 'c', 'c', 'b', 'b', 'd', 'd', 'e', 'x']
+const FLAVOURS = ['a', 'a', 'a', 'a', 'c', 'c', 'b', 'b', 'd', 'd', 'e', 'x', 'f']
 const N_ROOTS = 48
 const models = new Map() // name -> { bytes, sha }
 const events = [] // wire events
@@ -265,6 +287,7 @@ for (let i = 0; i < N_ROOTS; i++) {
   if (['a', 'e'].includes(flavour)) tags.push(['cameras', '1'])
   if (flavour === 'd') tags.push(['cameras', '2'], ['preview-camera', '1'])
   if (['a', 'c', 'd', 'x'].includes(flavour)) tags.push(['anim', '1'])
+  if (flavour === 'f') tags.push(['cameras', '1'])
   events.push(makeEvent(1063, tags, i))
 }
 
@@ -317,16 +340,29 @@ const RIG_HOOK = `(() => {
 // Blossom-style upload store: sha256 -> bytes (PUT /upload, GET /<sha>)
 const uploads = new Map()
 
+// The seed feed, captured once: POST /__reset restores it so the verify
+// suites can run repeatedly without earlier publishes polluting the feed.
+const SEED_EVENTS = [...events]
+
 const httpsServer = createHttps({ key: KEY, cert: CERT }, (req, res) => {
+  req.on('error', () => {})
+  res.on('error', () => {})
   const url = new URL(req.url, `https://localhost:${RELAY_PORT}`)
   const cors = {
     'access-control-allow-origin': '*',
-    'access-control-allow-methods': 'GET, PUT, OPTIONS',
+    'access-control-allow-methods': 'GET, PUT, POST, OPTIONS',
     'access-control-allow-headers': 'Authorization, Content-Type',
   }
   if (req.method === 'OPTIONS') {
     res.writeHead(204, cors)
     res.end()
+    return
+  }
+  if (req.method === 'POST' && url.pathname === '/__reset') {
+    events.length = 0
+    events.push(...SEED_EVENTS)
+    res.writeHead(200, { 'content-type': 'application/json', ...cors })
+    res.end(JSON.stringify({ events: events.length }))
     return
   }
   if (req.method === 'PUT' && url.pathname === '/upload') {
@@ -428,20 +464,44 @@ httpsServer.listen(RELAY_PORT, () => {
 
 // ------------------------------------------------------------------ proxy
 const proxy = createHttp((req, res) => {
+  // the browser aborts requests all the time (navigations, viewport
+  // changes) — without error handlers those aborts crash the whole rig
+  req.on('error', () => {})
+  res.on('error', () => {})
   if (req.url === '/__rig.js') {
     res.writeHead(200, { 'content-type': 'application/javascript', 'cache-control': 'no-store' })
     res.end(RIG_HOOK)
     return
   }
-  const upstream = httpRequest({ host: 'localhost', port: 5173, path: req.url, method: req.method, headers: req.headers }, (up) => {
+  const upstream = httpRequest({ host: UPSTREAM.host, port: UPSTREAM.port, path: req.url, method: req.method, headers: req.headers }, (up) => {
     const ct = String(up.headers['content-type'] || '')
     if (ct.includes('text/html')) {
       const chunks = []
       up.on('data', (c) => chunks.push(c))
       up.on('end', () => {
-        let body = Buffer.concat(chunks).toString('utf8')
-        body = body.replace('</head>', '<script src="/__rig.js"></script></head>')
-        res.writeHead(up.statusCode, { ...up.headers, 'content-length': Buffer.byteLength(body) })
+        // vite preview gzips the HTML; the dev server does not. Decompress
+        // before injecting — stringifying gzip bytes produced
+        // ERR_CONTENT_DECODING_FAILED in the browser (prod-verify was dead).
+        const headers = { ...up.headers }
+        let bytes = Buffer.concat(chunks)
+        const enc = String(headers['content-encoding'] || '').toLowerCase()
+        if (enc === 'gzip') bytes = zlib.gunzipSync(bytes)
+        else if (enc === 'deflate') bytes = zlib.inflateSync(bytes)
+        else if (enc === 'br') bytes = zlib.brotliDecompressSync(bytes)
+        if (enc) delete headers['content-encoding']
+        let body = bytes.toString('utf8')
+        // Injection must obey the page's OWN CSP: the web build allows only
+        // 'self' scripts (use the external /__rig.js), the standalone build
+        // allows only inline scripts (inline the hook itself). Injecting the
+        // wrong kind makes the browser silently refuse to fetch it and the
+        // relay is never configured.
+        const csp = /<meta[^>]*Content-Security-Policy[^>]*content="([^"]*)"/.exec(body)?.[1] ?? ''
+        if (/script-src[^;]*'unsafe-inline'/.test(csp)) {
+          body = body.replace('</head>', `<script>${RIG_HOOK}</script></head>`)
+        } else {
+          body = body.replace('</head>', '<script src="/__rig.js"></script></head>')
+        }
+        res.writeHead(up.statusCode, { ...headers, 'content-length': Buffer.byteLength(body) })
         res.end(body)
       })
     } else {
@@ -449,12 +509,13 @@ const proxy = createHttp((req, res) => {
       up.pipe(res)
     }
   })
-  upstream.on('error', () => { res.writeHead(502); res.end() })
+  upstream.on('error', () => { try { res.writeHead(502); res.end() } catch { /* client gone */ } })
   req.pipe(upstream)
 })
 proxy.on('upgrade', (req, socket, head) => {
   // vite HMR websocket — forward so the dev client stays quiet
-  const up = httpRequest({ host: 'localhost', port: 5173, path: req.url, headers: req.headers })
+  socket.on('error', () => {})
+  const up = httpRequest({ host: UPSTREAM.host, port: UPSTREAM.port, path: req.url, headers: req.headers })
   up.on('upgrade', (res, upSocket, upHead) => {
     socket.write('HTTP/1.1 101 Switching Protocols\r\n' + Object.entries(res.headers).map(([k, v]) => `${k}: ${v}`).join('\r\n') + '\r\n\r\n')
     if (upHead.length) socket.write(upHead)
@@ -464,5 +525,5 @@ proxy.on('upgrade', (req, socket, head) => {
   up.end()
 })
 proxy.listen(PROXY_PORT, () => {
-  console.log(`[rig] proxy on http://localhost:${PROXY_PORT} -> ${VITE}  (rig hook: /__rig.js)`)
+  console.log(`[rig] proxy on http://localhost:${PROXY_PORT} -> ${UPSTREAM.host}:${UPSTREAM.port}  (rig hook: /__rig.js)`)
 })

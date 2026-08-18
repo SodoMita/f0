@@ -25,7 +25,7 @@
       </button>
       <span id="brand" class="brand">FORM<span class="brand-zero">/0</span></span>
       <div class="spacer"></div>
-      <button id="net-dot" class="net-dot" title="network" aria-label="network"></button>
+      <button id="net-dot" class="net-dot" title="network relays" aria-label="network relays"></button>
       <button id="btn-shuffle" class="hbtn" title="shuffle" aria-label="shuffle">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5h3.6c1.4 0 2.2.7 3 1.8l4.8 7c.8 1.1 1.6 1.8 3 1.8H21"/><path d="M3 17.5h3.6c1.4 0 2.2-.7 3-1.8l1.3-1.9"/><path d="M13.6 8.4l.8-1.1c.8-1.1 1.6-1.8 3-1.8H21"/><path d="M18.4 3.4L21 5.5l-2.6 2.1"/><path d="M18.4 15L21 17.1l-2.6 2.1"/></svg>
       </button>
@@ -41,14 +41,22 @@
     <!-- Studio: tabbed editor with a persistent transform/camera toolbar -->
     <div id="studio" class="hud studio" hidden>
       <aside class="studio-rail">
+        <button class="rail-btn" id="btn-studio-close" title="close studio (Esc)" aria-label="close studio">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12"/><path d="M18 6L6 18"/></svg>
+        </button>
+        <div class="rail-sep-studio"></div>
         <button class="rail-btn active" data-tab="upload" title="upload model" aria-label="upload">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4"/><path d="M7 9l5-5 5 5"/><path d="M5 16v3a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3"/></svg>
         </button>
-        <button class="rail-btn" data-tab="type" title="text" aria-label="text">T</button>
-        <button class="rail-btn" data-tab="paint" title="paint" aria-label="paint">
+        <button class="rail-btn" data-tab="type" title="text" aria-label="text">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14"/><path d="M12 5v14"/></svg>
+        </button>
+        <!-- paint/symbols are later milestones (SPEC AMEND 10): disabled,
+             never a clickable-but-dead tab -->
+        <button class="rail-btn" data-tab="paint" title="paint editor — later milestone" aria-label="paint (not yet available)" disabled>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17l5-5 6 6-5 5z"/><path d="M14 7l3-3 3 3-3 3z"/></svg>
         </button>
-        <button class="rail-btn" data-tab="symbols" title="symbols" aria-label="symbols">
+        <button class="rail-btn" data-tab="symbols" title="3D symbols — later milestone" aria-label="symbols (not yet available)" disabled>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l10 10-10 10L2 12z"/></svg>
         </button>
       </aside>
@@ -59,15 +67,6 @@
           <div class="spacer"></div>
           <span id="studio-status" class="studio-status"></span>
           <button id="btn-studio-fold" class="hbtn small" title="fold inspector" aria-label="fold">▾</button>
-        </div>
-        <!-- Persistent tools: move/rotate/scale/delete/free-cam. Available
-             for BOTH imported models and text, regardless of the active tab. -->
-        <div class="studio-tools" role="toolbar" aria-label="transform">
-          <button class="tool-btn active" data-xform="position" title="move (W)">W</button>
-          <button class="tool-btn" data-xform="rotation" title="rotate (E)">E</button>
-          <button class="tool-btn" data-xform="scale" title="scale (R)">R</button>
-          <button class="tool-btn" id="tool-delete" title="delete (Del)">⌫</button>
-          <button class="tool-btn" id="tool-freecam" title="free camera">fly</button>
         </div>
         <button id="studio-fold-handle" class="fold-handle" title="toggle inspector" aria-label="toggle"></button>
       </main>
@@ -109,7 +108,7 @@
           </section>
 
           <!-- Camera settings are GLOBAL to the studio (not tab-specific). -->
-          <details class="cam-advanced" open>
+          <details class="cam-advanced">
             <summary>camera</summary>
             <div class="num-grid cam-grid">
               <label>target X<input id="cam-tx" type="number" step="0.1" value="0" /></label>
@@ -138,6 +137,17 @@
         </div>
 
         <div class="inspector-foot">
+          <!-- Persistent tools: move/rotate/scale/delete/free-cam, available
+               for BOTH imported models and text regardless of the active
+               tab. Lives here (not floating over the canvas) so it can never
+               collide with the stage or the publish button. -->
+          <div class="studio-tools" role="toolbar" aria-label="transform">
+            <button class="tool-btn active" data-xform="position" title="move (W)">W</button>
+            <button class="tool-btn" data-xform="rotation" title="rotate (E)">E</button>
+            <button class="tool-btn" data-xform="scale" title="scale (R)">R</button>
+            <button class="tool-btn" id="tool-delete" title="delete (Del)">⌫</button>
+            <button class="tool-btn" id="tool-freecam" title="free camera">fly</button>
+          </div>
           <button id="btn-studio-publish" class="big-button primary" disabled>publish</button>
         </div>
       </aside>

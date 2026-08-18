@@ -51,13 +51,22 @@ void main() { gl_Position = worldViewProjection * vec4(position, 1.0); vUV = uv;
 const FRAG = `precision highp float;
 varying vec2 vUV;
 uniform sampler2D tex;
+uniform sampler2D tex2;
 uniform vec3 tint;
+uniform vec3 tint2;
 uniform vec2 flip;
 uniform float opacity;
+uniform float blend;
 void main() {
   vec2 uv = vec2(flip.x > 0.5 ? 1.0 - vUV.x : vUV.x, flip.y > 0.5 ? 1.0 - vUV.y : vUV.y);
-  vec4 t = texture2D(tex, uv);
-  gl_FragColor = vec4(t.rgb * tint, t.a * opacity);
+  // Two-texture crossfade (SPEC CARD "Crossfade 120ms"): blend ramps 0..1
+  // between the old and the new texture in the SAME quad, so plate ->
+  // poster -> live preview genuinely crossfade instead of hard-swapping
+  // (hard swaps were the black-flicker regression).
+  vec4 a = texture2D(tex, uv);
+  vec4 b = texture2D(tex2, uv);
+  vec4 t = mix(a, b, blend);
+  gl_FragColor = vec4(t.rgb * mix(tint, tint2, blend), t.a * opacity);
 }`
 
 export type CardTextureKind = 'raw' | 'dyn' | 'rtt'
@@ -85,8 +94,8 @@ export function makeCardMaterial(scene: Scene, blend = true): ShaderMaterial {
   }
   const mat = new ShaderMaterial(blend ? 'card-shader' : 'card-shader-opaque', scene, 'card', {
     attributes: ['position', 'uv'],
-    uniforms: ['worldViewProjection', 'tint', 'flip', 'opacity'],
-    samplers: ['tex'],
+    uniforms: ['worldViewProjection', 'tint', 'tint2', 'flip', 'opacity', 'blend'],
+    samplers: ['tex', 'tex2'],
     // NOTE: `needAlphaBlending` must be passed as an OPTION. Calling
     // `mat.needAlphaBlending()` (as the old code did) is a *getter*, not a
     // setter — the cards were therefore rendered opaque and every model sat
@@ -95,9 +104,12 @@ export function makeCardMaterial(scene: Scene, blend = true): ShaderMaterial {
   })
   mat.backFaceCulling = false
   mat.setTexture('tex', getWhite(scene))
+  mat.setTexture('tex2', getWhite(scene))
   mat.setColor3('tint', Color3.White())
+  mat.setColor3('tint2', Color3.White())
   mat.setVector2('flip', new Vector2(0, 0))
   mat.setFloat('opacity', 1)
+  mat.setFloat('blend', 0)
   return mat
 }
 
@@ -127,6 +139,20 @@ export function setCardWhite(mat: ShaderMaterial): void {
 
 export function setCardOpacity(mat: ShaderMaterial, v: number): void {
   mat.setFloat('opacity', Math.max(0, Math.min(1, v)))
+}
+
+/** Second texture + its tint for the two-texture crossfade. */
+export function setCardTexture2(mat: ShaderMaterial, tex: TextureT | null): void {
+  mat.setTexture('tex2', tex ?? getWhite(mat.getScene()))
+}
+
+export function setCardTint2(mat: ShaderMaterial, hex: string): void {
+  mat.setColor3('tint2', Color3.FromHexString(hex))
+}
+
+/** Crossfade position 0..1 between tex/tint and tex2/tint2. */
+export function setCardBlend(mat: ShaderMaterial, v: number): void {
+  mat.setFloat('blend', Math.max(0, Math.min(1, v)))
 }
 
 /** Sampling orientation for a texture kind (deterministic; see header). */

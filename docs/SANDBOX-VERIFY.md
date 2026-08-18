@@ -234,3 +234,27 @@ work and **`git push` immediately after each commit** — only pushed commits
 survive a reset for certain. Local-only commits are NOT enough: they live in
 the `.git` that the reset discards. Uncommitted working-tree edits survived
 ONCE as a snapshot; do not bet the session on that.
+
+## Round 2: the audit's P0s + REGRESSIONS.txt (2026-08-18)
+
+The re-audit (`docs/AUDIT-01a011f8-f0.md`) + `docs/REGRESSIONS.txt` were
+worked through end to end. The pixel-level harness caught bugs that state
+checks had ratified:
+
+- **Live previews had NEVER rendered** — the pool never called
+  `container.addAllToScene()` (the poster pipeline does; the pool didn't).
+  Every live RTT was transparent; the suite's own "live" state checks were
+  green while pixels were black. Now pixel-verified (the `preview-camera=1`
+  post animates GREEN).
+- The authored-camera slot copy missed the 800-unit slot offset (stale
+  parent-chain world matrices) — camera'd previews filmed empty space.
+- The two-texture crossfade's first version left the blend uniform at ~1
+  (all-white cards); `finishFade` now resets it.
+- Harness notes: pool RTT readback needs warm-up frames + an
+  `_readPixelsAsync` flush before a sync `gl.readPixels` on SwiftShader;
+  the rig proxy must gunzip vite-preview HTML before injecting, and must
+  inject INLINE when the page CSP is the standalone `'unsafe-inline'`
+  policy; the rig relay got `POST /__reset` so repeated suite runs cannot
+  pollute each other's feed; `npm run build` must run AFTER
+  `build:standalone` (both write release/, the preview serves whichever
+  ran last).

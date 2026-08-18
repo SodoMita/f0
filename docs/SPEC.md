@@ -434,3 +434,33 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
       fresh visible set and the board requests live slots only for on-screen
       cards; slot cleanup un-reparents root nodes before
       removeAllFromScene().
+
+49. BUGFIX ROUND 2 (audit + REGRESSIONS, 2026-08-18, all verified headlessly):
+    - THE live-preview root cause: the pool never called
+      `container.addAllToScene()` — every live RTT rendered nothing since
+      the pool existed (the poster pipeline adds it; the pool didn't).
+      Fixed + pixel-verified (live slots now show the actual model).
+    - `preview-camera` plumbing: assets passes `cameraIndex` (was dead
+      field name); pixel check proves a preview-camera=1 post animates
+      GREEN (cam1), not red (cam0).
+    - Authored-camera slot copy: the slot offset is applied to the
+      container root, so the whole parent chain must be force-recomputed —
+      otherwise the camera films empty space 800*index units away.
+    - Two-texture card crossfade (SPEC CARD "Crossfade 120ms"): the card
+      shader mixes tex/tex2 by a blend uniform; plate->poster->live are
+      REAL crossfades now. (First version forgot to reset the blend
+      uniform on completion — every card sampled the white fallback.)
+    - POSTER_CACHE_V -> p4 (camera-policy posters invalidate old caches).
+    - Blank authored camera -> auto-fit fallback before the placeholder.
+    - Pending loads are cancellable; pool slots prune on thread detach.
+    - Studio: look-at origin/center/fit drive the ACTIVE camera (fly mode
+      included); origin = direct pick only (no subtree centroid);
+      Vector3.subtract mutation bug in the first version fixed.
+    - Publish flow waits for the relay echo before routing to the new
+      post's viewer (publish->board flash + dead delete button).
+    - REGRESSIONS.txt UI items: upload tab first, studio close button,
+      transform tools moved into the inspector foot, camera panel
+      collapsed by default, paint/symbols tabs disabled, rail glyphs as
+      SVG, portrait inspector 22vh, duplicate studio CSS block
+      consolidated, aspect-aware viewer spotlight (phone grey slab),
+      type-tab seed enables publish.
