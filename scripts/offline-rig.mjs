@@ -1,0 +1,405 @@
+// Offline test rig: a local wss:// relay + an https:// model server + an
+// http proxy that injects the relay address into the app, so the whole
+// verification suite runs WITHOUT real relays (this sandbox blocks every
+// public relay/CDN; only localhost and the npm/github allowlist work).
+//
+//   node scripts/offline-rig.mjs
+//
+//   * https://localhost:8443   — fake NIP-01 relay (wss upgrade) AND the
+//                               model files at /models/<name>.glb (CORS *)
+//   * http://localhost:4173    — proxy to the vite dev server (5173) with a
+//                               tiny same-origin rig hook injected
+//
+// The rig serves five GLB flavours (generated here, no assets on disk):
+//   a  camera + animation, two cubes (red at origin, big green offset) —
+//      the camera frames ONLY the red cube: poster must be red, not a
+//      two-cube auto-fit.
+//   b  static, no camera, two cubes — auto-fit poster must show both.
+//   c  animated, no camera — auto-fit poster, live feed/tree preview.
+//   d  TWO cameras (cam0=red view, cam1=green view) + animation, event
+//      carries preview-camera=1 — poster uses cam0 (red), live preview
+//      must use cam1 (green).
+//   e  camera, NOT animated — poster from camera; feed must STATIC-reject.
+//   x  animated text-ish wordmark (flat planes) for extra churn volume.
+//
+// The feed: 48 roots cycling those flavours + a reply tree on root #1
+// (animated, static and camera'd replies) for thread/badge/childCount checks.
+import { createServer as createHttps } from 'node:https'
+import { createServer as createHttp } from 'node:http'
+import { request as httpRequest } from 'node:http'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
+import { createHash } from 'node:crypto'
+import { WebSocketServer } from 'ws'
+import { finalizeEvent, generateSecretKey } from 'nostr-tools'
+
+const __dir = dirname(fileURLToPath(import.meta.url))
+const KEY = readFileSync('/tmp/rig-certs/key.pem')
+const CERT = readFileSync('/tmp/rig-certs/cert.pem')
+const RELAY_PORT = 8443
+const PROXY_PORT = 4173
+const VITE = 'http://localhost:5173'
+
+// ------------------------------------------------------------------ GLB
+
+/** Minimal GLB writer: glTF JSON + one BIN chunk. */
+function buildGLB(json) {
+  const jsonBuf = Buffer.from(JSON.stringify(json), 'utf8')
+  const jsonPad = (4 - (jsonBuf.length % 4)) % 4
+  const jsonChunk = Buffer.concat([jsonBuf, Buffer.alloc(jsonPad, 0x20)])
+  const binPad = (4 - (json.bin.length % 4)) % 4
+  const binChunk = Buffer.concat([json.bin, Buffer.alloc(binPad)])
+  const total = 12 + 8 + jsonChunk.length + 8 + binChunk.length
+  const out = Buffer.alloc(total)
+  out.write('glTF', 0)
+  out.writeUInt32LE(2, 4)
+  out.writeUInt32LE(total, 8)
+  out.writeUInt32LE(jsonChunk.length, 12)
+  out.write('JSON', 16)
+  jsonChunk.copy(out, 20)
+  const binOff = 20 + jsonChunk.length
+  out.writeUInt32LE(binChunk.length, binOff)
+  out.write('BIN\0', binOff + 4)
+  binChunk.copy(out, binOff + 8)
+  return out
+}
+
+/** One cube mesh's positions + normals + indices (1x1x1, centered). */
+function cubeData() {
+  const F = [
+    [[1, 0, 0], [[0.5, -0.5, -0.5], [0.5, -0.5, 0.5], [0.5, 0.5, 0.5], [0.5, 0.5, -0.5]]],
+    [[-1, 0, 0], [[-0.5, -0.5, 0.5], [-0.5, -0.5, -0.5], [-0.5, 0.5, -0.5], [-0.5, 0.5, 0.5]]],
+    [[0, 1, 0], [[-0.5, 0.5, -0.5], [-0.5, 0.5, 0.5], [0.5, 0.5, 0.5], [0.5, 0.5, -0.5]]],
+    [[0, -1, 0], [[-0.5, -0.5, 0.5], [-0.5, -0.5, -0.5], [0.5, -0.5, -0.5], [0.5, -0.5, 0.5]]],
+    [[0, 0, 1], [[-0.5, -0.5, 0.5], [0.5, -0.5, 0.5], [0.5, 0.5, 0.5], [-0.5, 0.5, 0.5]]],
+    [[0, 0, -1], [[0.5, -0.5, -0.5], [-0.5, -0.5, -0.5], [-0.5, 0.5, -0.5], [0.5, 0.5, -0.5]]],
+  ]
+  const pos = [], nor = [], idx = []
+  F.forEach(([n, verts], f) => {
+    const base = f * 4
+    for (const v of verts) { pos.push(...v); nor.push(...n) }
+    idx.push(base, base + 1, base + 2, base, base + 2, base + 3)
+  })
+  return { pos: Float32Array.from(pos), nor: Float32Array.from(nor), idx: Uint16Array.from(idx) }
+}
+
+/** Unit quaternion [x,y,z,w] rotating glTF -Z into `forward`. */
+function quatLookNegZ(forward) {
+  const f = norm(forward)
+  let right = cross(f, [0, 1, 0])
+  if (len(right) < 1e-6) right = cross(f, [1, 0, 0])
+  right = norm(right)
+  const up = cross(right, f)
+  // rotation matrix rows: right, up, back(-f)
+  const m = [right[0], right[1], right[2], up[0], up[1], up[2], -f[0], -f[1], -f[2]]
+  const t = m[0] + m[4] + m[8]
+  let x, y, z, w
+  if (t > 0) {
+    const s = Math.sqrt(t + 1) * 2
+    w = s / 4; x = (m[5] - m[7]) / s; y = (m[6] - m[2]) / s; z = (m[1] - m[3]) / s
+  } else if (m[0] > m[4] && m[0] > m[8]) {
+    const s = Math.sqrt(1 + m[0] - m[4] - m[8]) * 2
+    w = (m[5] - m[7]) / s; x = s / 4; y = (m[1] + m[3]) / s; z = (m[6] + m[2]) / s
+  } else if (m[4] > m[8]) {
+    const s = Math.sqrt(1 + m[4] - m[0] - m[8]) * 2
+    w = (m[6] - m[2]) / s; x = (m[1] + m[3]) / s; y = s / 4; z = (m[5] + m[7]) / s
+  } else {
+    const s = Math.sqrt(1 + m[8] - m[0] - m[4]) * 2
+    w = (m[1] - m[3]) / s; x = (m[6] + m[2]) / s; y = (m[5] + m[7]) / s; z = s / 4
+  }
+  return [x, y, z, w]
+}
+const norm = (v) => { const l = Math.hypot(...v) || 1; return v.map((c) => c / l) }
+const len = (v) => Math.hypot(...v)
+const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+
+/** Build one of the rig flavours. */
+function makeModel(flavour) {
+  const cube = cubeData()
+  const binParts = []
+  const views = []
+  const accessors = []
+  const addView = (buf, name) => {
+    const offset = align4(binParts.reduce((s, b) => s + b.length, 0))
+    binParts.push(Buffer.alloc(offset - binParts.reduce((s, b) => s + b.length, 0)), Buffer.from(buf.buffer, buf.byteOffset, buf.byteLength))
+    views.push({ buffer: 0, byteOffset: offset, byteLength: buf.byteLength })
+    return views.length - 1
+  }
+  const posView = addView(cube.pos, 'pos')
+  const norView = addView(cube.nor, 'nor')
+  const idxView = addView(cube.idx, 'idx')
+  accessors.push(
+    { bufferView: posView, componentType: 5126, count: cube.pos.length / 3, type: 'VEC3', min: [-0.5, -0.5, -0.5], max: [0.5, 0.5, 0.5] },
+    { bufferView: norView, componentType: 5126, count: cube.nor.length / 3, type: 'VEC3' },
+    { bufferView: idxView, componentType: 5123, count: cube.idx.length, type: 'SCALAR' },
+  )
+
+  const nodes = []
+  const meshes = []
+  const materials = [
+    { name: 'red', pbrMetallicRoughness: { baseColorFactor: [0.85, 0.08, 0.08, 1], metallicFactor: 0, roughnessFactor: 1 } },
+    { name: 'green', pbrMetallicRoughness: { baseColorFactor: [0.08, 0.75, 0.2, 1], metallicFactor: 0, roughnessFactor: 1 } },
+    { name: 'blue', pbrMetallicRoughness: { baseColorFactor: [0.1, 0.25, 0.9, 1], metallicFactor: 0, roughnessFactor: 1 } },
+  ]
+  const cubePrim = (mat) => ({ attributes: { POSITION: 0, NORMAL: 1 }, indices: 2, material: mat })
+  meshes.push({ name: 'cube-red', primitives: [cubePrim(0)] })
+
+  let anim = null
+  const flat = flavour === 'x'
+  if (flat) {
+    // wordmark: flat quads (2D text stand-in) that must never render mirrored
+    meshes.length = 0
+    nodes.push({ mesh: 0, name: 'glyph' })
+    const q = cubeData()
+    // squash the cube into a flat plate
+    for (let i = 0; i < q.pos.length; i += 3) q.pos[i + 2] *= 0.08
+    const posViewF = addView(q.pos, 'pos')
+    const norViewF = addView(q.nor, 'nor')
+    const idxViewF = addView(q.idx, 'idx')
+    accessors[0] = { bufferView: posViewF, componentType: 5126, count: q.pos.length / 3, type: 'VEC3', min: [-0.5, -0.5, -0.04], max: [0.5, 0.5, 0.04] }
+    accessors[1] = { bufferView: norViewF, componentType: 5126, count: q.nor.length / 3, type: 'VEC3' }
+    accessors[2] = { bufferView: idxViewF, componentType: 5123, count: q.idx.length, type: 'SCALAR' }
+    meshes.push({ name: 'glyph-plate', primitives: [{ attributes: { POSITION: 0, NORMAL: 1 }, indices: 2, material: 2 }] })
+    const inBuf = Float32Array.from([0, 1, 2])
+    const outBuf = Float32Array.from([0, 0, 0, 0.6, 0, 0, 0, 0, 0])
+    const inView = addView(inBuf, 'anim-in')
+    const outView = addView(outBuf, 'anim-out')
+    accessors.push(
+      { bufferView: inView, componentType: 5126, count: 3, type: 'SCALAR', min: [0], max: [2] },
+      { bufferView: outView, componentType: 5126, count: 3, type: 'VEC3' },
+    )
+    anim = { name: 'slide', channels: [{ sampler: 0, target: { node: 0, path: 'translation' } }], samplers: [{ input: 3, interpolation: 'LINEAR', output: 4 }] }
+  } else {
+    nodes.push({ mesh: 0, name: 'red' })
+    // big green cube off the red view's axis; for the camera tests (a, d) it
+    // sits far enough out of the authored frustum that the camera poster
+    // shows ONLY the red cube, while the auto-fit flavours (b, c, e, x) keep
+    // it near enough for one-frame framing.
+    const greenX = flavour === 'a' || flavour === 'd' ? 14 : 5
+    nodes.push({ mesh: 1, name: 'green', translation: [greenX, 0, 0], scale: [4, 4, 4] })
+    meshes.push({ name: 'cube-green', primitives: [cubePrim(1)] })
+    const inBuf = Float32Array.from([0, 1])
+    const outBuf = Float32Array.from([0, 0, 0, 0, 1.5, 0])
+    const inView = addView(inBuf, 'anim-in')
+    const outView = addView(outBuf, 'anim-out')
+    accessors.push(
+      { bufferView: inView, componentType: 5126, count: 2, type: 'SCALAR', min: [0], max: [1] },
+      { bufferView: outView, componentType: 5126, count: 2, type: 'VEC3' },
+    )
+    if (flavour !== 'b' && flavour !== 'e') {
+      anim = { name: 'bob', channels: [{ sampler: 0, target: { node: 0, path: 'translation' } }], samplers: [{ input: 3, interpolation: 'LINEAR', output: 4 }] }
+    }
+  }
+
+  const cameras = []
+  const camRed = { name: 'cam-red', type: 'perspective', perspective: { yfov: 0.7, znear: 0.01, zfar: 100 } }
+  const camGreen = { name: 'cam-green', type: 'perspective', perspective: { yfov: 0.7, znear: 0.01, zfar: 100 } }
+  if (['a', 'd', 'e'].includes(flavour)) {
+    cameras.push(camRed)
+    const q0 = quatLookNegZ(sub([0, 0, 0], [-1.5, 0.5, 2.5]))
+    nodes.push({ camera: 0, name: 'cam0', translation: [-1.5, 0.5, 2.5], rotation: q0 })
+  }
+  if (flavour === 'd') {
+    cameras.push(camGreen)
+    const gx = 14
+    const q1 = quatLookNegZ(sub([gx, 0, 0], [gx - 1.5, 0.6, 2.5]))
+    nodes.push({ camera: 1, name: 'cam1', translation: [gx - 1.5, 0.6, 2.5], rotation: q1 })
+  }
+
+  const json = {
+    asset: { version: '2.0', generator: 'offline-rig' },
+    scene: 0,
+    scenes: [{ nodes: nodes.map((_, i) => i) }],
+    nodes, meshes, materials, accessors,
+    bufferViews: views,
+    buffers: [{ byteLength: align4(binParts.reduce((s, b) => s + b.length, 0)) }],
+    cameras: cameras.length ? cameras : undefined,
+    animations: anim ? [anim] : undefined,
+  }
+  const bin = Buffer.concat(binParts)
+  json.bin = bin
+  return buildGLB(json)
+}
+const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+const align4 = (n) => (n + 3) & ~3
+
+// ------------------------------------------------------------------ feed
+
+const FLAVOURS = ['a', 'a', 'a', 'a', 'c', 'c', 'b', 'b', 'd', 'd', 'e', 'x']
+const N_ROOTS = 48
+const models = new Map() // name -> { bytes, sha }
+const events = [] // wire events
+const sk = generateSecretKey()
+
+function modelFor(flavour) {
+  let name = `m-${flavour}`
+  if (!models.has(name)) {
+    const bytes = makeModel(flavour)
+    const sha = createHash('sha256').update(bytes).digest('hex')
+    models.set(name, { bytes, sha })
+  }
+  return models.get(name)
+}
+
+function makeEvent(kind, tags, ageSec = 0) {
+  // every event gets its own created_at: identical tag sets must still
+  // produce distinct ids (the app dedupes by id)
+  const t = { kind, created_at: Math.floor(Date.now() / 1000) - 60 - ageSec, tags, content: '' }
+  return finalizeEvent(t, sk)
+}
+
+// 48 roots cycling the flavours
+for (let i = 0; i < N_ROOTS; i++) {
+  const flavour = FLAVOURS[i % FLAVOURS.length]
+  const { bytes, sha } = modelFor(flavour)
+  const tags = [
+    ['t', 'form-zero'], ['t', 'root'],
+    ['m', 'model/gltf-binary'],
+    ['x', sha], ['ox', sha], ['size', String(bytes.length)],
+    ['url', `https://localhost:${RELAY_PORT}/models/${flavour}.glb`],
+    ['v', 'form-zero:3'],
+    ['filename', `${flavour}.glb`],
+  ]
+  if (['a', 'e'].includes(flavour)) tags.push(['cameras', '1'])
+  if (flavour === 'd') tags.push(['cameras', '2'], ['preview-camera', '1'])
+  if (['a', 'c', 'd', 'x'].includes(flavour)) tags.push(['anim', '1'])
+  events.push(makeEvent(1063, tags, i))
+}
+
+// reply tree on root #1: animated, static, camera'd, and a nested reply
+const root1 = events[1]
+const replies = []
+for (const [i, flavour] of ['c', 'b', 'a', 'x'].entries()) {
+  const { bytes, sha } = modelFor(flavour)
+  const tags = [
+    ['t', 'form-zero'],
+    ['m', 'model/gltf-binary'],
+    ['x', sha], ['ox', sha], ['size', String(bytes.length)],
+    ['url', `https://localhost:${RELAY_PORT}/models/${flavour}.glb`],
+    ['v', 'form-zero:3'],
+    ['filename', `${flavour}.glb`],
+    ['e', root1.id, '', 'root'],
+    ['e', i === 0 ? root1.id : replies[0].id, '', 'reply'],
+  ]
+  if (['a', 'c', 'x'].includes(flavour)) tags.push(['anim', '1'])
+  if (flavour === 'a') tags.push(['cameras', '1'])
+  const ev = makeEvent(1063, tags)
+  events.push(ev)
+  replies.push(ev)
+}
+
+// ------------------------------------------------------------------ relay
+
+function matchFilter(ev, f) {
+  if (f.ids && !f.ids.includes(ev.id)) return false
+  if (f.authors && !f.authors.includes(ev.pubkey)) return false
+  if (f.kinds && !f.kinds.includes(ev.kind)) return false
+  if (f.since && ev.created_at < f.since) return false
+  if (f.until && ev.created_at > f.until) return false
+  if (f['#t'] && !ev.tags.some((t) => t[0] === 't' && f['#t'].includes(t[1]))) return false
+  if (f['#m'] && !ev.tags.some((t) => t[0] === 'm' && f['#m'].includes(t[1]))) return false
+  if (f['#e'] && !ev.tags.some((t) => t[0] === 'e' && f['#e'].includes(t[1]))) return false
+  return true
+}
+
+const RIG_HOOK = `(() => {
+  const relay = 'wss://localhost:${RELAY_PORT}';
+  const t = setInterval(() => {
+    const f = window.__form0;
+    if (!f) return;
+    clearInterval(t);
+    try { f.pool.applyRelays([relay]); } catch (e) { console.error('[rig]', e); }
+  }, 120);
+})();`
+
+const httpsServer = createHttps({ key: KEY, cert: CERT }, (req, res) => {
+  const url = new URL(req.url, `https://localhost:${RELAY_PORT}`)
+  if (url.pathname === '/debug') {
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ count: events.length, distinct: [...distinct.entries()] }))
+    return
+  }
+  if (url.pathname.startsWith('/models/')) {
+    const name = url.pathname.slice('/models/'.length).replace(/\.glb$/, '')
+    const m = modelFor(name)
+    if (!m) { res.writeHead(404).end(); return }
+    res.writeHead(200, {
+      'content-type': 'model/gltf-binary',
+      'content-length': m.bytes.length,
+      'access-control-allow-origin': '*',
+      'access-control-allow-methods': 'GET, HEAD',
+    })
+    res.end(Buffer.from(m.bytes))
+    return
+  }
+  res.writeHead(404).end()
+})
+
+const wss = new WebSocketServer({ server: httpsServer })
+wss.on('connection', (ws) => {
+  ws.on('message', (raw) => {
+    let msg
+    try { msg = JSON.parse(raw.toString()) } catch { return }
+    if (!Array.isArray(msg) || typeof msg[0] !== 'string') return
+    if (msg[0] === 'REQ') {
+      const sub = msg[1]
+      const filters = msg.slice(2).filter((f) => f && typeof f === 'object')
+      const sent = new Set()
+      for (const f of filters) {
+        const list = events.filter((ev) => matchFilter(ev, f)).slice(0, f.limit ?? 500)
+        for (const ev of list) {
+          if (sent.has(ev.id)) continue
+          sent.add(ev.id)
+          ws.send(JSON.stringify(['EVENT', sub, ev]))
+        }
+      }
+      ws.send(JSON.stringify(['EOSE', sub]))
+    }
+  })
+})
+
+httpsServer.listen(RELAY_PORT, () => {
+  console.log(`[rig] relay+models on https://localhost:${RELAY_PORT}  (${events.length} events, ${models.size} models)`)
+})
+
+// ------------------------------------------------------------------ proxy
+const proxy = createHttp((req, res) => {
+  if (req.url === '/__rig.js') {
+    res.writeHead(200, { 'content-type': 'application/javascript', 'cache-control': 'no-store' })
+    res.end(RIG_HOOK)
+    return
+  }
+  const upstream = httpRequest({ host: 'localhost', port: 5173, path: req.url, method: req.method, headers: req.headers }, (up) => {
+    const ct = String(up.headers['content-type'] || '')
+    if (ct.includes('text/html')) {
+      const chunks = []
+      up.on('data', (c) => chunks.push(c))
+      up.on('end', () => {
+        let body = Buffer.concat(chunks).toString('utf8')
+        body = body.replace('</head>', '<script src="/__rig.js"></script></head>')
+        res.writeHead(up.statusCode, { ...up.headers, 'content-length': Buffer.byteLength(body) })
+        res.end(body)
+      })
+    } else {
+      res.writeHead(up.statusCode, up.headers)
+      up.pipe(res)
+    }
+  })
+  upstream.on('error', () => { res.writeHead(502); res.end() })
+  req.pipe(upstream)
+})
+proxy.on('upgrade', (req, socket, head) => {
+  // vite HMR websocket — forward so the dev client stays quiet
+  const up = httpRequest({ host: 'localhost', port: 5173, path: req.url, headers: req.headers })
+  up.on('upgrade', (res, upSocket, upHead) => {
+    socket.write('HTTP/1.1 101 Switching Protocols\r\n' + Object.entries(res.headers).map(([k, v]) => `${k}: ${v}`).join('\r\n') + '\r\n\r\n')
+    if (upHead.length) socket.write(upHead)
+    socket.pipe(upSocket).pipe(socket)
+  })
+  up.on('error', () => socket.destroy())
+  up.end()
+})
+proxy.listen(PROXY_PORT, () => {
+  console.log(`[rig] proxy on http://localhost:${PROXY_PORT} -> ${VITE}  (rig hook: /__rig.js)`)
+})

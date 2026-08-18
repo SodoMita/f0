@@ -645,11 +645,17 @@ export class Board {
 
       if (settled && inRange) {
         if (!slot.requested) { slot.requested = true; this.drive(slot) }
-        if (slot.poster && !slot.live) {
+        // Live slots are for what the user can SEE. Requesting for every
+        // prefetched (offscreen) card made the pool evict one offscreen slot
+        // for another in an endless loop — the evicted card re-requested on
+        // the next pass and evicted its evictor (thousands of churned GLB
+        // loads per scroll). Offscreen cards keep their posters; the moment
+        // they scroll into view the request below fires.
+        if (slot.poster && !slot.live && this.visiblePosts.has(row.meta.eventId)) {
           // same gate as drive() — hints or poster-render knowledge
           const animated = this.assets?.isAnimated(row.meta)
           if ((animated ?? (row.meta.animHint || row.meta.cameraCount > 0)) && !this.previewPool.isRejected(row.meta.eventId)) {
-            this.previewPool.request(row.meta.eventId)
+            this.previewPool.request(row.meta.eventId, this.visiblePosts)
           }
         }
       } else if (slot.live && Math.abs(y) >= near) {
@@ -867,7 +873,7 @@ export class Board {
       // posts carry anim/cameras hints. The pool itself rejects STATIC.
       const animated = assets.isAnimated(meta)
       if ((animated ?? (meta.animHint || meta.cameraCount > 0)) && !this.previewPool.isRejected(meta.eventId) && this.visiblePosts.has(meta.eventId)) {
-        this.previewPool.request(meta.eventId)
+        this.previewPool.request(meta.eventId, this.visiblePosts)
       }
     })
   }

@@ -225,7 +225,7 @@ export class ThreadView {
       // same gate as the board: poster-render knowledge or v3 hints
       const animated = this.assets.isAnimated(n.meta)
       if (!(animated ?? (n.meta.animHint || n.meta.cameraCount > 0))) continue
-      this.previewPool.request(id)
+      this.previewPool.request(id, visible)
     }
   }
 

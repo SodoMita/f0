@@ -423,3 +423,14 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     - Studio: `.studio-stage`/`.stage-top` no longer intercept pointer
       events, so gizmo handles, orbit drags and mesh taps anywhere above the
       W/E/R toolbar finally reach the canvas (only the real controls grab).
+    - VERIFIED headlessly (docs/SANDBOX-VERIFY.md: npm-registry Chromium +
+      local wss relay + offline rig). Two more real bugs found and fixed:
+      (a) `Camera.rotationQuaternion` is null at runtime despite the .d.ts —
+      the pool's `.copyFrom()` failed every model WITH an authored camera;
+      (b) pool eviction used `slot.visible`, updated only in tick() AFTER the
+      request pass — stale flags either deadlocked eviction (visible cards
+      stopped animating once the pool filled) or ping-ponged prefetch cards
+      (thousands of churned GLB loads). `request()` now takes the caller's
+      fresh visible set and the board requests live slots only for on-screen
+      cards; slot cleanup un-reparents root nodes before
+      removeAllFromScene().

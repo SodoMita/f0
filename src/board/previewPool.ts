@@ -33,6 +33,8 @@ interface Slot {
   container: AssetContainer | null
   anims: AnimationGroup[]
   postId: string | null
+  /** stage root TransformNode holding the slot's model (offset per slot) */
+  root: TransformNode | null
   /** a load is in flight for this slot (the slot may not be live yet) */
   pending: boolean
   /** whether the post was in the last visible set handed to tick() */
@@ -150,7 +152,7 @@ export class PreviewPool {
   rejectReason(postId: string): 'STATIC' | 'FAILED' | undefined { return this.rejected.get(postId) }
   retry(postId: string): void { this.rejected.delete(postId) }
 
-  request(postId: string): boolean {
+  request(postId: string, visible?: ReadonlySet<string>): boolean {
     if (this.byPost.has(postId) || this.loading.has(postId)) return true
     if (this.rejected.has(postId)) return false
     // Reuse a released slot first — the old code counted spent slots against
@@ -160,8 +162,8 @@ export class PreviewPool {
       slot = this.makeSlot()
       this.slots.push(slot)
     }
-    if (!slot) slot = this.pickEvictable()
-    if (!slot) return false // every slot mid-load; retry on onLoadDone
+    if (!slot) slot = this.pickEvictable(visible)
+    if (!slot) return false // no eligible slot; the caller re-requests later
     // An evicted slot still holds its previous model: free it first (also
     // fires onRelease so its card falls back to its poster).
     if (slot.postId) this.release(slot.postId)
@@ -175,13 +177,30 @@ export class PreviewPool {
     const slot = this.byPost.get(postId)
     if (!slot) return
     const had = this.byPost.delete(postId)
+    this.clearSlotModel(slot)
+    if (had) this.onRelease?.(postId)
+  }
+
+  /**
+   * Free everything a slot holds: anims, container (un-reparented first so
+   * the container hierarchy stays valid for removeAllFromScene) and the
+   * stage root TransformNode. The slot is then reusable by request().
+   */
+  private clearSlotModel(slot: Slot): void {
     for (const a of slot.anims) a.stop()
     slot.anims = []
-    if (slot.container) { slot.container.removeAllFromScene(); slot.container.dispose() }
-    slot.container = null
+    if (slot.container) {
+      // rootNodes were reparented under the stage root, which is NOT part
+      // of the container — detach them again or removeAllFromScene warns
+      // "hierarchy is not valid" and the scene may keep stray nodes.
+      for (const n of slot.container.rootNodes) n.parent = null
+      slot.container.removeAllFromScene()
+      slot.container.dispose()
+      slot.container = null
+    }
+    if (slot.root) { slot.root.dispose(true); slot.root = null }
     slot.postId = null
     slot.visible = false
-    if (had) this.onRelease?.(postId)
   }
 
   /** Advance one frame; render only the slots whose turn it is.
@@ -214,11 +233,17 @@ export class PreviewPool {
   /**
    * Choose a live slot to recycle for a new request. Only slots that scrolled
    * out of view are eligible: evicting a VISIBLE card would make the caller
-   * re-request it immediately (its request gate only clears when the post
-   * goes offscreen), ping-ponging cards between poster and live preview.
+   * re-request it immediately, ping-ponging cards between poster and live
+   * preview. The caller's fresh visible set wins over the slot's own flag —
+   * that flag is only updated in tick(), which runs AFTER the caller's
+   * request pass in the same frame, so relying on it deadlocks: request()
+   * sees all slots "visible", fails, and nothing ever retries.
    */
-  private pickEvictable(): Slot | null {
-    const offscreen = this.slots.filter((s) => s.postId && !s.pending && !s.visible)
+  private pickEvictable(visible?: ReadonlySet<string>): Slot | null {
+    const offscreen = this.slots.filter((s) => {
+      if (!s.postId || s.pending) return false
+      return visible ? !visible.has(s.postId) : !s.visible
+    })
     if (!offscreen.length) return null
     offscreen.sort((a, b) => a.lastRenderAt - b.lastRenderAt)
     return offscreen[0]
@@ -253,7 +278,7 @@ export class PreviewPool {
     rtt.clearColor = new Color4(0, 0, 0, 0)
     const camera = new FreeCamera(`slot-cam-${index}`, Vector3.Zero(), this.stage)
     const slot: Slot = {
-      index, rtt, camera, container: null, anims: [], postId: null, pending: false, visible: false,
+      index, rtt, camera, container: null, root: null, anims: [], postId: null, pending: false, visible: false,
       facing: new Vector3(0, 0, 1), lastRenderAt: 0,
     }
     return slot
@@ -282,17 +307,22 @@ export class PreviewPool {
       const root = new TransformNode(`stage-${slot.index}`, this.stage)
       for (const node of container.rootNodes) node.parent = root
       root.position = offset
+      slot.root = root
       const wc = center.add(offset)
 
       // Camera policy matches the poster: the model's own camera when it has
       // one (v3 preview-camera index → first imported), auto-fit as fallback.
       const cameraIndex = model.cameraIndex ?? 0
       const authored = cameraIndex >= 0 && cameraIndex < container.cameras.length ? container.cameras[cameraIndex] : null
+      // Runtime note: Camera.rotationQuaternion is null until assigned (the
+      // .d.ts declares a non-null Quaternion — that is wrong, so any
+      // `.copyFrom()` on it throws for models WITH cameras).
+      const camQuat = slot.camera as unknown as { rotationQuaternion: Quaternion | null }
       if (authored) {
         authored.computeWorldMatrix()
         const quat = new Quaternion()
         authored.getWorldMatrix().decompose(undefined, quat, slot.camera.position)
-        slot.camera.rotationQuaternion.copyFrom(quat)
+        camQuat.rotationQuaternion = quat
         slot.camera.fov = authored.fov || 0.7
         if (authored.mode === Camera.ORTHOGRAPHIC_CAMERA) {
           slot.camera.mode = Camera.ORTHOGRAPHIC_CAMERA
@@ -308,6 +338,7 @@ export class PreviewPool {
         const facing = dominantFacing(container)
         const fov = 0.7
         const dist = frameDistance(min, max, center, facing.scale(-1), fov, this.opts.rttWidth / this.opts.rttHeight, 0.86)
+        camQuat.rotationQuaternion = null
         slot.camera.mode = Camera.PERSPECTIVE_CAMERA
         slot.camera.position = wc.add(facing.scale(dist))
         slot.camera.setTarget(wc)
@@ -332,17 +363,14 @@ export class PreviewPool {
         // called release() here, which looks the post up in byPost — but a
         // slot only enters byPost AFTER this check, so the container leaked
         // and the slot stayed spent forever.)
-        slot.postId = null
-        if (slot.container) { slot.container.removeAllFromScene(); slot.container.dispose() }
-        slot.container = null
+        this.clearSlotModel(slot)
         this.rejected.set(postId, 'STATIC')
         return
       }
       this.byPost.set(postId, slot)
       this.onLive?.(postId, slot.rtt)
     } catch {
-      if (container) { container.removeAllFromScene(); container.dispose() }
-      slot.postId = null
+      this.clearSlotModel(slot)
       // Do not mark a post FAILED when the slot itself was recycled mid-load
       // (a settings shrink) — nothing about the model was wrong.
       if (alive()) this.rejected.set(postId, 'FAILED')

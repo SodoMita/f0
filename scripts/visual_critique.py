@@ -18,9 +18,13 @@ def ocr_stats(img: np.ndarray, name=""):
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
         cv2.imwrite(f.name, img)
         p = f.name
-    out = subprocess.run(
-        ["tesseract", p, "stdout", "--psm", "11", "2>/dev/null"],
-        capture_output=True, text=True)
+    try:
+        out = subprocess.run(
+            ["tesseract", p, "stdout", "--psm", "11", "2>/dev/null"],
+            capture_output=True, text=True)
+    except FileNotFoundError:
+        os.unlink(p)
+        return "<tesseract not installed — OCR skipped>", 0.0, 0
     os.unlink(p)
     text = out.stdout.strip()
     # second pass with TSV for confidence

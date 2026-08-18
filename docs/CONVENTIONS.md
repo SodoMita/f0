@@ -85,6 +85,15 @@ input change works:
 | `node scripts/features.mjs` | reply badges, thread view, settings |
 | `node scripts/capture.mjs` | screenshots incl. light theme + phone viewport |
 | `node scripts/facing.mjs <url>` | which side of a model is the readable one |
+| `node scripts/offline-verify.mjs` | deterministic pixel/state checks of the poster camera policy, live-slot reuse, thread animation, card crossfades and studio view tools (runs against `scripts/offline-rig.mjs`, no real relays needed) |
+
+When relays/CDNs are unreachable (sandboxes), see `docs/SANDBOX-VERIFY.md`:
+how to obtain a headless Chromium from the npm registry alone (NSS libs from
+the `@sparticuz/chromium` bundle + `LD_LIBRARY_PATH` + a Playwright path
+shim), and how the offline rig (`scripts/offline-rig.mjs`: local wss relay +
+https model server + CSP-safe relay injection via a proxy on :4173) feeds
+the whole suite. All suites then run unmodified with
+`TARGET_URL=http://localhost:4173/`.
 
 Rules of thumb learned the hard way:
 

@@ -21,6 +21,15 @@ move it to **Done** with a commit reference. One agent per area.
         average origin / look-at bounding-box center / fit-selected buttons.
       - Studio stage/topbar no longer intercept pointer events — gizmos
         above the W/E/R toolbar are pressable again.
+      - Headless verification (see docs/SANDBOX-VERIFY.md — Chromium obtained
+        from the npm registry because every browser CDN/apt/relay is blocked
+        in this sandbox; scripts/offline-rig.mjs serves a local wss relay +
+        models through a CSP-safe proxy; scripts/offline-verify.mjs has 25
+        deterministic checks, all green, plus orient/interact/settings/
+        smoke/features/pages suites green against the rig). The verification
+        round caught and fixed two more pool bugs: the runtime-null
+        `rotationQuaternion` crash for camera'd models, and the stale
+        `slot.visible` eviction deadlock/churn.
 
 - [x] **Branch integration + remaining security hardening** (agent arena,
       2026-08-17). Merged the sidecar-import work and then synced main's
