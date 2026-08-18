@@ -116,8 +116,11 @@ check('PBR off switches materials to unlit', unlit.total === 0 || unlit.unlit ==
 await set({ pbr: true })
 
 await set({ fov: 90 })
-const fov = await page.evaluate(() => window.__form0.viewer.scene.activeCamera.fov)
-check('field of view reaches the camera', Math.abs(fov - (90 * Math.PI) / 180) < 0.01, fov.toFixed(3))
+// The setting drives the ORBIT camera. When a model's own authored camera is
+// active it keeps its authored fov by design (the viewer shows the author's
+// view), so asserting on activeCamera.fov is wrong — read the orbit camera.
+const fov = await page.evaluate(() => window.__form0.viewer.orbit.fov)
+check('field of view reaches the orbit camera', Math.abs(fov - (90 * Math.PI) / 180) < 0.01, fov.toFixed(3))
 await set({ fov: 46 })
 
 // --------------------------------------------------------------- memory
@@ -159,6 +162,9 @@ check('editing a setting switches the preset to Custom', custom === 'custom', St
 
 // ------------------------------------------------------------ persistence
 await set({ volMusic: 33, fov: 71 })
+// set() persists fire-and-forget (void put); give IndexedDB a beat so the
+// reload cannot race the write (that flaked on the fast production build)
+await page.waitForTimeout(500)
 await page.reload({ waitUntil: 'domcontentloaded' })
 await page.waitForFunction(() => window.__form0?.settings, { timeout: 30000 })
 await page.waitForTimeout(1500)

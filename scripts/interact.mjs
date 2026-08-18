@@ -170,13 +170,15 @@ await page.evaluate(() => { location.hash = '#/' })
 await page.waitForTimeout(800)
 const pos2 = await page.evaluate(() => window.__form0.board.screenPosOf(1))
 if (pos2) {
-  // deterministic: make the fetch slow so the ring must be observable even
-  // when the blob is already cached
+  // deterministic: make the viewer's byte fetch slow so the ring must be
+  // observable even when the blob is already cached. (The viewer calls
+  // getModelBytes, not getModel — delaying the wrong one left the check
+  // dependent on cache state.)
   await page.evaluate(() => {
     const a = window.__form0.assets
-    const orig = a.getModel.bind(a)
-    window.__restoreGetModel = () => { a.getModel = orig }
-    a.getModel = (m) => new Promise((res) => setTimeout(() => res(orig(m)), 1500))
+    const orig = a.getModelBytes.bind(a)
+    window.__restoreGetModelBytes = () => { a.getModelBytes = orig }
+    a.getModelBytes = (m) => new Promise((res) => setTimeout(() => res(orig(m)), 1500))
   })
   await page.mouse.click(pos2.x, pos2.y)
   const shown = await page.waitForFunction(
@@ -194,7 +196,7 @@ if (pos2) {
   const hidden = await page.waitForFunction(() => document.getElementById('loading').hidden, null, { timeout: 30000 })
     .then(() => true).catch(() => false)
   check('loading ring disappears when the model is ready', hidden)
-  await page.evaluate(() => window.__restoreGetModel?.())
+  await page.evaluate(() => window.__restoreGetModelBytes?.())
 }
 
 // ---------------------------------------------------------------- board

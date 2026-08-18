@@ -60,10 +60,13 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
    the thread map and the studio (scene.clearColor). The engine must NOT
    overwrite scene.clearColor on setActiveScene (scenes own their clearColor).
 
-6. Poster camera = ALWAYS auto-fit. The thumbnail never uses the model's
-   authored camera (it may point anywhere and yields blank posters); authored
-   cameras belong in the viewer (camera dots / C key). Auto-fit frames
-   worldBounds (union AABB) + dominant facing + fitDistance.
+6. Poster camera = the model's authored camera when it has one. The poster
+   shows the view the author framed, not a synthetic auto-fit (auto-fit is
+   only the fallback for models without a camera: worldBounds union AABB +
+   dominant facing + fitDistance). A camera that frames nothing still yields
+   a blank poster -> publish falls back to a placeholder. Live previews use
+   the same policy: preview-camera index -> first imported camera ->
+   auto-fit. Authored cameras also belong in the viewer (camera dots / C).
 
 7. Offscreen renders use scene.render(). Babylon's manual
    RenderTargetTexture.render()/renderList path does NOT compile materials on
@@ -398,3 +401,66 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     data images, oversized sides and aggregate decoded-memory excess fail
     closed.
 
+
+48. BUGFIX ROUND (feed/tree/studio, 2026-08-18):
+    - Posters + live previews render from the model's authored camera when
+      one exists (AMENDMENT 6 rewritten — the old "ALWAYS auto-fit" wording
+      was wrong in practice; users want the camera view).
+    - The live-preview pool REUSES released slots and evicts offscreen ones.
+      Previously every request allocated a slot up to maxSlots and then the
+      pool refused every later post — only the first N cards of a feed could
+      ever animate. STATIC rejection also leaked the container (release()
+      looked the post up in byPost, which it never entered).
+    - The thread map now runs live previews for animated nodes (small share
+      of the same slot budget, viewport-gated, same pipeline as the board).
+      Before, the tree only ever showed static posters.
+    - Card/nodes crossfade between plate -> poster -> live over 120ms (the
+      SPEC CARD "Crossfade 120ms" that was never implemented): loading cards
+      no longer flash black while scrolling the feed or building the tree.
+    - Studio: importing a model no longer snaps the camera to the object —
+      the composed view stays. New camera buttons: look at average origin of
+      selected, look at bounding-box centre of selected, fit selected in view.
+    - Studio: `.studio-stage`/`.stage-top` no longer intercept pointer
+      events, so gizmo handles, orbit drags and mesh taps anywhere above the
+      W/E/R toolbar finally reach the canvas (only the real controls grab).
+    - VERIFIED headlessly (docs/SANDBOX-VERIFY.md: npm-registry Chromium +
+      local wss relay + offline rig). Two more real bugs found and fixed:
+      (a) `Camera.rotationQuaternion` is null at runtime despite the .d.ts —
+      the pool's `.copyFrom()` failed every model WITH an authored camera;
+      (b) pool eviction used `slot.visible`, updated only in tick() AFTER the
+      request pass — stale flags either deadlocked eviction (visible cards
+      stopped animating once the pool filled) or ping-ponged prefetch cards
+      (thousands of churned GLB loads). `request()` now takes the caller's
+      fresh visible set and the board requests live slots only for on-screen
+      cards; slot cleanup un-reparents root nodes before
+      removeAllFromScene().
+
+49. BUGFIX ROUND 2 (audit + REGRESSIONS, 2026-08-18, all verified headlessly):
+    - THE live-preview root cause: the pool never called
+      `container.addAllToScene()` — every live RTT rendered nothing since
+      the pool existed (the poster pipeline adds it; the pool didn't).
+      Fixed + pixel-verified (live slots now show the actual model).
+    - `preview-camera` plumbing: assets passes `cameraIndex` (was dead
+      field name); pixel check proves a preview-camera=1 post animates
+      GREEN (cam1), not red (cam0).
+    - Authored-camera slot copy: the slot offset is applied to the
+      container root, so the whole parent chain must be force-recomputed —
+      otherwise the camera films empty space 800*index units away.
+    - Two-texture card crossfade (SPEC CARD "Crossfade 120ms"): the card
+      shader mixes tex/tex2 by a blend uniform; plate->poster->live are
+      REAL crossfades now. (First version forgot to reset the blend
+      uniform on completion — every card sampled the white fallback.)
+    - POSTER_CACHE_V -> p4 (camera-policy posters invalidate old caches).
+    - Blank authored camera -> auto-fit fallback before the placeholder.
+    - Pending loads are cancellable; pool slots prune on thread detach.
+    - Studio: look-at origin/center/fit drive the ACTIVE camera (fly mode
+      included); origin = direct pick only (no subtree centroid);
+      Vector3.subtract mutation bug in the first version fixed.
+    - Publish flow waits for the relay echo before routing to the new
+      post's viewer (publish->board flash + dead delete button).
+    - REGRESSIONS.txt UI items: upload tab first, studio close button,
+      transform tools moved into the inspector foot, camera panel
+      collapsed by default, paint/symbols tabs disabled, rail glyphs as
+      SVG, portrait inspector 22vh, duplicate studio CSS block
+      consolidated, aspect-aware viewer spotlight (phone grey slab),
+      type-tab seed enables publish.

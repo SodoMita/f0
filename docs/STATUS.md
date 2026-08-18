@@ -5,6 +5,64 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 
+- [x] **Bugfix round 2 — audit + REGRESSIONS.txt, all verified headlessly**
+      (agent arena, 2026-08-18, SPEC AMENDMENT 49, docs/SANDBOX-VERIFY.md):
+      - THE live-preview root cause found and fixed: the pool never called
+        `container.addAllToScene()` — live RTTs had been blank forever
+        (pixel-verified now: live slots show the model).
+      - `preview-camera` plumbing actually wired (assets -> pool field),
+        pixel check: preview-camera=1 animates GREEN not red.
+      - Authored-camera slot copy force-recomputes the parent chain (the
+        800-unit slot offset was missing from the camera pose).
+      - Real two-texture crossfade (shader blends tex/tex2) + the blend
+        uniform now resets on completion (all-white-card regression).
+      - POSTER_CACHE_V p4, blank-authored-camera -> auto-fit fallback,
+        cancellable pending loads, pool prune on thread detach, studio
+        look-at/fit drive the ACTIVE camera, publish waits for the relay
+        echo before routing (delete button arm race), and the whole
+        REGRESSIONS.txt UI list (upload tab, close X, toolbar in the
+        inspector foot, collapsed camera panel, disabled paint/symbols,
+        SVG rail glyphs, 22vh portrait inspector, consolidated studio CSS,
+        aspect-aware viewer spotlight).
+      - Verification: 39 offline-verify checks + 11 publish checks green on
+        the dev AND the production preview builds; orient/interact/
+        settings/smoke/features/pages/shaders/facing/memcheck green. The
+        rig now resets its feed per run, proxies gzip HTML correctly, and
+        injects the relay hook CSP-aware (inline for the standalone CSP).
+
+- [x] **Feed/tree/studio bugfix round** (agent arena, 2026-08-18, SPEC
+      AMENDMENT 48):
+      - Posters and live previews render from the model's authored camera
+        when it has one (auto-fit only as fallback); AMENDMENT 6's
+        "ALWAYS auto-fit" wording corrected.
+      - Live-preview pool reuses released slots + evicts offscreen ones
+        (before: only the first N cards of a feed could ever animate, and
+        STATIC rejection leaked the container).
+      - Thread map animates its nodes via the same pool (was static posters
+        only).
+      - 120ms plate→poster→live crossfade in feed + tree (SPEC CARD
+        crossfade had never been implemented; loading cards flashed black).
+      - Studio no longer auto-frames the camera on import; added look-at
+        average origin / look-at bounding-box center / fit-selected buttons.
+      - Studio stage/topbar no longer intercept pointer events — gizmos
+        above the W/E/R toolbar are pressable again.
+      - Headless verification (see docs/SANDBOX-VERIFY.md — Chromium obtained
+        from the npm registry because every browser CDN/apt/relay is blocked
+        in this sandbox; scripts/offline-rig.mjs serves a local wss relay +
+        models through a CSP-safe proxy; scripts/offline-verify.mjs has 25
+        deterministic checks, all green, plus orient/interact/settings/
+        smoke/features/pages suites green against the rig, on BOTH the dev
+        and the production preview builds). The verification round caught
+        and fixed two more pool bugs: the runtime-null
+        `rotationQuaternion` crash for camera'd models, and the stale
+        `slot.visible` eviction deadlock/churn.
+      - Publish round-trip verified on the rig (scripts/verify-publish.mjs,
+        11 checks green): export → poster (pixel-checked authored camera) →
+        Blossom upload → relay OK → live feed event → SHA-verified
+        re-download → kind-5 delete → live tombstone. Perf gates hold
+        (static board 0 renders/s, flat heap, +0 shader recompiles); p95
+        numbers are environment-bound here (see docs/SANDBOX-VERIFY.md).
+
 - [x] **Branch integration + remaining security hardening** (agent arena,
       2026-08-17). Merged the sidecar-import work and then synced main's
       integrated studio-tools PR. Closed the audit's two open findings:

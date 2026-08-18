@@ -89,7 +89,16 @@ export function applySettings(w: Wiring, v: SettingsValues, changed: string[] | 
   if (touched('modelRamBudget', 'textureBudget')) {
     w.assets.setBudgets({ modelRamMiB: Number(v.modelRamBudget ?? 48), textures: Number(v.textureBudget ?? 32) })
   }
-  if (touched('livePreviews')) w.board.setLivePreviewSlots(Number(v.livePreviews ?? 5))
+  if (touched('livePreviews')) {
+    // ONE budget, two viewports: board and thread each cap at the setting,
+    // but only the ACTIVE route renders, its slots are created lazily and
+    // the thread pool prunes its RTTs on detach — so the effective cost is
+    // a single pool's worth, not two permanent allocations.
+    const slots = Number(v.livePreviews ?? 5)
+    w.board.setLivePreviewSlots(slots)
+    // the thread map gets a small share of the same budget
+    w.threadView.setLivePreviewSlots(Math.max(0, Math.min(3, slots)))
+  }
   if (touched('prefetch', 'keepOffscreen')) {
     w.board.setPrefetch(v.keepOffscreen ? 4 : Number(v.prefetch ?? 100) / 100)
   }

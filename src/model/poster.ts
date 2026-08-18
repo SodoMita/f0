@@ -125,40 +125,73 @@ export class PosterRenderer {
       }
       const animated = container.animationGroups.some((g) => g.targetedAnimations.length > 0)
 
-      // Camera policy: ALWAYS auto-fit for the poster thumbnail. The model's
-      // own camera may point anywhere (it is an authored view, not a framing
-      // hint), which produced blank posters. The model's cameras belong in
-      // the detail viewer (camera dots), not the thumbnail.
+      // Camera policy: the poster shows the model from its OWN camera when
+      // the GLB ships one (the poster must match the view the author framed);
+      // auto-fit is the fallback — BOTH for models without a camera AND for
+      // authored cameras that frame nothing (a blank poster must not reach
+      // the publish placeholder just because an author stored a bad camera).
       const { min, max, center, radius } = worldBox(container)
-      const facing = dominantFacing(container)
-      // Tight, aspect-aware framing: wide models must fill the 16:10 card.
-      const fov = 0.7
-      const dist = frameDistance(min, max, center, facing.scale(-1), fov, POSTER_W / POSTER_H, 0.86)
-      this.headlight.direction = facing.scale(-1)
-      ownCamera = new FreeCamera('poster-cam', center.add(facing.scale(dist)), this.scene)
-      ownCamera.setTarget(center)
-      ownCamera.fov = fov
-      ownCamera.minZ = Math.max(0.001, (dist - radius) * 0.2)
-      ownCamera.maxZ = dist + radius * 6
-      const cam: Camera = ownCamera
-      this.scene.activeCamera = cam
+      const loaded: AssetContainer = container // narrowed for the closures
+      // The auto-fit fallback camera, created eagerly (a FreeCamera is
+      // cheap; it is only added to the scene's camera list and disposed
+      // with the container at the end of the render).
+      ownCamera = new FreeCamera('poster-cam', Vector3.Zero(), this.scene)
+      const setupCamera = (useAuthored: boolean): Camera => {
+        const authored = useAuthored ? loaded.cameras[0] : null
+        if (authored) {
+          authored.computeWorldMatrix()
+          // Display-only: authored near/far often clips tiny or offset
+          // models. The GLB itself is never touched (backFaceCulling rule).
+          const camPos = authored.getWorldMatrix().getTranslation()
+          const dist = Vector3.Distance(camPos, center)
+          authored.minZ = Math.max(0.0001, Math.min(authored.minZ, (dist - radius) * 0.2))
+          authored.maxZ = Math.max(authored.maxZ, dist + radius * 6)
+          this.headlight.direction = authored.getDirection(Vector3.Forward())
+          return authored
+        }
+        const facing = dominantFacing(loaded)
+        // Tight, aspect-aware framing: wide models must fill the 16:10 card.
+        const fov = 0.7
+        const dist = frameDistance(min, max, center, facing.scale(-1), fov, POSTER_W / POSTER_H, 0.86)
+        this.headlight.direction = facing.scale(-1)
+        const fallback = ownCamera as FreeCamera
+        fallback.position = center.add(facing.scale(dist))
+        fallback.setTarget(center)
+        fallback.fov = fov
+        fallback.minZ = Math.max(0.001, (dist - radius) * 0.2)
+        fallback.maxZ = dist + radius * 6
+        return fallback
+      }
       // Render the scene into the RTT via the SAME path the detail viewer
       // uses (scene.render()): this compiles materials over frames, which the
       // manual rtt.render()/renderList path did not do reliably, leaving
-      // every poster blank on this GL driver.
-      cam.outputRenderTarget = rtt
-      // Warm-up frames first: materials/textures compile over a few frames,
-      // and readPixels is a full GPU sync — doing it once per attempt (with a
-      // 100 ms sleep between attempts, 60 times) was most of the poster cost.
-      let pixels: ArrayBufferView | null = null
-      for (let attempt = 0; attempt < 14; attempt++) {
-        this.scene.render()
-        if (attempt < 2) { await sleep(0); continue }
-        pixels = await this.readback()
-        if (pixels && !isBlank(pixels)) break
-        await sleep(attempt < 6 ? 30 : 90)
+      // every poster blank on this GL driver. Warm-up frames first:
+      // materials/textures compile over a few frames, and readPixels is a
+      // full GPU sync — doing it once per attempt (with a 100 ms sleep
+      // between attempts, 60 times) was most of the poster cost.
+      const tryRender = async (cam: Camera): Promise<ArrayBufferView | null> => {
+        this.scene.activeCamera = cam
+        cam.outputRenderTarget = rtt
+        let out: ArrayBufferView | null = null
+        for (let attempt = 0; attempt < 14; attempt++) {
+          this.scene.render()
+          if (attempt < 2) { await sleep(0); continue }
+          out = await this.readback()
+          if (out && !isBlank(out)) break
+          await sleep(attempt < 6 ? 30 : 90)
+        }
+        cam.outputRenderTarget = null
+        return out
       }
-      cam.outputRenderTarget = null
+      let pixels: ArrayBufferView | null = null
+      let cam = setupCamera(loaded.cameras.length > 0)
+      pixels = await tryRender(cam)
+      if ((!pixels || isBlank(pixels)) && loaded.cameras.length > 0) {
+        // The authored camera frames nothing (or clips everything): fall
+        // back to auto-fit instead of failing the poster.
+        cam = setupCamera(false)
+        pixels = await tryRender(cam)
+      }
       if (!pixels) throw new Error('readPixels returned null')
       if (isBlank(pixels)) throw new Error('poster rendered empty')
       const footprint = projectFootprint(cam, min, max)

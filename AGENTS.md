@@ -46,6 +46,17 @@ bun run build:standalone  # ONE self-contained form-zero-standalone.html
 
 ## Non-negotiable rules (each one previously cost real debugging)
 
+> **SESSION SAFETY: commit and push as you go.** Sandbox sessions can be
+> reset at any moment (2026-08-18: the whole workspace was replaced by a
+> fresh clone mid-task). Only **pushed** commits are guaranteed to survive;
+> uncommitted edits survive only as a working-tree snapshot, and local-only
+> commits live in a `.git` that the reset discards. Commit small,
+> self-contained changes at least every ~60 seconds of active work and
+> `git push` immediately after each commit. After a reset: `git fetch`,
+> find the remote tip, `git diff <tip>` to see what survived as working-tree
+> delta, reapply it on top of the tip, commit, push. (Full playbook:
+> `docs/SANDBOX-VERIFY.md` § Sandbox resets.)
+
 1. **Deep imports only.** `import { Scene } from '@babylonjs/core/scene'`, never
    the `@babylonjs/core` barrel — the barrel is 6 MB and untree-shakable.
 2. **One engine, one context.** Scenes swap via `engine.setActiveScene()`; never
@@ -61,9 +72,11 @@ bun run build:standalone  # ONE self-contained form-zero-standalone.html
    posters/previews). See `poster.ts` / `previewPool.ts`.
 5. **No `scene.environmentTexture` (IBL)** — it rendered every PBR model black.
    Lights-only rig (hemispheric + directional + fill).
-6. **Posters always auto-fit** (`worldBounds` + `dominantFacing` +
-   `fitDistance` in `model/facing.ts`). The model's authored cameras belong in
-   the **viewer** (camera dots), never the thumbnail.
+6. **Posters use the model's authored camera when it has one** (the poster
+   must show the view the author framed); auto-fit (`worldBounds` +
+   `dominantFacing` + `fitDistance` in `model/facing.ts`) is the fallback for
+   models without a camera. Live previews follow the same policy
+   (`preview-camera` index → first imported camera → auto-fit).
 7. **Display rendering is double-sided** (`backFaceCulling = false`) so flat
    text/models are never invisible; never modify the source GLB.
 8. **Side-effect imports** are required for `scene.pick` (`@babylonjs/core/Culling/ray`)

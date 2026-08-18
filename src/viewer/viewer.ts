@@ -158,9 +158,18 @@ export class Viewer {
     this.form.kick()
     this.background = hex
     this.scene.clearColor = Color4.FromHexString(hex + 'FF')
-    paintSpotlight(this.backdropTex, hex)
+    this.repaintBackdrop()
     setCardTint(this.glowMat, luminance(hex) < 0.5 ? '#000000' : '#1a1a20')
     setCardOpacity(this.glowMat, luminance(hex) < 0.5 ? 0.5 : 0.22)
+  }
+
+  /** Repaint the spotlight backdrop for the CURRENT viewport aspect (a
+   *  square gradient stretched across a phone screen was the flat-grey-slab
+   *  regression; the counter-stretch in paintSpotlight needs the aspect). */
+  private repaintBackdrop(): void {
+    const eng = this.scene.getEngine()
+    const aspect = eng.getRenderWidth() / Math.max(1, eng.getRenderHeight())
+    paintSpotlight(this.backdropTex, this.background, aspect)
   }
 
   get cameraCount(): number { return this.imported.length }
@@ -170,6 +179,8 @@ export class Viewer {
     if (this.scene.activeCamera === this.orbit) this.orbit.attachControl(true)
   }
   detach(): void { this.orbit.detachControl() }
+
+  resize(): void { this.repaintBackdrop() }
 
   async load(bytes: Uint8Array, meta: ThreadMeta): Promise<void> {
     this.clear()

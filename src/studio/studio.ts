@@ -14,7 +14,7 @@ import { GLTF2Export } from '@babylonjs/serializers/glTF/2.0/glTFSerializer'
 import type { FormEngine } from '../core/engine'
 import { toFile } from '../model/poster'
 import { validateGLB, type LimitReport } from '../model/limits'
-import { worldCenter, worldRadius } from '../model/facing'
+import { worldCenter, worldRadius, frameDistance } from '../model/facing'
 
 import { theme } from '../theme'
 
@@ -43,6 +43,7 @@ import { importModelFiles } from '../model/importSidecar'
 import { UtilityLayerRenderer } from '@babylonjs/core/Rendering/utilityLayerRenderer'
 import { GizmoManager } from '@babylonjs/core/Gizmos/gizmoManager'
 import type { AbstractMesh } from '@babylonjs/core/Meshes/abstractMesh'
+import { Mesh } from '@babylonjs/core/Meshes/mesh'
 import { PointerEventTypes } from '@babylonjs/core/Events/pointerEvents'
 import { FreeCamera } from '@babylonjs/core/Cameras/freeCamera'
 import { Vector3 as V3 } from '@babylonjs/core/Maths/math.vector'
@@ -285,8 +286,9 @@ export class Studio {
     }
     this.textMesh = result
     const dist = Math.max(result.width, result.height, 1) * 2.4 + 1
-    this.camera.radius = dist
-    this.camera.setTarget(Vector3.Zero())
+    // Frame the ACTIVE camera: in free-fly mode writing only the orbit
+    // camera left the text out of view — "the text exists but is invisible".
+    this.lookAt(Vector3.Zero(), dist)
     this.select(result.mesh)
     this.form.kick(300)
   }
@@ -365,6 +367,129 @@ export class Studio {
       this.camera.setTarget(Vector3.Zero())
     }
     this.form?.kick(500)
+  }
+
+  // ---- view helpers: the camera does NOT auto-look at content any more.
+  // Importing a model keeps the composed view; these buttons frame it.
+
+  /**
+   * The meshes the view helpers operate on.
+   * `withDescendants` controls whether a selection expands to its subtree:
+   * the ORIGIN look-at uses the direct pick only (an "origin" that is the
+   * subtree centroid would just be the bbox centre again), while the
+   * bbox/fit helpers include descendants so the framed extent is real.
+   */
+  private selectedSet(withDescendants = true): AbstractMesh[] {
+    if (this.selection) {
+      const out = [this.selection]
+      if (withDescendants) {
+        for (const d of this.selection.getDescendants(true)) {
+          if (d instanceof Mesh) out.push(d)
+        }
+      }
+      return out
+    }
+    if (this.container) return this.container.meshes.filter((m) => m.name !== '__root__')
+    if (this.textMesh) return [this.textMesh.mesh]
+    return []
+  }
+
+  /** Average of the world origins (pivots) of the selected meshes. */
+  private selectionOrigin(): Vector3 | null {
+    const set = this.selectedSet(false) // origins, not the subtree centroid
+    if (!set.length) return null
+    const acc = new Vector3()
+    for (const m of set) {
+      m.computeWorldMatrix(true)
+      acc.addInPlace(m.getAbsolutePosition())
+    }
+    return acc.scaleInPlace(1 / set.length)
+  }
+
+  /** World AABB of the selection (union over the selected meshes). */
+  private selectionBounds(): { min: Vector3; max: Vector3; center: Vector3; radius: number } | null {
+    const set = this.selectedSet()
+    if (!set.length) return null
+    const min = new Vector3(Infinity, Infinity, Infinity)
+    const max = new Vector3(-Infinity, -Infinity, -Infinity)
+    for (const m of set) {
+      m.computeWorldMatrix(true)
+      const bb = m.getBoundingInfo().boundingBox
+      min.minimizeInPlace(bb.minimumWorld)
+      max.maximizeInPlace(bb.maximumWorld)
+    }
+    const center = min.add(max).scaleInPlace(0.5)
+    const radius = Math.max(0.001, Vector3.Distance(min, max) / 2)
+    return { min, max, center, radius }
+  }
+
+  /**
+   * Apply a look-at target (and optionally a framing distance) to the camera
+   * the user is ACTUALLY using. setCameraState() only writes the orbit
+   * camera, so in free-fly mode the view buttons used to be dead.
+   */
+  private lookAt(target: Vector3, distance?: number): void {
+    if (this.freeCam && this.scene.activeCamera === this.freeCam) {
+      const pos = this.freeCam.position
+      // NOTE: Vector3.subtract mutates in place — it must never be called
+      // on the caller's target (that corrupted the look-at point so the
+      // fly camera aimed at "origin - cameraPos" instead of the origin).
+      const dir = new Vector3()
+      target.subtractToRef(pos, dir)
+      const len = dir.length()
+      if (len > 1e-6) dir.scaleInPlace(1 / len)
+      this.freeCam.setTarget(target.clone())
+      if (distance !== undefined && Number.isFinite(distance) && distance > 0) {
+        // move the fly camera to the framing distance along its look ray
+        const at = target.clone()
+        const back = dir.scale(distance) // fresh vector — no aliasing
+        at.subtractToRef(back, pos)
+      }
+      this.form.kick(300)
+      return
+    }
+    const patch: Partial<CameraState> = { target: [target.x, target.y, target.z] }
+    if (distance !== undefined && Number.isFinite(distance)) patch.radius = Math.max(0.05, distance)
+    this.setCameraState(patch)
+  }
+
+  /** Point the camera at the average origin of the selected meshes. */
+  lookAtSelectedOrigin(): void {
+    const origin = this.selectionOrigin()
+    if (!origin) return
+    this.lookAt(origin)
+  }
+
+  /** Point the camera at the bounding-box centre of the selected meshes. */
+  lookAtSelectedCenter(): void {
+    const b = this.selectionBounds()
+    if (!b) return
+    this.lookAt(b.center)
+  }
+
+  /** Fit the selected meshes in view (keeps the current view direction). */
+  fitSelected(): void {
+    const b = this.selectionBounds()
+    if (!b) return
+    const eng = this.form.engine
+    const aspect = eng.getRenderWidth() / Math.max(1, eng.getRenderHeight())
+    if (this.freeCam && this.scene.activeCamera === this.freeCam) {
+      // Free fly camera: frame the bounds along the current look direction.
+      const dir = this.freeCam.getDirection(Vector3.Forward())
+      const dist = frameDistance(b.min, b.max, b.center, dir, this.freeCam.fov || 0.7, aspect, 0.86)
+      this.lookAt(b.center, Math.max(0.05, dist))
+      return
+    }
+    if (this.camera.mode === 1) {
+      // ortho: size the frustum to the bounds (half-height drives left/right
+      // via aspect; radius keeps the state panel's "dist" consistent).
+      const h = Math.max(0.1, Math.max(b.max.y - b.min.y, (b.max.x - b.min.x) / Math.max(0.2, aspect)) * 0.55)
+      this.lookAt(b.center, h / 0.55)
+    } else {
+      const dir = this.camera.getDirection(Vector3.Forward())
+      const dist = frameDistance(b.min, b.max, b.center, dir, this.camera.fov || 0.7, aspect, 0.86)
+      this.lookAt(b.center, Math.max(0.05, dist))
+    }
   }
 
   // ---- user cameras: add / select / edit / remove ----
@@ -481,10 +606,8 @@ export class Studio {
       throw new Error(report.reason)
     }
     const file = toFile(result.glb, result.filename)
-    const center = worldCenter(result.container)
-    const radius = worldRadius(result.container)
-    this.camera.setTarget(center)
-    this.camera.radius = Math.max(0.6, radius * 2.6)
+    // The camera keeps the composed view: importing must NOT snap it to the
+    // model. Framing is explicit (frame / fit-selected / look-at buttons).
     const imported: ImportedModel = { file, bytes, report, sourceFormat: result.sourceFormat }
     this.imported = imported
     const first = result.container.meshes.find((m) => m.name !== '__root__') ?? null

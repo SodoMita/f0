@@ -59,6 +59,16 @@ bun scripts/capture.mjs && python3 scripts/visual_critique.py
 
 - Branch: `main` (shared). `git fetch && git rebase origin/main` before
   pushing; small atomic commits.
+- **Commit-and-push cadence: every ~60 seconds of active work.** Sandbox
+  sessions can reset at any moment (2026-08-18 incident: the workspace was
+  replaced by a fresh clone mid-task). Only pushed commits are guaranteed to
+  survive — uncommitted edits survive only as a working-tree snapshot, and
+  local-only commits die with the discarded `.git`. Small atomic commits are
+  already the convention; the new part is the *frequency* and the immediate
+  `git push` after each commit. Recovery playbook after a reset:
+  `git fetch` → remote tip → `git diff <tip>` (surviving working-tree delta)
+  → reapply on top of the tip → commit → push. See
+  `docs/SANDBOX-VERIFY.md` § Sandbox resets.
 - Message: `area: what changed (and why if non-obvious)`.
 - Never commit: `node_modules/`, `release/`, `form-zero-standalone.html`,
   `shots/`, secrets, `*.tsbuildinfo` (`.gitignore` covers these).
@@ -85,6 +95,16 @@ input change works:
 | `node scripts/features.mjs` | reply badges, thread view, settings |
 | `node scripts/capture.mjs` | screenshots incl. light theme + phone viewport |
 | `node scripts/facing.mjs <url>` | which side of a model is the readable one |
+| `node scripts/offline-verify.mjs` | deterministic pixel/state checks of the poster camera policy, live-slot reuse, thread animation, card crossfades and studio view tools (runs against `scripts/offline-rig.mjs`, no real relays needed) |
+| `node scripts/verify-publish.mjs` | publish round-trip on the rig: export → poster → Blossom upload → relay OK → live feed event → SHA-verified re-download → kind-5 delete → live tombstone |
+
+When relays/CDNs are unreachable (sandboxes), see `docs/SANDBOX-VERIFY.md`:
+how to obtain a headless Chromium from the npm registry alone (NSS libs from
+the `@sparticuz/chromium` bundle + `LD_LIBRARY_PATH` + a Playwright path
+shim), and how the offline rig (`scripts/offline-rig.mjs`: local wss relay +
+https model server + CSP-safe relay injection via a proxy on :4173) feeds
+the whole suite. All suites then run unmodified with
+`TARGET_URL=http://localhost:4173/`.
 
 Rules of thumb learned the hard way:
 

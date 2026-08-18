@@ -111,24 +111,39 @@ export function paintBackdrop(tex: DynamicTexture, hex: string): void {
  * falls off to a darker floor, so a model reads as standing in a room
  * instead of floating in a black void.
  */
-export function paintSpotlight(tex: DynamicTexture, hex: string): void {
+export function paintSpotlight(tex: DynamicTexture, hex: string, aspect = 1.6): void {
   const { width: w, height: h } = tex.getSize()
   const ctx = tex.getContext() as CanvasRenderingContext2D
   const dark = luminance(hex) < 0.5
+  ctx.save()
   ctx.fillStyle = shade(hex, dark ? -0.25 : -0.08)
   ctx.fillRect(0, 0, w, h)
-  const rg = ctx.createRadialGradient(w / 2, h * 0.42, 0, w / 2, h * 0.42, Math.max(w, h) * 0.62)
+  // The backdrop plane is camera-aspect (wide on landscape, narrow on
+  // portrait). A circular gradient drawn here gets stretched by the plane,
+  // so on phones the lit oval turned into a flat grey slab (regression:
+  // "viewer shows a flat grey slab on phone"). Counter-stretch by 1/aspect
+  // so the spotlight is CIRCULAR on screen at every aspect.
+  ctx.translate(w / 2, h * 0.42)
+  ctx.scale(1 / Math.max(0.25, aspect), 1)
+  const rg = ctx.createRadialGradient(0, 0, 0, 0, 0, Math.max(w, h) * 0.55)
   rg.addColorStop(0, shade(hex, dark ? 0.16 : 0.1))
   rg.addColorStop(0.45, shade(hex, dark ? 0.05 : 0.02))
   rg.addColorStop(1, shade(hex, dark ? -0.35 : -0.14))
   ctx.fillStyle = rg
+  ctx.fillRect(-w, -h, w * 2, h * 2)
+  ctx.restore()
+  // bottom falloff so the model's "floor" reads darker than the top
+  const fg = ctx.createLinearGradient(0, h * 0.5, 0, h)
+  fg.addColorStop(0, 'rgba(0,0,0,0)')
+  fg.addColorStop(1, dark ? 'rgba(0,0,0,0.28)' : 'rgba(0,0,0,0.10)')
+  ctx.fillStyle = fg
   ctx.fillRect(0, 0, w, h)
   tex.update()
 }
 
-export function makeSpotlightTexture(scene: Scene, name: string, hex: string): DynamicTexture {
+export function makeSpotlightTexture(scene: Scene, name: string, hex: string, aspect = 1.6): DynamicTexture {
   const tex = new DynamicTexture(name, { width: 512, height: 512 }, scene, false)
-  paintSpotlight(tex, hex)
+  paintSpotlight(tex, hex, aspect)
   return tex
 }
 
