@@ -314,11 +314,52 @@ const RIG_HOOK = `(() => {
   }, 120);
 })();`
 
+// Blossom-style upload store: sha256 -> bytes (PUT /upload, GET /<sha>)
+const uploads = new Map()
+
 const httpsServer = createHttps({ key: KEY, cert: CERT }, (req, res) => {
   const url = new URL(req.url, `https://localhost:${RELAY_PORT}`)
-  if (url.pathname === '/debug') {
-    res.writeHead(200, { 'content-type': 'application/json' })
-    res.end(JSON.stringify({ count: events.length, distinct: [...distinct.entries()] }))
+  const cors = {
+    'access-control-allow-origin': '*',
+    'access-control-allow-methods': 'GET, PUT, OPTIONS',
+    'access-control-allow-headers': 'Authorization, Content-Type',
+  }
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, cors)
+    res.end()
+    return
+  }
+  if (req.method === 'PUT' && url.pathname === '/upload') {
+    const chunks = []
+    req.on('data', (c) => chunks.push(c))
+    req.on('end', () => {
+      const body = Buffer.concat(chunks)
+      const sha = createHash('sha256').update(body).digest('hex')
+      // BUD-01 requires a kind-24242 authorization; the rig only checks it
+      // is present and parses (the app's real signature check is off-rig).
+      const auth = String(req.headers.authorization ?? '')
+      if (!auth.startsWith('Nostr ')) { res.writeHead(401, cors).end('missing Nostr authorization'); return }
+      try {
+        const ev = JSON.parse(Buffer.from(auth.slice(6), 'base64').toString('utf8'))
+        if (ev.kind !== 24242 || !Array.isArray(ev.tags)) { res.writeHead(401, cors).end('bad auth event'); return }
+        if (!ev.tags.some((t) => t[0] === 't' && t[1] === 'upload')) { res.writeHead(401, cors).end('bad auth method'); return }
+      } catch { res.writeHead(401, cors).end('bad auth encoding'); return }
+      uploads.set(sha, body)
+      res.writeHead(200, { 'content-type': 'application/json', ...cors })
+      res.end(JSON.stringify({ url: `https://localhost:${RELAY_PORT}/${sha}`, sha256: sha }))
+    })
+    return
+  }
+  if (req.method === 'GET' && /^\/[0-9a-f]{64}$/.test(url.pathname)) {
+    const bytes = uploads.get(url.pathname.slice(1))
+    if (!bytes) { res.writeHead(404, cors).end(); return }
+    const isPng = bytes[0] === 0x89 && bytes[1] === 0x50
+    res.writeHead(200, {
+      'content-type': isPng ? 'image/png' : 'model/gltf-binary',
+      'content-length': bytes.length,
+      'access-control-allow-origin': '*',
+    })
+    res.end(bytes)
     return
   }
   if (url.pathname.startsWith('/models/')) {
@@ -338,6 +379,7 @@ const httpsServer = createHttps({ key: KEY, cert: CERT }, (req, res) => {
 })
 
 const wss = new WebSocketServer({ server: httpsServer })
+const subs = new Map() // subId -> { ws, filters }
 wss.on('connection', (ws) => {
   ws.on('message', (raw) => {
     let msg
@@ -346,6 +388,7 @@ wss.on('connection', (ws) => {
     if (msg[0] === 'REQ') {
       const sub = msg[1]
       const filters = msg.slice(2).filter((f) => f && typeof f === 'object')
+      subs.set(sub, { ws, filters })
       const sent = new Set()
       for (const f of filters) {
         const list = events.filter((ev) => matchFilter(ev, f)).slice(0, f.limit ?? 500)
@@ -356,7 +399,26 @@ wss.on('connection', (ws) => {
         }
       }
       ws.send(JSON.stringify(['EOSE', sub]))
+    } else if (msg[0] === 'EVENT') {
+      const ev = msg[1]
+      if (!ev || typeof ev.id !== 'string' || typeof ev.kind !== 'number') return
+      // NIP-20 acknowledgement — nostr-tools' publish() waits for it
+      ws.send(JSON.stringify(['OK', ev.id, true, '']))
+      if (!events.some((e) => e.id === ev.id)) {
+        events.push(ev)
+        // live push to every matching subscription INCLUDING the publisher's
+        // own (NIP-01 relays deliver to all subscribers; the app dedupes by
+        // id) — otherwise the app would never see its own published posts.
+        for (const [sub, { ws: other, filters }] of subs) {
+          if (filters.some((f) => matchFilter(ev, f))) other.send(JSON.stringify(['EVENT', sub, ev]))
+        }
+      }
+    } else if (msg[0] === 'CLOSE') {
+      subs.delete(msg[1])
     }
+  })
+  ws.on('close', () => {
+    for (const [sub, subInfo] of subs) if (subInfo.ws === ws) subs.delete(sub)
   })
 })
 

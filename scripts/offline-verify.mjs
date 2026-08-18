@@ -22,6 +22,10 @@ page.on('pageerror', (e) => errors.push(e.message.slice(0, 200)))
 page.on('console', (m) => {
   // headless has no audio device; the mixer's device error is expected
   if (m.type() !== 'error' || /AudioContext|audio device/i.test(m.text())) return
+  // The app boots with the DEFAULT public relays for a few frames before the
+  // rig hook switches them to the local one; the sandbox blocks those relays
+  // and Chrome logs the failed connection. Expected here, not an app error.
+  if (/WebSocket connection to 'wss:\/\/(?!localhost)/.test(m.text())) return
   errors.push('[console] ' + m.text().slice(0, 160))
 })
 page.on('request', (r) => { if (/cdn\.babylonjs\.com|unpkg|jsdelivr/.test(r.url())) bad.push(r.url()) })
