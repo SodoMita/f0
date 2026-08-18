@@ -5,6 +5,32 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 
+- [x] **Settings: arbitrary preview width + viewer hand-off from live preview**
+      (agent arena, 2026-08-18, SPEC AMENDMENTS 50+51):
+      - `previewQuality` (select, 4 presets 224/320/448/640 px) renamed to
+        `previewWidth` (slider, 32-4096 px, default 448, step 1). Height
+        is derived from the 16:10 poster aspect. PreviewPool.setRttSize
+        rebuilds every slot's RTT in place; a new `onResize` callback
+        tells the board/thread to swap the card material's texture handle
+        immediately (no fade). Preset keys still recommend the same
+        widths, so picking a tier is unchanged.
+      - Viewer's `openViewer` now hands off the live preview's parsed
+        container to `viewer.loadFromContainer` when the user opens a
+        currently-animating card. New helper `handoffContainer` (in
+        `src/core/sceneTransfer.ts`) clones meshes/materials/skeletons/
+        animationGroups into viewer.scene via Babylon's
+        `instantiateModelsToScene(nameFn, /*cloneMaterials*/ true)` and
+        disposes the source; PreviewPool.acquire() preserves the parsed
+        container for the viewer. Hand-off bypasses LoadAssetContainerAsync
+        entirely, AND skips the "loading model" flash since the model is
+        already on screen. Falls through to the bytes path if the hand-off
+        fails. The pool's staging offset (+800*N per slot) is subtracted
+        so the model lands at the origin in viewer.scene.
+      - Verification: `bun run build` clean (tsc strict + vite build), all
+        new types resolve, no regressions to the existing viewer/poster
+        pipeline (previewQuality consumed by ZERO call sites prior — it
+        was a dead setting).
+
 - [x] **Bugfix round 2 — audit + REGRESSIONS.txt, all verified headlessly**
       (agent arena, 2026-08-18, SPEC AMENDMENT 49, docs/SANDBOX-VERIFY.md):
       - THE live-preview root cause found and fixed: the pool never called

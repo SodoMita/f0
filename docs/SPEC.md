@@ -464,3 +464,25 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
       SVG, portrait inspector 22vh, duplicate studio CSS block
       consolidated, aspect-aware viewer spotlight (phone grey slab),
       type-tab seed enables publish.
+
+50. Card preview width is an arbitrary positive integer (settings →
+    Textures → "Card / preview width", renamed from "Card / preview
+    resolution"). The previous 4-preset select (224 / 320 / 448 / 640 px
+    width) became a numeric slider (32-4096 px, default 448, step 1).
+    Height is derived from the 16:10 poster aspect (width × 5/8) so the
+    live preview never stretches the model. PreviewPool.setRttSize(w,h)
+    rebuilds every slot's RenderTargetTexture in place; onResize(postId,
+    rtt) callback tells the card / thread-node shader to swap its
+    texture handle immediately (no fade — the model pose and animation
+    don't change, only the pixel grid).
+51. Model viewer hands off the live-preview container. When the user
+    opens the model view for a post currently animating in the board's
+    live preview pool, Viewer.loadFromContainer() adopts the
+    already-parsed AssetContainer (cloned into viewer.scene by
+    `handoffContainer` in src/core/sceneTransfer.ts) instead of running
+    a fresh LoadAssetContainerAsync. Skips the parse entirely AND the
+    "loading model" indicator, since the model is already on screen.
+    Falls back to the byte-loading path silently if the hand-off fails.
+    The slot's staging offset (the +800*N the pool uses to keep slots
+    outside one another's frustums) is subtracted from each cloned
+    rootNode so the model lands at the viewer-scene origin.
