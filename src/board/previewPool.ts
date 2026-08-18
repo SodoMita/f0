@@ -257,6 +257,40 @@ export class PreviewPool {
     slot.visible = false
   }
 
+  /**
+   * Hand off the LIVE container for a post without disposing it. The slot
+   * becomes free (so a new request() can re-use it) but the parsed
+   * AssetContainer is left intact — the caller (the model viewer) takes
+   * ownership and re-binds it to its own scene via handoffContainer.
+   *
+   * Returns null when the post is not currently live (caller falls back
+   * to a fresh LoadAssetContainerAsync).
+   */
+  acquire(postId: string): { container: AssetContainer; anims: AnimationGroup[] } | null {
+    const slot = this.byPost.get(postId)
+    if (!slot || !slot.container) return null
+    const container = slot.container
+    const anims = slot.anims.slice()
+    // Pause the slot's anims so a parallel view doesn't keep ticking them
+    // while the caller rebinds. handoffContainer clones AnimationGroups
+    // and remaps their targets, so the caller restarts playback.
+    for (const a of slot.anims) a.stop()
+    // Un-reparent rootNodes from the slot's offset TransformNode so
+    // removeAllFromScene in handoffContainer does not warn about a stale
+    // parent (the offset root will be disposed below).
+    for (const n of container.rootNodes) n.parent = null
+    // Drop slot bookkeeping; KEEP the container — the caller owns it now.
+    this.byPost.delete(postId)
+    this.onRelease?.(postId)
+    slot.anims = []
+    slot.container = null
+    slot.root?.dispose()
+    slot.root = null
+    slot.postId = null
+    slot.visible = false
+    return { container, anims }
+  }
+
   /** Advance one frame; render only the slots whose turn it is.
    * Each slot renders the stage scene into its own RTT via
    * camera.outputRenderTarget — the same path the poster pipeline uses. The
