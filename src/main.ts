@@ -27,6 +27,7 @@ import { Legend } from './hud/legend'
 import { NetworkPanel } from './hud/networkPanel'
 import { ErrorSheet, ERRORS } from './hud/errorSheet'
 import { attachAllDragNumbers } from './studio/dragNumber'
+import { handoffContainer } from './core/sceneTransfer'
 
 type Mode = 'boot' | 'board' | 'viewer' | 'studio' | 'thread'
 
@@ -800,6 +801,27 @@ async function boot(): Promise<void> {
     syncDeleteButton()
     setMode('viewer')
     camDots.innerHTML = ''
+    // Try to hand off the live preview pool's parsed container BEFORE the
+    // loading indicator. If the post is currently animating on a card, the
+    // pool already has the GLB parsed in previewScene; cloning it into
+    // viewer.scene is far cheaper than re-parsing and avoids the
+    // "loading model" flash on what was already on screen.
+    const live = board.previewPool.acquire(id)
+    if (live) {
+      try {
+        const container = handoffContainer(live.container, board.previewPool.scene, viewer.scene, 'viewer')
+        if (nav !== viewerNav) return
+        viewer.loadFromContainer(container, meta)
+        if (nav !== viewerNav) return
+        renderCamDots()
+        syncPlay()
+        return
+      } catch (err) {
+        // Hand-off failed (e.g. parse result lost a mesh). Fall through to
+        // the bytes path — the user still gets a working viewer.
+        console.warn('viewer handoff failed, falling back to parse:', err)
+      }
+    }
     setLoading('model', true, 'loading model')
     try {
       const bytes = await assets.getModelBytes(meta)
