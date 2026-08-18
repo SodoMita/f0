@@ -218,10 +218,10 @@ export class Viewer {
    * stale loadToken, a disposed container, or a stage that is no longer the
    * active scene — the user still gets a working viewer, just with the parse.
    */
-  loadFromContainer(container: import('@babylonjs/core/assetContainer').AssetContainer, meta: ThreadMeta): void {
+  loadFromContainer(container: AssetContainer, meta: ThreadMeta): void {
     this.clear()
     const token = ++this.loadToken
-    if (container.scene !== this.scene || container.isDisposed?.()) {
+    if (container.scene !== this.scene) {
       // Defensive: only adopt containers already bound to our scene.
       this.loadToken++
       return
@@ -236,7 +236,7 @@ export class Viewer {
   }
 
   /** Wire a parsed container into the viewer state (camera, anims, glow, lights). */
-  private adopt(container: import('@babylonjs/core/assetContainer').AssetContainer, meta: ThreadMeta): void {
+  private adopt(container: AssetContainer, meta: ThreadMeta): void {
     container.addAllToScene()
     for (const m of container.meshes) {
       if (m.material) m.material.backFaceCulling = false

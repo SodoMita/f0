@@ -1,7 +1,7 @@
 import { Scene } from '@babylonjs/core/scene'
 import { Mesh } from '@babylonjs/core/Meshes/mesh'
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode'
-import type { AssetContainer } from '@babylonjs/core/assetContainer'
+import { AssetContainer } from '@babylonjs/core/assetContainer'
 
 /**
  * Take an `AssetContainer` whose meshes live in `sourceScene` and produce a
@@ -58,12 +58,12 @@ export function handoffContainer(
       moveMesh(node, sourceScene, targetScene)
     } else if (node instanceof TransformNode) {
       moveTransformNode(node, sourceScene, targetScene)
-    }
-    // Children of root nodes that were added by the clone: walk them and
-    // re-bind too. addAllAssetsToContainer (below) handles bookkeeping,
-    // but the scene's own *_scene pointer needs reassignment explicitly.
-    for (const child of [...node.getChildMeshes(false)]) {
-      moveMesh(child, sourceScene, targetScene)
+      // TransformNodes in Babylon can also register meshes as children via
+      // node.getChildMeshes() — re-bind those too (the cloned tree is
+      // dispatched under rootNodes, but the materials come via the meshes).
+      for (const child of [...node.getChildMeshes(false)]) {
+        if (child instanceof Mesh) moveMesh(child, sourceScene, targetScene)
+      }
     }
   }
 

@@ -132,7 +132,7 @@ export class PreviewPool {
     this.opts.rttWidth = w
     this.opts.rttHeight = h
     for (const slot of this.slots) {
-      if (slot.rtt && !slot.rtt.isDisposed?.()) slot.rtt.dispose()
+      slot.rtt.dispose()
       slot.rtt = new RenderTargetTexture(`slot-${slot.index}`, { width: w, height: h }, this.stage)
       slot.rtt.renderTargetOptions.generateDepthBuffer = true
       slot.rtt.renderTargetOptions.generateMipMaps = false
