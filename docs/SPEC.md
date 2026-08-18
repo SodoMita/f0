@@ -464,3 +464,44 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
       SVG, portrait inspector 22vh, duplicate studio CSS block
       consolidated, aspect-aware viewer spotlight (phone grey slab),
       type-tab seed enables publish.
+
+50. NETWORK BUTTON + LIVE TRANSFER STATUS (2026-08-18):
+    - The network control in the topbar is a **42x42 button** (the same size
+      as every other HUD control, 10px gap => WCAG 2.5.5 target size), with
+      the relay-state dot drawn as a `::before` pseudo-element tinted through
+      a `--dot` custom property. It used to be an 8x8 `<button class=net-dot>`
+      — a 64px^2 target, roughly 1/24th of the recommended minimum, so on
+      touch it was mostly a miss. The dot's meaning is unchanged (grey none /
+      amber partial / green all connected) and the legend glyph still renders
+      as the plain 8px span.
+    - **Loading statuses now report throughput.** `src/core/transfer.ts` is a
+      single app-wide meter: every Blossom download (models AND posters) and
+      every Blossom upload registers a handle, reports byte deltas, and ends
+      in a `finally`. Speed is measured over a 2s sliding window of
+      cumulative-byte samples ticked at 200ms, so a stalled replica visibly
+      drops to 0 instead of being hidden by a whole-transfer average. The
+      ticker only runs while something is in flight (idle board still renders
+      ~0 fps — see perf.mjs `idleBoard.rendersPerSec`).
+    - Four surfaces read that one meter:
+      (a) the loading overlay — one line per active direction
+          `↓ 4.2 MiB/s · 9.7/18 MiB · 54%` plus a determinate bar once a total
+          size is known;
+      (b) the topbar — a compact `↓ 4.2 MiB/s` readout beside the network
+          button (slot reserved so the toolbar never jumps; hidden < 560px)
+          and a pulse ring on the button itself while bytes move;
+      (c) the studio publish status — the live upload rate + percent instead
+          of a static `upload…`;
+      (d) the network panel — a TRAFFIC section with a live row per direction
+          that falls back to `idle · N MiB this session`.
+    - Uploads had NO progress signal because `fetch` does not report
+      request-body progress. `BlossomClient.upload` now PUTs through
+      XMLHttpRequest (`upload.onprogress`), same semantics as before (no
+      credentials, 60s cap, JSON response, URL validation), with a `fetch`
+      fallback where XHR is unavailable.
+    - Downloads late-bind their total from `Content-Length` when the event
+      carried no `size` tag.
+    - Verified with `scripts/transfer.mjs` (13 checks: 42x42 target,
+      no overlap, off-centre tap opens the panel, a real rig download is
+      metered end-to-end, determinate totals, return-to-idle, session totals,
+      and the upload readouts) plus the existing offline-verify (39) and
+      verify-publish (7, exercising the new XHR upload path) suites.

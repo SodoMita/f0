@@ -35,7 +35,10 @@ body[data-theme="light"] #settings-panel { background: rgba(252, 252, 254, 0.95)
 body[data-theme="light"] #toast { background: rgba(250, 250, 252, 0.85); border-color: rgba(0, 0, 0, 0.12); }
 body[data-theme="light"] .cam-dot { border-color: rgba(0, 0, 0, 0.28); }
 body[data-theme="light"] .cam-dot.active { background: #16161b; color: #fafafc; border-color: #16161b; }
-body[data-theme="light"] .net-dot { box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.06); }
+/* Legend glyph only — the topbar button draws its dot as a ::before and
+   must not inherit this halo around its 42px chrome. */
+body[data-theme="light"] span.net-dot { box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.06); }
+body[data-theme="light"] button.net-dot::before { box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.06), 0 0 10px var(--dot, transparent); }
 /* studio + form contrast fixes: every dark translucent panel/input that used
    #0b0b0c/#222/rgba(18,18,19) or white-translucent on dark must flip to a
    dark-on-light equivalent so var(--ink) (dark) stays legible. */
@@ -168,13 +171,32 @@ html, body {
 #btn-play .i-play { fill: currentColor; stroke-width: 1.2; }
 
 /* ---------- network dot ---------- */
+/* The plain dot (legend glyph, and the base look of the topbar button). */
 .net-dot {
   pointer-events: auto;
   width: 8px; height: 8px; border-radius: 50%;
-  background: var(--muted);
+  background: var(--dot, var(--muted));
   margin-right: 4px;
   box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.06);
 }
+
+/* Live throughput readout next to the network button. Monospace + a fixed
+   min-width so the digits don't shove the toolbar around every 200 ms. */
+.net-rate {
+  pointer-events: none;
+  font: 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  white-space: nowrap;
+  min-width: 74px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.net-rate.up { color: var(--accent); }
+/* Reserve the slot instead of collapsing it: the topbar must not jump
+   sideways every time a transfer starts or finishes. */
+.net-rate[hidden] { display: inline-block; visibility: hidden; }
+@media (max-width: 560px) { .net-rate, .net-rate[hidden] { display: none; } }
 
 /* ---------- viewer bar ---------- */
 #viewer-bar {
@@ -270,6 +292,33 @@ body.drawer-open #viewer-bar { padding-right: calc(min(400px, 92vw) + 16px); }
   font-size: 9px; letter-spacing: 0.24em; text-transform: uppercase;
   color: var(--muted);
 }
+/* Live transfer readout under the ring: direction, speed, moved/total, %. */
+.loading-rate {
+  font: 10px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.06em;
+  color: var(--ink);
+  opacity: 0.78;
+  white-space: pre;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  margin-top: -4px;
+}
+/* Determinate bar — only shown once a total size is known. */
+.loading-bar {
+  display: block;
+  width: 132px; height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.14);
+  overflow: hidden;
+  margin-top: -2px;
+}
+.loading-bar > i {
+  display: block; height: 100%; width: 0%;
+  border-radius: 2px;
+  background: var(--accent);
+  transition: width 0.2s linear;
+}
+body[data-theme="light"] .loading-bar { background: rgba(0, 0, 0, 0.12); }
 @keyframes ring-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
   #loading .ring { animation-duration: 2.4s; }
@@ -505,9 +554,64 @@ body[data-theme="light"] #legend { background: rgba(240, 240, 244, 0.55); }
 body[data-theme="light"] .legend-card { background: rgba(252, 252, 254, 0.97); border-color: rgba(0, 0, 0, 0.10); }
 body[data-theme="light"] .legend-glyph { background: rgba(0, 0, 0, 0.05); border-color: rgba(0, 0, 0, 0.13); }
 
-/* net-dot is a button now */
-button.net-dot { border: none; padding: 0; cursor: pointer; }
-button.net-dot:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+/* net-dot is a button now.
+   It used to be literally 8x8 px — a 64 px^2 tap target, ~1/24th of the
+   recommended minimum, so on touch it was mostly a miss. It is now a full
+   42x42 button matching the other topbar controls (WCAG 2.5.5 "Target Size"
+   wants >= 44x44 including spacing; the 10 px topbar gap covers the rest),
+   with the coloured dot drawn as a pseudo-element so the button chrome and
+   the state colour stay independent. main.ts sets `--dot`. */
+button.net-dot {
+  position: relative;
+  width: 42px; height: 42px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  box-shadow: none;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.14s ease, border-color 0.14s ease;
+}
+button.net-dot::before {
+  content: '';
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: var(--dot, var(--muted));
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.06), 0 0 10px var(--dot, transparent);
+  transition: transform 0.14s ease;
+}
+button.net-dot:hover { background: rgba(255, 255, 255, 0.10); border-color: rgba(255, 255, 255, 0.24); }
+button.net-dot:hover::before { transform: scale(1.15); }
+button.net-dot:active { background: rgba(255, 255, 255, 0.16); }
+button.net-dot:active::before { transform: scale(0.9); }
+button.net-dot:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Traffic pulse: a ring that breathes while bytes are actually moving, so
+   the topbar shows "the network is working" even with no overlay up. */
+button.net-dot::after {
+  content: '';
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 10px; height: 10px;
+  margin: -5px 0 0 -5px;
+  border-radius: 50%;
+  border: 1.5px solid var(--dot, var(--muted));
+  opacity: 0;
+  pointer-events: none;
+}
+button.net-dot.busy::after { animation: net-pulse 1.35s ease-out infinite; }
+@keyframes net-pulse {
+  0%   { transform: scale(1);   opacity: 0.55; }
+  100% { transform: scale(2.6); opacity: 0; }
+}
+body[data-theme="light"] button.net-dot:hover { background: rgba(0, 0, 0, 0.07); border-color: rgba(0, 0, 0, 0.16); }
+@media (prefers-reduced-motion: reduce) {
+  button.net-dot.busy::after { animation-duration: 3s; }
+  button.net-dot:hover::before, button.net-dot:active::before { transform: none; }
+}
 
 /* ---------- network panel (kestrel) ---------- */
 #network-panel {
@@ -553,6 +657,15 @@ button.net-dot:focus-visible { outline: 2px solid var(--accent); outline-offset:
 .net-state.offline { background: var(--danger); }
 @keyframes netpulse { 50% { opacity: 0.35; } }
 @media (prefers-reduced-motion: reduce) { .net-state.connecting { animation: none; border: 1px dashed rgba(255,255,255,0.7); } }
+/* Live traffic rows (network panel): direction glyph + speed/volume. */
+.net-traffic .net-item { font: 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; }
+.net-traffic .url { direction: ltr; color: var(--muted); }
+.net-traffic .net-item.live .url { color: var(--ink); }
+.net-arrow {
+  flex: 0 0 auto; width: 12px; text-align: center;
+  color: var(--muted); font-size: 12px; line-height: 1;
+}
+.net-traffic .net-item.live .net-arrow { color: var(--accent); }
 .net-remove {
   flex: 0 0 auto; border: none; background: transparent; color: var(--muted);
   cursor: pointer; padding: 2px; display: grid; place-items: center;
@@ -641,7 +754,7 @@ body[data-theme="light"] .sheet-card { background: rgba(253, 246, 245, 0.97); bo
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.studio-status { font: 11px/1 ui-monospace, monospace; color: var(--muted); min-width: 64px; text-align: right; }
+.studio-status { font: 11px/1 ui-monospace, monospace; color: var(--muted); min-width: 96px; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .studio-status.ok { color: var(--success); }
 .studio-status.err { color: var(--danger); }
 .studio-status.busy { color: var(--warning); }

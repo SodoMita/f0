@@ -5,6 +5,26 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 
+- [x] **Network button hit target + live download/upload speeds**
+      (agent arena, 2026-08-18, SPEC AMENDMENT 50):
+      - The topbar network control is a real 42x42 button (was an 8x8 dot —
+        ~1/24th of the recommended touch target). The state dot is now a
+        `::before` tinted via `--dot`; hover/active/focus affordances added.
+      - New `src/core/transfer.ts`: one app-wide transfer meter (2s sliding
+        window, 200ms tick, idle-stops) fed by every Blossom download and
+        upload.
+      - Loading overlay shows `↓ 4.2 MiB/s · 9.7/18 MiB · 54%` per direction
+        plus a determinate bar; topbar shows a compact rate + a pulse ring on
+        the network button; studio publish shows the live upload rate;
+        network panel gained a TRAFFIC section (live rows, session totals).
+      - `BlossomClient.upload` switched from `fetch` to XHR so upload
+        progress exists at all (`fetch` has no request-body progress).
+      - Verified: `scripts/transfer.mjs` (13 checks, new), offline-verify
+        (39), verify-publish (7, covers the new XHR upload), orient,
+        interact, settings, smoke, features, shaders, pages, memcheck, perf
+        (`idleBoard.rendersPerSec` still 0 — the meter's ticker only runs
+        during transfers).
+
 - [x] **Bugfix round 2 — audit + REGRESSIONS.txt, all verified headlessly**
       (agent arena, 2026-08-18, SPEC AMENDMENT 49, docs/SANDBOX-VERIFY.md):
       - THE live-preview root cause found and fixed: the pool never called

@@ -27,6 +27,7 @@ import { Legend } from './hud/legend'
 import { NetworkPanel } from './hud/networkPanel'
 import { ErrorSheet, ERRORS } from './hud/errorSheet'
 import { attachAllDragNumbers } from './studio/dragNumber'
+import { transfers, formatRate, formatBytes, formatDirStats, type TransferStats } from './core/transfer'
 
 type Mode = 'boot' | 'board' | 'viewer' | 'studio' | 'thread'
 
@@ -110,6 +111,7 @@ async function boot(): Promise<void> {
   const fileInput = $('file-input') as HTMLInputElement
   let publishing = false
   const netDot = $('net-dot')
+  let relaysOnline = 0
   const btnPlay = $('btn-play') as HTMLButtonElement
   const camDots = $('cam-dots')
   const metaText = $('meta-text')
@@ -118,6 +120,9 @@ async function boot(): Promise<void> {
   // ---------- loading ring ----------
   const loading = $('loading')
   const loadingLabel = $('loading-label')
+  const loadingRate = $('loading-rate')
+  const loadingBar = $('loading-bar')
+  const loadingBarFill = loadingBar.firstElementChild as HTMLElement
   const loadingReasons = new Set<string>()
   function setLoading(reason: string, on: boolean, label = ''): void {
     if (on === loadingReasons.has(reason)) return
@@ -126,8 +131,65 @@ async function boot(): Promise<void> {
     engine.kick()
     loading.hidden = loadingReasons.size === 0
     if (!loading.hidden) loadingLabel.textContent = label || reason
+    if (loading.hidden) { loadingRate.hidden = true; loadingBar.hidden = true }
+    else paintTransfers(transfers.stats())
   }
   ;(window as any).__loading = loadingReasons
+
+  // ---------- live transfer readouts ----------
+  // One meter feeds three surfaces: the loading overlay (speed + progress
+  // bar), the topbar readout next to the network button, and the network
+  // panel's TRAFFIC rows. A spinner alone can't tell "downloading a 40 MiB
+  // model at 300 KiB/s" from "hung"; the byte rate can.
+  const netRate = $('net-rate')
+  const netDown = $('net-down')
+  const netUp = $('net-up')
+
+  function paintTransfers(s: TransferStats): void {
+    // The "primary" transfer drives the single-value surfaces (topbar
+    // readout, progress bar): whichever active direction is moving the most
+    // bytes. Picking a fixed direction made the bar disagree with the line
+    // above it whenever a publish overlapped a poster fetch.
+    const primary = !s.up.active ? s.down
+      : !s.down.active ? s.up
+      : s.up.total > s.down.total ? s.up : s.down
+    const primaryArrow = primary === s.up ? '↑' : '↓'
+
+    // --- topbar: compact, one direction at a time
+    const compact = s.active ? `${primaryArrow} ${formatRate(primary.bps)}` : ''
+    netRate.textContent = compact
+    netRate.hidden = compact === ''
+    netRate.classList.toggle('up', primaryArrow === '↑')
+    netDot.classList.toggle('busy', s.active)
+    netDot.title = `${relaysOnline}/${pool.relayUrls.length} relays` + (compact ? ` · ${compact}` : '')
+
+    // --- loading overlay: full detail + a determinate bar when size is known
+    if (!loading.hidden) {
+      const lines: string[] = []
+      if (s.down.active) lines.push(formatDirStats('↓', s.down))
+      if (s.up.active) lines.push(formatDirStats('↑', s.up))
+      loadingRate.textContent = lines.join('\n')
+      loadingRate.hidden = lines.length === 0
+      const pct = primary.total > 0 ? Math.min(100, (primary.bytes / primary.total) * 100) : 0
+      loadingBar.hidden = !(primary.active && primary.total > 0)
+      if (!loadingBar.hidden) loadingBarFill.style.width = pct.toFixed(1) + '%'
+    }
+
+    // --- studio: publishing shows the live upload rate, not a bare 'upload…'
+    if (publishing && s.up.active) {
+      const pct = s.up.total > 0 ? ` · ${Math.min(100, Math.round((s.up.bytes / s.up.total) * 100))}%` : ''
+      setStudioStatus(`↑ ${formatRate(s.up.bps)}${pct}`, 'busy')
+    }
+
+    // --- network panel: persistent rows, so 'idle' is a real state, and
+    // an idle row still reports what this session has moved.
+    const idle = (moved: number) => moved > 0 ? `idle · ${formatBytes(moved)} this session` : 'idle'
+    netDown.textContent = s.down.active ? formatDirStats('', s.down) : idle(s.session.down)
+    netUp.textContent = s.up.active ? formatDirStats('', s.up) : idle(s.session.up)
+    netDown.parentElement?.classList.toggle('live', s.down.active > 0)
+    netUp.parentElement?.classList.toggle('live', s.up.active > 0)
+  }
+  transfers.subscribe(paintTransfers)
 
   let toastTimer = 0
   function showToast(msg: string): void {
@@ -891,8 +953,11 @@ async function boot(): Promise<void> {
     const online = states.filter((s) => s === 'online').length
     const state = online === 0 ? 'none' : online < pool.relayUrls.length ? 'partial' : 'online'
     const color = { none: theme.muted, partial: theme.warning, online: theme.success }[state]
-    netDot.style.background = color
-    netDot.title = `${online}/${pool.relayUrls.length} relays`
+    // The dot is a pseudo-element now (the button itself is a 42px hit
+    // target), so the state colour travels through a custom property.
+    relaysOnline = online
+    netDot.style.setProperty('--dot', color)
+    paintTransfers(transfers.stats())
     const allOffline = states.length >= pool.relayUrls.length && states.every((s) => s === 'offline')
     if (allOffline && !warnedOffline) {
       warnedOffline = true
@@ -952,6 +1017,9 @@ async function boot(): Promise<void> {
   ;(window as any).__form0 = {
     engine, pool, blossoms, index, board, viewer, studio, threadView, router, assets,
     legend, networkPanel, errorSheet, settings, settingsPanel, graphics, mixer, caps,
+    // transfer meter: lets scripts/loading-shot.mjs fake a slow transfer and
+    // capture the speed readouts without waiting for a real 40 MiB model
+    transfers, setLoading,
   }
 }
 

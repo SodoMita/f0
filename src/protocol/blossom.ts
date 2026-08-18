@@ -1,5 +1,6 @@
 import { finalizeEvent, generateSecretKey, type EventTemplate } from 'nostr-tools'
 import { BLOSSOM_AUTH_KIND, LIMITS } from '../theme'
+import { transfers } from '../core/transfer'
 
 export async function sha256Hex(bytes: Uint8Array): Promise<string> {
   const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
@@ -68,9 +69,16 @@ export class BlossomClient {
    */
   async download(urls: string[], hash: string, expectedSize: number, maxBytes = LIMITS.modelBytesHard, kind: BlobKind = 'glb'): Promise<Blob> {
     for (const url of urls) {
+      // One meter entry per replica attempt: a replica that stalls stops
+      // contributing bytes and the reported speed drops, which is exactly
+      // what the HUD should show.
+      const xfer = transfers.track('down', expectedSize)
       try {
         const res = await fetch(url, { credentials: 'omit', redirect: 'error', signal: AbortSignal.timeout(30000) })
         if (!res.ok || !res.body) continue
+        // Prefer the server's own size when the event did not carry one.
+        const declared = Number(res.headers.get('content-length') ?? '')
+        if (!expectedSize && Number.isFinite(declared)) xfer.setTotal(declared)
         const reader = res.body.getReader()
         const chunks: Uint8Array[] = []
         let total = 0
@@ -78,6 +86,7 @@ export class BlossomClient {
           const { done, value } = await reader.read()
           if (done) break
           total += value.length
+          xfer.advance(value.length)
           if (total > maxBytes) throw new Error('stream exceeded size cap')
           chunks.push(value)
         }
@@ -88,7 +97,9 @@ export class BlossomClient {
         if (hash && (await sha256Hex(bytes)) !== hash) continue
         if (!magicOk(bytes, kind)) continue
         return new Blob([bytes.buffer as ArrayBuffer], { type: kind === 'png' ? 'image/png' : 'model/gltf-binary' })
-      } catch { /* next replica */ }
+      } catch { /* next replica */ } finally {
+        xfer.end()
+      }
     }
     throw new Error('No verified replica available.')
   }
@@ -110,15 +121,17 @@ export class BlossomClient {
     const hash = await sha256Hex(bytes)
     const results = await Promise.allSettled(
       this.servers.map(async (server) => {
-        const res = await fetch(`${server}/upload`, {
-          method: 'PUT',
-          headers: { Authorization: `Nostr ${this.auth('upload', hash, secret)}` },
-          body: blob,
-          credentials: 'omit',
-          signal: AbortSignal.timeout(60000),
-        })
+        // XHR, not fetch: `fetch` reports nothing about request-body
+        // progress, so an upload would sit at "0 bytes sent" until it
+        // completed. XHR's upload.onprogress is the only portable way to
+        // show a real upload speed. Semantics kept identical to the old
+        // fetch call (no credentials, 60 s cap, JSON body).
+        const res = await putWithProgress(`${server}/upload`, blob, {
+          Authorization: `Nostr ${this.auth('upload', hash, secret)}`,
+        }, 60000)
         if (!res.ok) throw new Error(`${server} upload failed (${res.status})`)
-        const json = (await res.json()) as { url?: string }
+        let json: { url?: string }
+        try { json = JSON.parse(res.body) as { url?: string } } catch { throw new Error(`${server} returned invalid JSON`) }
         // A regex check alone lets through parseable-garbage like "https://"
         // (no host), which would later crash publish.ts's `new URL(u.url)`
         // while building the server tags. Parse and require a real host.
@@ -132,6 +145,56 @@ export class BlossomClient {
     const out = results.filter((r): r is PromiseFulfilledResult<{ url: string; sha256: string }> => r.status === 'fulfilled').map((r) => r.value)
     if (!out.length) throw new Error('No Blossom replica completed.')
     return out
+  }
+}
+
+/**
+ * PUT a blob with upload-progress reporting into the transfer meter.
+ * Falls back to `fetch` (no per-byte progress, one lump at the end) where
+ * XMLHttpRequest is unavailable, e.g. inside a worker-only environment.
+ */
+async function putWithProgress(
+  url: string,
+  blob: Blob,
+  headers: Record<string, string>,
+  timeoutMs: number,
+): Promise<{ ok: boolean; status: number; body: string }> {
+  const xfer = transfers.track('up', blob.size)
+  if (typeof XMLHttpRequest === 'undefined') {
+    try {
+      const res = await fetch(url, {
+        method: 'PUT', headers, body: blob, credentials: 'omit',
+        signal: AbortSignal.timeout(timeoutMs),
+      })
+      xfer.advance(blob.size)
+      return { ok: res.ok, status: res.status, body: await res.text() }
+    } finally { xfer.end() }
+  }
+  try {
+    return await new Promise<{ ok: boolean; status: number; body: string }>((resolve, reject) => {
+      const xhr = new XMLHttpRequest()
+      xhr.open('PUT', url, true)
+      xhr.withCredentials = false
+      xhr.timeout = timeoutMs
+      for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v)
+      let sent = 0
+      xhr.upload.onprogress = (e) => {
+        // e.loaded is cumulative; the meter wants deltas
+        xfer.advance(e.loaded - sent)
+        sent = e.loaded
+        if (e.lengthComputable && e.total > 0) xfer.setTotal(e.total)
+      }
+      xhr.onload = () => {
+        xfer.advance(blob.size - sent) // some agents skip the final progress event
+        resolve({ ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status, body: xhr.responseText })
+      }
+      xhr.onerror = () => reject(new Error('upload network error'))
+      xhr.ontimeout = () => reject(new Error('upload timed out'))
+      xhr.onabort = () => reject(new Error('upload aborted'))
+      xhr.send(blob)
+    })
+  } finally {
+    xfer.end()
   }
 }
 

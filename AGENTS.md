@@ -122,9 +122,18 @@ bun run build:standalone  # ONE self-contained form-zero-standalone.html
    for cards near the viewport and only after scrolling settles; the poster
    queue is paused while the feed moves. Card slots are recycled — never bind
    a slot to a row by index.
-9f. **Show the ring.** Any wait longer than a frame gets the spinning-ring
-   indicator: `setLoading(reason, on, label)` for the HUD, or the in-canvas
-   ring for cards/nodes. It is reference-counted per reason.
+9f. **Show the ring, and show the bytes.** Any wait longer than a frame gets
+   the spinning-ring indicator: `setLoading(reason, on, label)` for the HUD,
+   or the in-canvas ring for cards/nodes. It is reference-counted per reason.
+   Anything that moves bytes over the network must register with
+   `src/core/transfer.ts` (`transfers.track('down'|'up', totalBytes)` ->
+   `advance(delta)` -> `end()` in a `finally`) so the HUD can show a real
+   speed instead of an opaque spinner. Upload progress needs XHR — `fetch`
+   reports nothing about request-body progress.
+9k. **Touch targets are >= 42px.** HUD controls are 42x42 (`.hbtn`) with a
+   10px gap; a small *visual* (a status dot, a badge) must still sit inside a
+   full-size button, never be the button. The network dot shipped as a
+   literal 8x8 button for months and was near-unhittable on touch.
 9d. **The thread map binds native pointer events** — Babylon drops the second
    finger via `navigator.maxTouchPoints` slots. Pan integrates the delta since
    the previous move event (anchor-based deltas drift forever).
@@ -149,6 +158,7 @@ bun scripts/capture.mjs             # board/viewer/thread/light/phone screenshot
 bun scripts/perf.mjs                # PERF: boot, per-view frame cost, 48-card stress, idle, heap
 bun scripts/shaders.mjs             # shader recompiles (repeat model opens must compile 0 programs)
 bun scripts/settings.mjs            # every setting must reach real engine state (20 checks)
+bun scripts/transfer.mjs            # network button hit target + live download/upload speed readouts (needs the rig)
 PHASE=load bun scripts/profile.mjs  # CPU profile of a board load, aggregated by self time
 CPU=4 bun scripts/perf.mjs          #   …the same, throttled to emulate a phone
 python3 scripts/visual_critique.py  # orientation + composition on those shots
