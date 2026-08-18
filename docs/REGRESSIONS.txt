@@ -1,0 +1,88 @@
+REGRESSIONS vs old React/Three project
+branch: arena/01a011f8-f0  (updated after theme fix 3ef8886)
+================================================================
+Compared against project-form0-old/. Items marked DONE were present in
+an earlier review and have since been fixed on this branch.
+
+CORE USABILITY
+--------------
+1. [DONE] Studio UI text/controls did not adapt to light/dark theme
+   (hardcoded #0b0b0c/#222/rgba(18,18,19) panels + dark ink in light
+   mode). Fixed with --surface/--surface-2/--panel-soft/--hover-soft/
+   --thumb variables and a circular --panel-soft self-reference bug.
+2. [OPEN] 3D text mesh can be invisible/black in the studio even though
+   it exists in the scene graph (90 tris, selected). Camera framing races
+   the async Unifont rasterize; verify text is actually visible after
+   load, not just present.
+3. [OPEN] "choose model" import button is 0x0 because the studio opens
+   on the TYPE tab; importing a model is a hidden two-step. Old defaulted
+   to Upload with a visible drop zone.
+4. [OPEN] No visible close affordance on the studio (no X in rail or
+   inspector); only Esc / browser back. Old had studio-close +
+   studio-close-mobile.
+5. [OPEN] Transform toolbar floats over the bottom of the stage and
+   collides with the inspector publish button; should live in the
+   rail/inspector, not over the canvas.
+6. [OPEN] Inspector can be taller than the viewport; publish button
+   sits off-screen on laptops. Camera details should collapse by default
+   and publish should be pinned.
+7. [OPEN] Viewer shows a flat grey slab/backdrop on phone (dominant color
+   ~rgb(123,123,124)); old viewer had a clean spotlight + contact shadow.
+8. [OPEN] Paint and Symbols tabs are clickable but non-functional (Paint
+   is a "later milestone" paragraph; Symbols inserts unicode glyphs as
+   text, not 3D). Disable or clearly mark them until implemented.
+
+FEATURES MISSING (old had them)
+-------------------------------
+9.  [OPEN] PAINT / HAND-WRITING EDITOR — the #1 feature (SPEC AMEND 10).
+    Old: brush stamps (cube/sphere/cylinder/tetra/quad), pointer pressure
+    -> width/alpha, getCoalescedEvents, eraser, color/layer, undo >=20,
+    orbit, thin-instance voxel store + spatial hash. Arena: none.
+10. [OPEN] AUDIO RECORDING + EMBED (SPEC AMEND 11). Old generated a
+    casket WAV, AudioButton, and gltf.ts embedded KHR_audio /
+    MSFT_audio_emitter (append BIN). Arena has AudioMixer for
+    playback/routing/device enumeration only; no getUserMedia/
+    MediaRecorder, no in-app record/preview, no embed-into-GLB.
+11. [OPEN] 3D BUILT-IN SYMBOLS / TEMPLATES. Old templates.ts had real
+    meshes (cube, spark, heart, modeled casket with shell/lid/cross)
+    + colors/tints. Arena symbols are 8 unicode chars rendered as text.
+12. [OPEN] ANIMATION EDITOR: timeline, keyframes, record, camera
+    fly-through authoring, real glTF animation export (quaternion sign
+    guard). Listed as next task; absent.
+13. [OPEN] PHONE-POSE CAMERA WHILE RECORDING (AMEND 12):
+    DeviceOrientation rotation + optional WebXR translation, synced
+    clock, exported as glTF camera animation + audio. Absent.
+14. [OPEN] CUSTOM FONT UPLOAD. Old used opentype.js parseCustomFont;
+    arena text is bundled Unifont only.
+15. [OPEN] TEXT BEVEL. Old extrusion supported a chamfer/bevel; arena
+    textTool has depth (good) but no bevel.
+
+UI / CHROME
+-----------
+16. [OPEN] Rail icons inconsistent (literal "T" vs SVGs); old ToolButton
+    had hover labels. Net-dot is an unlabeled 8px dot.
+17. [OPEN] First-run legend exists; confirm it does not reappear every
+    load and that "?" reopens it.
+18. [OPEN] Portrait: rail moves to bottom (good) but inspector still
+    takes up to 38vh; verify nothing is clipped on a 390px phone.
+19. [OPEN] Duplicate studio CSS block in style.css (~line 645 and ~812);
+    later rules win but it is a maintenance hazard — consolidate.
+
+PRESENT / AHEAD OF OLD (do not redo)
+------------------------------------
+- BUD-01 publish + per-post ownedSecrets + kind-5 deletion (protocol/deletion.ts)
+- Settings system (schema/capabilities/panel/store/persistence)
+- Worker GLB validation + encode worker
+- AudioMixer playback, spatial routing, output/input device enumeration
+- Full responsive studio, drag-number inputs, free camera, gizmos
+- glTF sidecar (.bin + images) AND OBJ import with validation/repasck
+- Poster/preview reuse, board card crossfade, thread animation
+- Reply authoring through the studio (rootId/parentId -> NIP-10 e tags)
+
+VERIFY BEFORE CALLING DONE
+--------------------------
+- Deletion UI is reachable from viewer/studio and signs/broadcasts kind-5.
+- Repacked sidecar/OBJ GLBs preserve mesh/node hierarchy, cameras,
+  animations, materials.
+- Pass-through GLB round-trips byte-for-byte.
+- Partial relay failures are reflected in the UI (amber), not silently.
