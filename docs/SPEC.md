@@ -723,3 +723,32 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     default on entering the studio for a fresh post). offline-verify's
     empty-stage tap now hides the preview first (covering the hide/reveal
     pair as a side effect).
+
+64. VERIFY ON LOAD — HASH WINS (2026-08-20):
+    AMENDMENT 61 still left holes: RAM cache hits were returned unverified,
+    `blossom.download` skipped a replica when `size` ≠ byte length BEFORE
+    hashing (a stale size tag false-refused a hash-valid body), and the
+    thread map neither filtered `hashFailed` nor tore a node down on
+    mismatch. Format v4 already forces every plate through a local render
+    (`getModelBytes`), so a remote thumb can no longer skip the GLB hash.
+    Policy (overrides 58/61 where they conflict):
+    - Hash every blob/bytes before return from `getModel` / `getModelBytes`.
+      Cache key = claimed sha; key-exists ≠ bytes match. Poisoned IDB/RAM
+      → delete + redownload (do NOT failHash — the event `x` may be honest).
+      Confirmed download mismatch → `failHash(meta)`. Never store unverified
+      bytes. Empty / non-hex64 `x` is a refuse (`parse` already requires it).
+    - Size is a progress meter and a stream cap
+      (`total > max(size, modelBytesHard)`), never a refuse. Hash matches
+      `x` → ACCEPT even if the size tag is wrong (local `meta.size` is
+      repaired). Hash mismatch → refuse, hide. Oversize and network errors
+      are distinct from `HashMismatchError` and do not hide the post.
+    - On `hashFailed` tear down the board card AND the thread node
+      (`dropNode`, dispose poster). Verify at first byte use (poster /
+      preview / viewer), then evict. Hide only on confirmed hash mismatch,
+      never on network failure.
+    - Thread: `flatten` / `ThreadView.open` skip `hashFailed` and
+      tombstoned; `onHashFailed` calls `threadView.dropNode` and leaves
+      the thread if the open root failed.
+    - `validateGLBCached` is memoised by the actual `Uint8Array` identity
+      (WeakMap), not the claimed sha.
+    - Guard: `scripts/hash-unit.mjs` + `scripts/verify-hash.mjs`.

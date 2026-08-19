@@ -484,6 +484,12 @@ move it to **Done** with a commit reference. One agent per area.
   pushes to `main`.
 ## In progress
 
+- [ ] **Wrong-hash / wrong-size models still render** — claimed by agent arena,
+      2026-08-19. Verify on LOAD (do not redo cancel/freeze). Hash every
+      getModel/getModelBytes return; size is cap+meter not a refuse;
+      thumbs are not a trust shortcut; tear down board card AND thread
+      node on confirmed hash mismatch.
+
 - [ ] **Paint editor (hand-writing ink)** — claimed by agent arena, 2026-08-19.
       Rebased onto main (PR #12: preview width / viewer hand-off / zoom
       RTTs / typing guard). SPEC AMENDMENT 54.
