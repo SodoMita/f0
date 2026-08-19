@@ -5,6 +5,14 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 
+- [x] **Studio publish generates no poster** (agent arena, 2026-08-20, SPEC
+      AMENDMENT 62 follow-up): the publish flow's local poster render (the
+      "poster…" stage that validated the model and derived `dim`) is gone —
+      the studio stamps the default render size (448x280) into `dim` and
+      uploads only the model. Posters exist solely as on-demand local
+      renders by whoever views a card; `renderPosterFor` stays as a
+      pipeline probe for the verification rig's camera-policy pixel check.
+
 - [x] **Post format v4: local-only posters + `dim` (width/height) in the
       event** (agent arena, 2026-08-20, SPEC AMENDMENT 62): removed the
       thumb PNG tags from kind-1063 — posters are now ONLY rendered locally

@@ -364,12 +364,11 @@ export class AssetCache {
   }
 
   /**
-   * Pre-publish poster render for an arbitrary (not-yet-published) model
-   * blob. Format v4: the PNG stays LOCAL (it is never uploaded); the publish
-   * flow needs the validated render size for the event's `dim` tag, and the
-   * bytes are returned for verification/pixel checks only.
-   * A blank render (transparent/empty/invisible) does not hard-block — the
-   * caller warns and the post still publishes.
+   * Render a poster for an arbitrary (not-yet-published) model blob.
+   * NOT part of publishing (format v4: the studio generates no poster at
+   * all) — this is a direct probe of the local render pipeline, used by the
+   * verification rig to pixel-check the camera policy. Posters for real
+   * posts come from getPoster(); the PNG is returned for pixel checks.
    */
   async renderPosterFor(model: Blob): Promise<{ blob: Blob; width: number; height: number; blank: boolean }> {
     // PosterRenderer takes shared bytes + a content hash (see SPEC 30)

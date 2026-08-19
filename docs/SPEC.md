@@ -64,8 +64,9 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
    shows the view the author framed, not a synthetic auto-fit (auto-fit is
    only the fallback for models without a camera: worldBounds union AABB +
    dominant facing + fitDistance). A camera that frames nothing still yields
-   a blank poster -> publish warns (the post still ships; format v4 has no
-   uploaded placeholder PNG). Live previews use
+   a blank poster -> the card shows the quiet failed plate (format v4: the
+   studio neither renders nor uploads a poster, so there is no placeholder
+   PNG to fall back to). Live previews use
    the same policy: preview-camera index -> first imported camera ->
    auto-fit. Authored cameras also belong in the viewer (camera dots / C).
 
@@ -695,9 +696,9 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     the model bytes (poster scene, camera policy per §6) at the size the
     event declares in `dim` (`WxH`, e.g. `448x280`; validated 64..4096 px
     per side and aspect 0.5..2, falling back to 448x280 when absent or
-    unusable — so older v3 posts parse unchanged). Publish renders the
-    poster locally purely to validate the model and stamp `dim`; the model
-    GLB is the ONLY blob uploaded to Blossom. Downstream: `ThreadMeta`
+    unusable — so older v3 posts parse unchanged). The studio generates NO poster at
+    all — publish just stamps `dim` with the default render size (448x280)
+    and uploads the model GLB as the ONLY blob. Downstream: `ThreadMeta`
     carries width/height instead of thumbUrl/thumbSha256/thumbSize;
     `AssetCache` renders posters at `dim` (POSTER_CACHE_V p5, cache key
     includes the size; the PNG download path is deleted — blossom download

@@ -14,7 +14,7 @@ import { publishModel, type PublishProgress } from './protocol/publish'
 import { isAbortError } from './protocol/hash'
 import { configureDraco } from './model/draco'
 import { enforceOffline } from './model/offline'
-import { DEFAULTS, theme } from './theme'
+import { DEFAULTS, POSTER_W, POSTER_H, theme } from './theme'
 import { luminance } from './core/gfx'
 import { loadNetworkConfig } from './protocol/storage'
 import { DeletionService } from './protocol/deletion'
@@ -295,12 +295,9 @@ async function boot(): Promise<void> {
       setStudioStatus('export…', 'busy')
       const content = await studio.getContentForPublish()
       if (signal.aborted) throw Object.assign(new Error('upload aborted'), { name: 'AbortError' })
-      setStudioStatus('poster…', 'busy')
-      // Format v4: the poster render is LOCAL — it validates the model and
-      // yields the `dim` the event will declare. No PNG is uploaded.
-      const { width, height, blank } = await assets.renderPosterFor(content.blob)
-      if (signal.aborted) throw Object.assign(new Error('upload aborted'), { name: 'AbortError' })
-      if (blank) setStudioStatus('poster blank — publishing anyway', 'busy')
+      // Format v4: the studio generates NO poster at all — every client
+      // renders cards locally from the model at the event's `dim`. The event
+      // just declares the default render size; nothing is rendered here.
       const onProgress = (p: PublishProgress) => {
         if (signal.aborted) return
         if (p.stage === 'blossom') setStudioStatus('upload…', 'busy')
@@ -311,8 +308,8 @@ async function boot(): Promise<void> {
       const result = await publishModel(
         {
           model: content.blob,
-          width,
-          height,
+          width: POSTER_W,
+          height: POSTER_H,
           tint: studio.tintColor,
           filename: content.filename,
           sourceFormat: content.sourceFormat,
