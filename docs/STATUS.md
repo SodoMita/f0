@@ -5,6 +5,24 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 
+- [x] **Preview resolution scales with camera zoom + hotkey typing guard**
+      (agent arena, 2026-08-19, SPEC AMENDMENTS 52+53):
+      - Thread-map live preview RTTs scale with the map camera zoom
+        (ThreadView.applyPreviewScale: effective width = previewWidth/zoom,
+        clamped 64-2048 px, 32 px snap). Zoomed in → sharper previews;
+        zoomed out → cheaper. No GLB re-parse on zoom (setRttSize +
+        onResize rebind).
+      - Thread map zoom UI added: + / - / fit cluster in the topbar (only
+        in thread mode) + + - = _ hotkeys; wheel/pinch still work.
+      - Window keydown typing guard: INPUT/TEXTAREA/SELECT/contenteditable
+        focus blocks game hotkeys (arrow keys were switching models while
+        editing the preview width in settings). Escape for error
+        sheet/network panel stays first.
+      - Hand-off parity: handoffContainer now clones authored cameras and
+        lights into viewer.scene too (instantiateModelsToScene doesn't),
+        so the viewer's camera dots and authored framing match the
+        byte-loading path.
+
 - [x] **Settings: arbitrary preview width + viewer hand-off from live preview**
       (agent arena, 2026-08-18, SPEC AMENDMENTS 50+51):
       - `previewQuality` (select, 4 presets 224/320/448/640 px) renamed to

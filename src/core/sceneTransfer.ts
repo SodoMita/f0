@@ -2,6 +2,7 @@ import { Scene } from '@babylonjs/core/scene'
 import { Vector3 } from '@babylonjs/core/Maths/math.vector'
 import { Mesh } from '@babylonjs/core/Meshes/mesh'
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode'
+import type { Camera } from '@babylonjs/core/Cameras/camera'
 import { AssetContainer } from '@babylonjs/core/assetContainer'
 
 /**
@@ -72,18 +73,49 @@ export function handoffContainer(
   }
 
   // ----- meshes + transform nodes -----
-  for (const node of entries.rootNodes) {
-    if (node instanceof Mesh) {
-      moveMesh(node, sourceScene, targetScene)
-    } else if (node instanceof TransformNode) {
-      moveTransformNode(node, sourceScene, targetScene)
-      // TransformNodes in Babylon can also register meshes as children via
-      // node.getChildMeshes() — re-bind those too (the cloned tree is
-      // dispatched under rootNodes, but the materials come via the meshes).
-      for (const child of [...node.getChildMeshes(false)]) {
-        if (child instanceof Mesh) moveMesh(child, sourceScene, targetScene)
-      }
+  // Move the FULL clone tree: instantiateModelsToScene clones every root
+  // node (transform nodes AND meshes) with their whole descendant chain.
+  // Each clone is registered in sourceScene (the clone constructors call
+  // scene.addMesh/addTransformNode), so we must move every level — roots,
+  // intermediate transform nodes and meshes — or the scene bookkeeping
+  // ends up inconsistent (a mesh's parent in one scene, the mesh in
+  // another). A Set guards against a node being reachable from two roots.
+  const movedNodes = new Set<object>()
+  for (const root of entries.rootNodes) {
+    if (root instanceof Mesh) moveMesh(root, sourceScene, targetScene, movedNodes)
+    else if (root instanceof TransformNode) moveTransformNode(root, sourceScene, targetScene, movedNodes)
+    for (const child of root.getDescendants(false)) {
+      if (child instanceof Mesh) moveMesh(child, sourceScene, targetScene, movedNodes)
+      else if (child instanceof TransformNode) moveTransformNode(child, sourceScene, targetScene, movedNodes)
     }
+  }
+
+  // ----- authored cameras -----
+  // instantiateModelsToScene clones meshes / materials / skeletons /
+  // animationGroups but NOT cameras — the GLB's authored cameras must be
+  // recreated for the viewer (camera dots + authored framing, SPEC 04 §5).
+  // Camera.clone() materialises in the source scene; move it over like any
+  // other node.
+  const cameraClones: Camera[] = []
+  for (const cam of source.cameras) {
+    const clone = cam.clone(`${nameHint}-cam-${cam.name}`)
+    if (!clone) continue
+    sourceScene.removeCamera(clone)
+    ;(clone as unknown as { _scene: Scene })._scene = targetScene
+    targetScene.addCamera(clone)
+    cameraClones.push(clone)
+  }
+  // Lights: instantiateModelsToScene does not clone lights either; the
+  // byte-loading path (LoadAssetContainerAsync -> addAllToScene) keeps
+  // them, so hand off clones for the same result.
+  const lightClones: import('@babylonjs/core/Lights/light').Light[] = []
+  for (const l of source.lights) {
+    const clone = l.clone(`${nameHint}-light-${l.name}`)
+    if (!clone) continue
+    sourceScene.removeLight(clone)
+    ;(clone as unknown as { _scene: Scene })._scene = targetScene
+    targetScene.addLight(clone)
+    lightClones.push(clone)
   }
 
   // ----- skeletons + animationGroups (cloned by instantiateModelsToScene) -----
@@ -108,6 +140,12 @@ export function handoffContainer(
   // material, light, camera, skeleton, etc. the clones reference.
   const c = new AssetContainer(targetScene)
   for (const root of entries.rootNodes) c.addAllAssetsToContainer(root)
+  for (const cam of cameraClones) {
+    if (c.cameras.indexOf(cam) === -1) c.cameras.push(cam)
+  }
+  for (const l of lightClones) {
+    if (c.lights.indexOf(l) === -1) c.lights.push(l)
+  }
   for (const sk of entries.skeletons) {
     if (c.skeletons.indexOf(sk) === -1) c.skeletons.push(sk)
   }
@@ -117,13 +155,17 @@ export function handoffContainer(
   return c
 }
 
-function moveMesh(m: Mesh, from: Scene, to: Scene): void {
+function moveMesh(m: Mesh, from: Scene, to: Scene, seen: Set<object>): void {
+  if (seen.has(m)) return
+  seen.add(m)
   from.removeMesh(m)
   ;(m as unknown as { _scene: Scene })._scene = to
   to.addMesh(m)
 }
 
-function moveTransformNode(n: TransformNode, from: Scene, to: Scene): void {
+function moveTransformNode(n: TransformNode, from: Scene, to: Scene, seen: Set<object>): void {
+  if (seen.has(n)) return
+  seen.add(n)
   from.removeTransformNode(n)
   ;(n as unknown as { _scene: Scene })._scene = to
   to.addTransformNode(n)

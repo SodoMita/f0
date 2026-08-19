@@ -486,3 +486,20 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     The slot's staging offset (the +800*N the pool uses to keep slots
     outside one another's frustums) is subtracted from each cloned
     rootNode so the model lands at the viewer-scene origin.
+
+52. Live preview resolution follows the map camera zoom (thread view). The
+    thread map's camera zoom (0.12x-6x, wheel/pinch/+ - keys/fit button)
+    changes how big a node appears on screen; the node preview RTT now
+    scales with it: effective width = previewWidth / zoom (clamped 64-2048
+    px, snapped to 32 px steps so a wheel gesture rebuilds RTTs a handful
+    of times, not per notch). Zoomed in → previews stay sharp; zoomed out
+    → previews get cheaper. PreviewPool.setRttSize is idempotent and
+    rebinds live card textures via onResize, so zooming never re-parses a
+    GLB. The thread map's zoom UI is a + / - / fit cluster in the topbar
+    (visible only in thread mode) plus the existing wheel/pinch.
+53. Hotkeys never fire while typing. The window keydown handler ignores
+    game hotkeys when the event target is an INPUT / TEXTAREA / SELECT /
+    contenteditable element. Previously the viewer's ArrowLeft/ArrowRight
+    (model prev/next) and the thread map's 0/+/-/Escape fired while the
+    user was editing a settings input (e.g. typing the preview width),
+    switching models under the caret.
