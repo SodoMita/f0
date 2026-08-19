@@ -141,7 +141,6 @@ await page.waitForFunction(() => window.__form0.index.byId.size >= 52, null, { t
     const poster = await f.assets.renderPosterFor(content.blob)
     return {
       passThrough: content.sourceFormat === 'glb' && content.filename === 'a.glb',
-      posterBlank: poster.blank,
       dim: `${poster.width}x${poster.height}`,
       pixels: [...poster.pixels],
     }
@@ -161,7 +160,7 @@ await page.waitForFunction(() => window.__form0.index.byId.size >= 52, null, { t
     return { red: opaque ? red / opaque : 0, green: opaque ? green / opaque : 0 }
   })()
   check('local poster pipeline renders from the authored camera (red only)',
-    !r.posterBlank && px.red > 0.5 && px.green < 0.01,
+    px.red > 0.5 && px.green < 0.01,
     `red=${(px.red * 100).toFixed(1)}% green=${(px.green * 100).toFixed(2)}%`)
   await page.screenshot({ path: 'shots/verify-publish.png' })
 }

@@ -1,5 +1,4 @@
 import { Texture } from '@babylonjs/core/Materials/Textures/texture'
-import { RawTexture } from '@babylonjs/core/Materials/Textures/rawTexture'
 import { Scene } from '@babylonjs/core/scene'
 import { clearStore, del, get, put } from '../protocol/storage'
 import { BlossomClient } from '../protocol/blossom'
@@ -7,10 +6,9 @@ import { blobMatchesHash, blobToBytes, isHashMismatch, isSha256Hex, sha256Hex } 
 import type { ThreadMeta } from '../protocol/thread-index'
 import { PosterRenderer, POSTER_W, POSTER_H, type Footprint, type PosterResult } from '../model/poster'
 
-// Bump when the poster pipeline changes visually (framing, transparency…):
-// cached records from an older pipeline must not be reused. p6 = format v4
-// + transparent RTT (no PNG): cache is raw GL-order RGBA, sized by `dim`.
-const POSTER_CACHE_V = 'p6:'
+// Metadata only (anim / footprint). The card texture is the live RTT —
+// we do not cache pixels (that was VRAM→RAM→VRAM).
+const POSTER_CACHE_V = 'p7:'
 
 const MAX_POSTER_CONCURRENT = 3 // concurrent downloads; the shared render scene serializes renders internally
 // Decoded GLBs stay in IndexedDB; RAM only keeps the few most recent, or a
@@ -230,19 +228,15 @@ export class AssetCache {
   private async produce(meta: ThreadMeta): Promise<Texture | undefined> {
     if (this.hashFailed.has(meta.eventId) || meta.hashFailed) return undefined
     try {
-      // Reload path: raw GL-order RGBA from IndexedDB (never a PNG — the
-      // encode/decode round-trip dropped models whose materials wrote RGB
-      // without alpha, and createImageBitmap silently failed on some blobs).
-      const cached = await this.cachedRawPoster(meta)
-      if (cached) return this.commitRawPoster(meta, cached.pixels, cached.width, cached.height)
+      await this.restorePosterMeta(meta)
       const result = await this.renderLocal(meta)
       if (!result) return undefined
       if (this.hashFailed.has(meta.eventId) || meta.hashFailed) {
         result.texture.dispose()
         return undefined
       }
-      // The dedicated transparent RTT IS the card texture. No PNG, no
-      // invertY upload — the board/thread sample it like a live preview.
+      // The RTT stays on the GPU. Cards sample it directly — no readPixels,
+      // no RawTexture upload.
       result.texture.hasAlpha = true
       result.texture.name = 'poster-' + meta.eventId.slice(0, 8)
       this.posterTex.set(meta.eventId, result.texture)
@@ -256,65 +250,29 @@ export class AssetCache {
     return `${POSTER_CACHE_V}${meta.sha256}@${meta.width}x${meta.height}`
   }
 
-  private commitRawPoster(
-    meta: ThreadMeta, pixels: Uint8Array, width: number, height: number,
-  ): Texture | undefined {
-    if (this.hashFailed.has(meta.eventId) || meta.hashFailed) return undefined
-    const tex = RawTexture.CreateRGBATexture(
-      pixels, width, height, this.scene, false, false, Texture.BILINEAR_SAMPLINGMODE,
-    )
-    tex.name = 'poster-' + meta.eventId.slice(0, 8)
-    tex.hasAlpha = true
-    tex.wrapU = Texture.CLAMP_ADDRESSMODE
-    tex.wrapV = Texture.CLAMP_ADDRESSMODE
-    this.posterTex.set(meta.eventId, tex)
-    this.evictPosters()
-    return tex
-  }
-
-  /** Previously rendered poster (raw RGBA) from IndexedDB, if any. */
-  private async cachedRawPoster(meta: ThreadMeta): Promise<{ pixels: Uint8Array; width: number; height: number } | undefined> {
+  /** Restore anim/footprint flags from IDB (no pixel payload). */
+  private async restorePosterMeta(meta: ThreadMeta): Promise<void> {
     const key = AssetCache.posterKey(meta)
-    const cached = await get<ArrayBuffer | Uint8Array>('posterCache', key)
-    if (!cached) return undefined
-    const pixels = cached instanceof Uint8Array ? cached : new Uint8Array(cached)
-    if (pixels.byteLength !== meta.width * meta.height * 4) return undefined
-    const fp = await get<Footprint>('posterCache', key + ':fp')
-    this.footprintBySha.set(meta.sha256, fp ?? null)
-    // The animated flag is part of the poster cache record: without it a
-    // reload forgot which posts animate (events carry no anim hint), so
-    // live previews were never requested again — posts stopped animating
-    // for everyone with a warm cache.
+    if (!this.footprintBySha.has(meta.sha256)) {
+      const fp = await get<Footprint>('posterCache', key + ':fp')
+      if (fp !== undefined) this.footprintBySha.set(meta.sha256, fp)
+    }
     if (!this.animatedBySha.has(meta.sha256)) {
       const anim = await get<boolean>('posterCache', key + ':anim')
       if (anim !== undefined) this.animatedBySha.set(meta.sha256, anim)
     }
-    return { pixels, width: meta.width, height: meta.height }
   }
 
-  /** Render a poster now into a dedicated transparent RTT (no PNG). */
+  /** Render a poster now into a dedicated transparent RTT. Stays on the GPU. */
   private async renderLocal(meta: ThreadMeta): Promise<PosterResult | undefined> {
     const bytes = await this.getModelBytes(meta)
     if (!bytes) return undefined
     const result = await this.poster.render(bytes, meta.sha256, meta.width, meta.height)
     this.animatedBySha.set(meta.sha256, result.animated)
     this.footprintBySha.set(meta.sha256, result.footprint)
-    // Cache raw RGBA when idle — never a PNG. Skip blank frames so a
-    // compile-race empty capture cannot poison the next reload.
-    if (!result.blank) {
-      const key = AssetCache.posterKey(meta)
-      const idle = (fn: () => void) => (typeof requestIdleCallback === 'function'
-        ? requestIdleCallback(fn, { timeout: 4000 })
-        : setTimeout(fn, 400))
-      const pixels = result.pixels
-      const footprint = result.footprint
-      const animated = result.animated
-      idle(() => {
-        void put('posterCache', key, pixels)
-        if (footprint) void put('posterCache', key + ':fp', footprint)
-        void put('posterCache', key + ':anim', animated)
-      })
-    }
+    const key = AssetCache.posterKey(meta)
+    if (result.footprint) void put('posterCache', key + ':fp', result.footprint)
+    void put('posterCache', key + ':anim', result.animated)
     return result
   }
 
@@ -407,15 +365,15 @@ export class AssetCache {
    * card preview. Returns raw GL-order RGBA (no PNG).
    */
   async renderPosterFor(model: Blob, width = POSTER_W, height = POSTER_H): Promise<{
-    pixels: Uint8Array; width: number; height: number; blank: boolean
+    pixels: Uint8Array; width: number; height: number
   }> {
     const bytes = new Uint8Array(await model.arrayBuffer())
     const sha = await sha256Hex(bytes)
     const result = await this.poster.render(bytes, sha, width, height)
-    // Probe callers only want the pixels; drop the RTT so it cannot linger
-    // in the poster scene's customRenderTargets list.
+    // Studio / tests need a CPU copy. The board never takes this path.
+    const pixels = await this.poster.snapshot(result.texture, result.width, result.height)
     result.texture.dispose()
-    return { pixels: result.pixels, width: result.width, height: result.height, blank: result.blank }
+    return { pixels, width: result.width, height: result.height }
   }
 
   dispose(): void {

@@ -7,13 +7,10 @@ move it to **Done** with a commit reference. One agent per area.
 
 - [x] **Posters render to a transparent RTT, never a PNG** (agent arena, 2026-08-19,
       SPEC AMENDMENT 65): each post gets its own transparent RenderTargetTexture
-      (detached after capture so later renders cannot wipe it). PNG encode/decode
-      is gone — IDB caches raw RGBA (p6). `isBlank` now samples RGB+alpha densely;
-      authored cameras that miss the AABB skip straight to auto-fit; opaque
-      materials write alpha=1; the card shader treats non-black RGB as coverage.
-      Models that used to throw "poster rendered empty" now appear. Studio
-      preview paints pixels. Guard: offline-verify + verify-publish sample raw
-      pixels.
+      (detached after capture). No PNG, no pixel cache, no blank-check retry —
+      cards sample the RTT in place. Camera fallback is a frustum-vs-AABB test.
+      Opaque materials write alpha=1; card shader treats non-black RGB as coverage.
+      Studio/tests take one `snapshot()` readback. IDB keeps anim/footprint only.
 
 - [x] **Search models by name** (agent arena, 2026-08-19): a search menu
       (magnifier button in the topbar → overlay panel) filters the board by

@@ -757,17 +757,13 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     The card texture IS the offscreen render target. PosterRenderer allocates
     a dedicated transparent RTT per post (`scene.clearColor = (0,0,0,0)`,
     `refreshRate = RENDER_ONCE`, then detached from `customRenderTargets` so
-    the next poster.scene.render() cannot wipe earlier cards). No PNG is
-    encoded, cached, or decoded — IndexedDB stores raw GL-order RGBA (cache
-    key p6). Why some models never appeared:
-    - `isBlank` sampled every 397th pixel's *alpha only*, so thin text and
-      opaque-but-no-alpha materials threw "poster rendered empty" and the
-      card stayed a quiet plate forever.
-    - An authored camera that framed nothing burned the whole retry budget
-      before auto-fit.
-    - The PNG encode/decode path dropped RGB-only writes (alpha stayed 0).
-    Fixes: frustum test skips a camera that misses the AABB; denser RGB+alpha
-    blank check; opaque materials forced to write alpha=1; card shader treats
-    non-black RGB as coverage; never throw on a still-blank frame (return the
-    transparent texture). Studio preview paints pixels with putImageData.
-    Guard: offline-verify + verify-publish sample raw pixels, not a PNG blob.
+    the next poster.scene.render() cannot wipe earlier cards). No PNG, no
+    pixel cache, no blank-check retry loop: cards sample the RTT in place
+    (VRAM stays VRAM). Camera choice is a CPU frustum-vs-AABB test — an
+    authored camera that misses the model falls back to auto-fit without
+    reading the framebuffer. Pixel blank-checks were a waste: existing posts
+    are visible in the viewer anyway, and the probe burned 14 readbacks +
+    sleeps per card. `readPixels` runs only for studio preview / test probes
+    (`snapshot()`). Opaque materials write alpha=1; the card shader treats
+    non-black RGB as coverage. IDB keeps anim/footprint flags only (p7).
+    Guard: offline-verify + verify-publish sample a one-shot snapshot.
