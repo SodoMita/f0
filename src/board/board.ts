@@ -208,6 +208,22 @@ export class Board {
       this.showPoster(slot)
       this.invalidate()
     }
+    // The pool rebuilt its RTTs (settings → Textures → "Card / preview width").
+    // The card material was still sampling the disposed handle, so we swap
+    // its texture in place — no fade (the model pose and animation don't
+    // change, only the pixel grid behind it).
+    this.previewPool.onResize = (postId, newRtt) => {
+      const slot = this.cards.find((c) => c.meta?.eventId === postId)
+      if (!slot || !slot.live) return
+      slot.live = newRtt
+      if (slot.fadeStart) this.finishFade(slot)
+      setCardTexture(slot.mat, newRtt)
+      setCardWhite(slot.mat)
+      setCardTexture2(slot.mat, null)
+      setCardTint2(slot.mat, '#FFFFFF')
+      setCardFlip(slot.mat, 'rtt')
+      this.invalidate(2)
+    }
     // A finished load frees a slot; re-run the request pass so queued cards
     // (request() returned false while every slot was mid-load) get their turn.
     this.previewPool.onLoadDone = () => {
@@ -329,6 +345,14 @@ export class Board {
     this.previewPool.setMaxSlots(n)
     this.lastSyncScroll = Number.NEGATIVE_INFINITY
     this.syncSlots(true)
+  }
+
+  /** Settings → Textures: card / preview width. Height is fixed at the
+   *  poster aspect (5:8 = 0.625), so the slot never stretches the model. */
+  setPreviewSize(width: number): void {
+    const w = Math.max(16, Math.round(width))
+    const h = Math.max(16, Math.round(w * (10 / 16))) // matches CARD_W:CARD_H
+    this.previewPool.setRttSize(w, h)
   }
 
   setInertia(v: number): void {

@@ -150,6 +150,20 @@ export class ThreadView {
       this.showNodePoster(n)
       this.form.kick()
     }
+    // Pool rebuilt its RTTs (settings → Textures → "Card / preview width"):
+    // swap the node material's texture handle in place, no fade.
+    this.previewPool.onResize = (postId, newRtt) => {
+      const n = this.nodes.get(postId)
+      if (!n || !n.live || n.mesh.isDisposed()) return
+      n.live = newRtt
+      if (n.fadeStart) this.finishNodeFade(n)
+      setCardTexture(n.mat, newRtt)
+      setCardWhite(n.mat)
+      setCardTexture2(n.mat, null)
+      setCardTint2(n.mat, '#FFFFFF')
+      setCardFlip(n.mat, 'rtt')
+      this.form.kick()
+    }
     this.previewPool.onLoadDone = () => {
       this.syncPreviews()
       this.form.kick()
@@ -185,6 +199,52 @@ export class ThreadView {
   setLivePreviewSlots(n: number): void {
     this.previewPool.setMaxSlots(n)
     this.syncPreviews()
+  }
+
+  /** Settings → Textures: card / preview width. Height is fixed at the
+   *  node rect aspect (16:10 = 0.625), same as the poster.
+   *  The width is the BASE at 1:1 zoom; the live RTT scales with the map's
+   *  camera zoom (applyPreviewScale) so zooming in stays sharp and zooming
+   *  out spends fewer GPU pixels. */
+  setPreviewSize(width: number): void {
+    this.basePreviewWidth = Math.max(32, Math.round(width))
+    this.applyPreviewScale()
+  }
+
+  /** RTT widths (px) — never below 64 or above 2048 regardless of zoom. */
+  private static readonly RTT_MIN_W = 64
+  private static readonly RTT_MAX_W = 2048
+  private basePreviewWidth = 384
+  /** Last width applied to the pool (avoids rebuild churn on every wheel notch). */
+  private appliedRttWidth = -1
+
+  /**
+   * Live preview resolution follows the map camera: `this.zoom` is the
+   * ortho half-height (20·zoom) — a SMALL zoom shows few world units on
+   * screen, i.e. the user is zoomed IN and every node is large, so the RTT
+   * must be larger to stay sharp; a LARGE zoom is zoomed out, nodes are
+   * tiny and a smaller RTT is plenty (and cheaper). Width snaps to 32 px
+   * steps so a wheel gesture rebuilds the RTT a handful of times, not per
+   * notch.
+   */
+  private applyPreviewScale(): void {
+    const raw = this.basePreviewWidth / Math.max(0.05, this.zoom)
+    const w = Math.min(ThreadView.RTT_MAX_W, Math.max(ThreadView.RTT_MIN_W, Math.round(raw)))
+    const snapped = Math.round(w / 32) * 32
+    if (snapped === this.appliedRttWidth) return
+    this.appliedRttWidth = snapped
+    const h = Math.max(16, Math.round(snapped * (10 / 16)))
+    this.previewPool.setRttSize(snapped, h)
+  }
+
+  /** Zoom the map by a factor about the viewport centre (HUD buttons / + − keys). */
+  zoomBy(factor: number): void {
+    const canvas = this.scene.getEngine().getRenderingCanvas()
+    const rect = canvas?.getBoundingClientRect()
+    const cx = (rect?.left ?? 0) + (rect?.width ?? window.innerWidth) / 2
+    const cy = (rect?.top ?? 0) + (rect?.height ?? window.innerHeight) / 2
+    this.zoomAbout(cx, cy, factor)
+    this.form.kick()
   }
 
   /** Render-on-demand probe: pointers down, a crossfade, a spinner, or a live node. */
@@ -606,6 +666,8 @@ export class ThreadView {
     const halfW = 20 * z * this.aspect
     this.backdrop.scaling.set((halfW * 2 + 2) / 4, (20 * z * 2 + 2) / 4, 1)
     this.backdrop.position.set(this.panX, this.panY, 4)
+    // zoom changed -> the sharpness a node needs changed -> rescale the RTTs
+    this.applyPreviewScale()
     // viewport changed -> live previews must follow what is now on screen
     this.syncPreviews()
   }
