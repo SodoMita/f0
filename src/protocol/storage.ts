@@ -146,8 +146,6 @@ export interface OwnedPostRecord {
   secretKey: string
   modelSha256: string
   modelUrls: string[]
-  posterUrl?: string
-  posterSha256?: string
   relays: string[]
   createdAt: number
   rootId?: string
@@ -229,15 +227,12 @@ function ownedMetadata(value: unknown): OwnedPostMetadata | null {
   if (typeof rec.eventId !== 'string' || !HEX64.test(rec.eventId)) return null
   if (typeof rec.modelSha256 !== 'string' || !HEX64.test(rec.modelSha256)) return null
   if (typeof rec.createdAt !== 'number' || !Number.isSafeInteger(rec.createdAt) || rec.createdAt < 0) return null
-  const posterSha256 = optionalHex(rec.posterSha256)
   const rootId = optionalHex(rec.rootId)
   const parentId = optionalHex(rec.parentId)
   return {
     eventId: rec.eventId.toLowerCase(),
     modelSha256: rec.modelSha256.toLowerCase(),
     modelUrls: boundedStrings(rec.modelUrls),
-    posterUrl: typeof rec.posterUrl === 'string' && rec.posterUrl.length <= 2048 ? rec.posterUrl : undefined,
-    posterSha256,
     relays: boundedStrings(rec.relays),
     createdAt: rec.createdAt,
     rootId,

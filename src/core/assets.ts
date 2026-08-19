@@ -8,11 +8,10 @@ import type { ThreadMeta } from '../protocol/thread-index'
 import { PosterRenderer, POSTER_W, POSTER_H, type Footprint } from '../model/poster'
 
 // Bump when the poster pipeline changes visually (framing, transparency…):
-// cached PNGs from an older pipeline must not be reused.
-// Bump when the poster pipeline changes visually (framing, transparency…):
-// cached PNGs from an older pipeline must not be reused. p4 = posters now
-// render from the model's authored camera instead of always auto-fit.
-const POSTER_CACHE_V = 'p4:'
+// cached PNGs from an older pipeline must not be reused. p5 = format v4:
+// posters are ONLY rendered locally (no thumb fetch), sized by `dim`, and
+// the cache key carries the post's declared size.
+const POSTER_CACHE_V = 'p5:'
 
 const MAX_POSTER_CONCURRENT = 3 // concurrent downloads; the shared render scene serializes renders internally
 const AUTO_POSTER_MAX_BYTES = 8 * 1024 * 1024
@@ -141,7 +140,7 @@ export class AssetCache {
     }
   }
 
-  /** Poster: thumb tag = fast path; local render = normal path (00 §2.2). */
+  /** Poster: always a LOCAL render from the model, at the post's `dim` size. */
   getPoster(meta: ThreadMeta): Promise<Texture | undefined> {
     if (this.hashFailed.has(meta.eventId) || meta.hashFailed) return Promise.resolve(undefined)
     this.byPostId.set(meta.eventId, meta)
@@ -209,37 +208,22 @@ export class AssetCache {
       // Fast path: freshly rendered posters go straight from the GPU readback
       // to a RawTexture. The old path went pixels -> PNG -> Image -> canvas ->
       // getImageData -> texture, i.e. an encode and a decode per poster.
-      if (!meta.thumbUrl) {
-        const direct = await this.renderLocalPixels(meta)
-        if (direct) {
-          const tex = RawTexture.CreateRGBATexture(
-            direct.pixels, direct.width, direct.height, this.scene, false, false, Texture.BILINEAR_SAMPLINGMODE,
-          )
-          tex.name = 'poster-' + meta.eventId.slice(0, 8)
-          tex.wrapU = Texture.CLAMP_ADDRESSMODE
-          tex.wrapV = Texture.CLAMP_ADDRESSMODE
-          this.posterTex.set(meta.eventId, tex)
-          this.evictPosters()
-          return tex
-        }
+      const direct = await this.renderLocalPixels(meta)
+      if (direct) {
+        const tex = RawTexture.CreateRGBATexture(
+          direct.pixels, direct.width, direct.height, this.scene, false, false, Texture.BILINEAR_SAMPLINGMODE,
+        )
+        tex.name = 'poster-' + meta.eventId.slice(0, 8)
+        tex.wrapU = Texture.CLAMP_ADDRESSMODE
+        tex.wrapV = Texture.CLAMP_ADDRESSMODE
+        this.posterTex.set(meta.eventId, tex)
+        this.evictPosters()
+        return tex
       }
-      let blob = meta.thumbUrl ? await this.fetchThumb(meta) : await this.cachedPoster(meta)
-      if (!blob && meta.thumbUrl) {
-        // Thumb advertised but unfetchable (server purged it / offline):
-        // fall back to rendering the model locally instead of a blank card.
-        const direct = await this.renderLocalPixels(meta)
-        if (direct) {
-          const tex = RawTexture.CreateRGBATexture(
-            direct.pixels, direct.width, direct.height, this.scene, false, false, Texture.BILINEAR_SAMPLINGMODE,
-          )
-          tex.name = 'poster-' + meta.eventId.slice(0, 8)
-          tex.wrapU = Texture.CLAMP_ADDRESSMODE
-          tex.wrapV = Texture.CLAMP_ADDRESSMODE
-          this.posterTex.set(meta.eventId, tex)
-          return tex
-        }
-        blob = await this.cachedPoster(meta)
-      }
+      // No fresh render (model > AUTO_POSTER_MAX_BYTES, render failed…):
+      // decode a previously rendered (locally cached) copy if one exists.
+      // Format v4: a poster PNG is NEVER fetched from a server.
+      const blob = await this.cachedPoster(meta)
       if (!blob) return undefined
       // Decode the PNG to raw RGBA and upload directly (RawTexture). This
       // sidesteps both the async blob-URL Texture load and DynamicTexture's
@@ -262,18 +246,24 @@ export class AssetCache {
     } catch { return undefined }
   }
 
+  /** Cache key for a post's locally rendered poster at its declared size. */
+  private static posterKey(meta: ThreadMeta): string {
+    return `${POSTER_CACHE_V}${meta.sha256}@${meta.width}x${meta.height}`
+  }
+
   /** Previously rendered poster (PNG) from IndexedDB, if any. */
   private async cachedPoster(meta: ThreadMeta): Promise<Blob | undefined> {
-    const cached = await get<Blob>('posterCache', POSTER_CACHE_V + meta.sha256)
+    const key = AssetCache.posterKey(meta)
+    const cached = await get<Blob>('posterCache', key)
     if (!cached) return undefined
-    const fp = await get<Footprint>('posterCache', POSTER_CACHE_V + meta.sha256 + ':fp')
+    const fp = await get<Footprint>('posterCache', key + ':fp')
     this.footprintBySha.set(meta.sha256, fp ?? null)
     // The animated flag is part of the poster cache record: without it a
     // reload "forgot" which posts animate (events carry no anim hint), so
     // live previews were never requested again — posts stopped animating
     // for everyone with a warm cache.
     if (!this.animatedBySha.has(meta.sha256)) {
-      const anim = await get<boolean>('posterCache', POSTER_CACHE_V + meta.sha256 + ':anim')
+      const anim = await get<boolean>('posterCache', key + ':anim')
       if (anim !== undefined) this.animatedBySha.set(meta.sha256, anim)
     }
     return cached
@@ -285,32 +275,24 @@ export class AssetCache {
     if (await this.cachedPoster(meta)) return undefined     // decode the cached PNG instead
     const bytes = await this.getModelBytes(meta)
     if (!bytes) return undefined
-    const result = await this.poster.render(bytes, meta.sha256)
+    // Format v4: render at the post's declared `dim` size.
+    const result = await this.poster.render(bytes, meta.sha256, meta.width, meta.height)
     this.animatedBySha.set(meta.sha256, result.animated)
     this.footprintBySha.set(meta.sha256, result.footprint)
     // Encode the cache copy when the browser is idle — the card is already up
     // and canvas.toBlob is another chunk of main thread.
+    const key = AssetCache.posterKey(meta)
     const idle = (fn: () => void) => (typeof requestIdleCallback === 'function'
       ? requestIdleCallback(fn, { timeout: 4000 })
       : setTimeout(fn, 400))
     idle(() => {
       void result.toPng().then((png) => {
-        void put('posterCache', POSTER_CACHE_V + meta.sha256, png)
-        if (result.footprint) void put('posterCache', POSTER_CACHE_V + meta.sha256 + ':fp', result.footprint)
-        void put('posterCache', POSTER_CACHE_V + meta.sha256 + ':anim', result.animated)
+        void put('posterCache', key, png)
+        if (result.footprint) void put('posterCache', key + ':fp', result.footprint)
+        void put('posterCache', key + ':anim', result.animated)
       }).catch(() => undefined)
     })
     return { pixels: result.pixels, width: result.width, height: result.height }
-  }
-
-  private async fetchThumb(meta: ThreadMeta): Promise<Blob | undefined> {
-    if (!meta.thumbUrl || this.hashFailed.has(meta.eventId) || meta.hashFailed) return undefined
-    const cached = meta.thumbSha256 ? await get<Blob>('posterCache', POSTER_CACHE_V + meta.thumbSha256) : undefined
-    if (cached) return cached
-    // kind 'png': posters are images; the GLB magic check must not apply
-    const blob = await this.blossoms.download([meta.thumbUrl], meta.thumbSha256 ?? '', meta.thumbSize ?? 0, 2 * 1024 * 1024, 'png')
-    if (meta.thumbSha256) void put('posterCache', POSTER_CACHE_V + meta.thumbSha256, blob)
-    return blob
   }
 
   async getModel(meta: ThreadMeta): Promise<Blob | undefined> {
@@ -383,19 +365,21 @@ export class AssetCache {
 
   /**
    * Render a poster for an arbitrary (not-yet-published) model blob.
-   * Falls back to a generated placeholder if the model renders blank
-   * (transparent/empty/invisible) so publishing is not hard-blocked.
+   * NOT part of publishing (format v4: the studio generates no poster at
+   * all) — this is a direct probe of the local render pipeline, used by the
+   * verification rig to pixel-check the camera policy. Posters for real
+   * posts come from getPoster(); the PNG is returned for pixel checks.
    */
-  async renderPosterFor(model: Blob, tint = '#FF5C35'): Promise<{ blob: Blob; blank: boolean }> {
+  async renderPosterFor(model: Blob, width = POSTER_W, height = POSTER_H): Promise<{ blob: Blob; width: number; height: number; blank: boolean }> {
+    // PosterRenderer takes shared bytes + a content hash (see SPEC 30)
+    const bytes = new Uint8Array(await model.arrayBuffer())
+    const sha = await sha256Hex(bytes)
     try {
-      // PosterRenderer takes shared bytes + a content hash (see SPEC 30)
-      const bytes = new Uint8Array(await model.arrayBuffer())
-      const sha = await sha256Hex(bytes)
-      const result = await this.poster.render(bytes, sha)
-      return { blob: await result.toPng(), blank: false }
+      const result = await this.poster.render(bytes, sha, width, height)
+      return { blob: await result.toPng(), width: result.width, height: result.height, blank: false }
     } catch (err) {
       if (err instanceof Error && /rendered empty|blank/i.test(err.message)) {
-        return { blob: placeholderPoster(tint), blank: true }
+        return { blob: new Blob(), width: POSTER_W, height: POSTER_H, blank: true }
       }
       throw err
     }
@@ -419,30 +403,4 @@ function loadImage(blob: Blob): Promise<HTMLImageElement> {
     img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('poster decode failed')) }
     img.src = url
   })
-}
-
-
-/** A deterministic 448x280 placeholder used when a model renders blank. */
-function placeholderPoster(tint: string): Blob {
-  const canvas = document.createElement('canvas')
-  canvas.width = POSTER_W
-  canvas.height = POSTER_H
-  const ctx = canvas.getContext('2d')!
-  ctx.fillStyle = '#121213'
-  ctx.fillRect(0, 0, POSTER_W, POSTER_H)
-  ctx.strokeStyle = 'rgba(255,255,255,0.05)'
-  ctx.lineWidth = 1
-  for (let x = 0; x <= POSTER_W; x += 32) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, POSTER_H); ctx.stroke() }
-  for (let y = 0; y <= POSTER_H; y += 32) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(POSTER_W, y); ctx.stroke() }
-  ctx.fillStyle = tint
-  const cx = POSTER_W / 2, cy = POSTER_H / 2
-  ctx.beginPath()
-  ctx.moveTo(cx, cy - 26); ctx.lineTo(cx + 26, cy); ctx.lineTo(cx, cy + 26); ctx.lineTo(cx - 26, cy); ctx.closePath()
-  ctx.fill()
-  // toBlob sync-ish
-  const data = canvas.toDataURL('image/png')
-  const bin = atob(data.slice(data.indexOf(',') + 1))
-  const bytes = new Uint8Array(bin.length)
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
-  return new Blob([bytes], { type: 'image/png' })
 }

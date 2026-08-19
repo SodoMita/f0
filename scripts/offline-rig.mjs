@@ -265,10 +265,18 @@ function modelFor(flavour) {
   return models.get(name)
 }
 
+// Captured ONCE at boot: makeEvent must derive created_at from a FIXED base,
+// not per-call Date.now(). GLB generation is slow enough that the wall clock
+// can advance by exactly the ageSec delta between two same-flavour roots —
+// identical created_at + identical tags = identical event id, and the app
+// dedupes by id, silently shrinking the 52-event feed (verify suites stall
+// on their `>= 52` gates). A frozen base makes ageSec strictly monotonic.
+const BOOT_NOW = Math.floor(Date.now() / 1000)
+
 function makeEvent(kind, tags, ageSec = 0) {
   // every event gets its own created_at: identical tag sets must still
   // produce distinct ids (the app dedupes by id)
-  const t = { kind, created_at: Math.floor(Date.now() / 1000) - 60 - ageSec, tags, content: '' }
+  const t = { kind, created_at: BOOT_NOW - 60 - ageSec, tags, content: '' }
   return finalizeEvent(t, sk)
 }
 
@@ -281,7 +289,8 @@ for (let i = 0; i < N_ROOTS; i++) {
     ['m', 'model/gltf-binary'],
     ['x', sha], ['ox', sha], ['size', String(bytes.length)],
     ['url', `https://localhost:${RELAY_PORT}/models/${flavour}.glb`],
-    ['v', 'form-zero:3'],
+    ['dim', '448x280'],
+    ['v', 'form-zero:4'],
     ['filename', `${flavour}.glb`],
   ]
   if (['a', 'e'].includes(flavour)) tags.push(['cameras', '1'])
@@ -301,7 +310,8 @@ for (const [i, flavour] of ['c', 'b', 'a', 'x'].entries()) {
     ['m', 'model/gltf-binary'],
     ['x', sha], ['ox', sha], ['size', String(bytes.length)],
     ['url', `https://localhost:${RELAY_PORT}/models/${flavour}.glb`],
-    ['v', 'form-zero:3'],
+    ['dim', '448x280'],
+    ['v', 'form-zero:4'],
     ['filename', `${flavour}.glb`],
     ['e', root1.id, '', 'root'],
     ['e', i === 0 ? root1.id : replies[0].id, '', 'reply'],
@@ -343,6 +353,16 @@ const uploads = new Map()
 // The seed feed, captured once: POST /__reset restores it so the verify
 // suites can run repeatedly without earlier publishes polluting the feed.
 const SEED_EVENTS = [...events]
+
+// Seed sanity: the feed must be 52 DISTINCT ids (the app dedupes by id, so a
+// collision silently shrinks the feed and stalls every `>= 52` gate).
+{
+  const seen = new Map()
+  for (const ev of events) {
+    if (seen.has(ev.id)) console.error('[rig] SEED DUPLICATE id', ev.id.slice(0, 8), 'created_at', ev.created_at, 'tags', JSON.stringify(ev.tags.filter(t => ['t','x','e'].includes(t[0]))))
+    seen.set(ev.id, true)
+  }
+}
 
 const httpsServer = createHttps({ key: KEY, cert: CERT }, (req, res) => {
   req.on('error', () => {})

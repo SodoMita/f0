@@ -4,7 +4,8 @@ WHAT: anonymous, wordless 3D imageboard. Browser-only client -> Nostr relays +
 Blossom, one canvas, Babylon.js. Posts = animated GLB models w/ own cameras +
 optional audio.
 
-LAYOUT: board = responsive 1-3 column grid of transparent 16:10 cards, scroll
+LAYOUT: board = responsive 1-3 column grid of transparent cards (aspect from
+each post's `dim`, default 16:10), scroll
 + inertia, tap card -> viewer, reply badge (↩ N) -> thread. Thread = 2D tree
 map (pan/pinch/zoom, tidy tree, tap node) — PLANNED 3 modes (spec AMENDMENT 43):
 2D posters · tree view · 3D with ACTUAL GLB models, each shown through the

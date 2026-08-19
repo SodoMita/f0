@@ -61,8 +61,17 @@ interface TNode {
 interface TEdge { parent: string; child: string }
 
 const NODE_W = 6.4
-const NODE_H = 4.0 // 16:10
+// Reference node height (16:10). Node quads follow each post's declared
+// poster aspect (`dim`, format v4); the reference only spaces tree rows.
+const NODE_H_REF = 4.0
 const ROOT_SCALE = 1.28
+
+/** Node quad size in world units for a post's declared poster aspect. */
+function nodeSize(meta: ThreadMeta, root: boolean): { w: number; h: number } {
+  const w = root ? NODE_W * ROOT_SCALE : NODE_W
+  return { w, h: w * (meta.height / meta.width) }
+}
+
 const GAP_X = 2.2
 const GAP_Y = 4.6
 const ZOOM_MIN = 0.12
@@ -201,8 +210,9 @@ export class ThreadView {
     this.syncPreviews()
   }
 
-  /** Settings → Textures: card / preview width. Height is fixed at the
-   *  node rect aspect (16:10 = 0.625), same as the poster.
+  /** Settings → Textures: card / preview width. Height follows the 16:10
+   *  reference aspect; the live-preview RTT is shared by all slots, so it
+   *  keeps the reference aspect even for posts that declare another.
    *  The width is the BASE at 1:1 zoom; the live RTT scales with the map's
    *  camera zoom (applyPreviewScale) so zooming in stays sharp and zooming
    *  out spends fewer GPU pixels. */
@@ -494,8 +504,7 @@ export class ThreadView {
       const p = pos.get(meta.eventId)
       if (!p) continue
       const root = meta.eventId === rootId
-      const w = root ? NODE_W * ROOT_SCALE : NODE_W
-      const h = root ? NODE_H * ROOT_SCALE : NODE_H
+      const { w, h } = nodeSize(meta, root)
 
       const frame = MeshBuilder.CreatePlane(`tframe-${meta.eventId.slice(0, 8)}`, { width: 4, height: 4 }, this.scene)
       const frameMat = makeCardMaterial(this.scene)
@@ -606,14 +615,14 @@ export class ThreadView {
         const xs = ch.map((c) => walk(c, depth + 1, seen))
         x = (xs[0] + xs[xs.length - 1]) / 2
       }
-      out.set(id, { x, y: -depth * (NODE_H + GAP_Y), depth })
+      out.set(id, { x, y: -depth * (NODE_H_REF + GAP_Y), depth })
       return x
     }
     walk(rootId, 0, new Set())
     // anything orphaned by a missing parent: park it on a trailing row
     for (const m of metas) {
       if (out.has(m.eventId)) continue
-      out.set(m.eventId, { x: cursor, y: -(NODE_H + GAP_Y), depth: 1 })
+      out.set(m.eventId, { x: cursor, y: -(NODE_H_REF + GAP_Y), depth: 1 })
       cursor += step
     }
     // centre horizontally on the root

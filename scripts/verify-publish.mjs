@@ -1,8 +1,9 @@
 // Publish round-trip against the offline rig, driven through the REAL UI so
 // it runs identically on the dev server AND the production preview build
 // (no /src/ module imports — those only exist on the dev server):
-// studio text -> publish button -> Blossom PUT /upload -> relay publish ->
-// live feed event -> SHA-verified re-download -> kind-5 delete -> tombstone.
+// studio text -> publish button -> Blossom PUT /upload (model only, no
+// poster) -> relay publish -> live feed event -> SHA-verified re-download ->
+// kind-5 delete -> tombstone.
 //
 //   node scripts/offline-rig.mjs   + dev/preview server, then:
 //   node scripts/verify-publish.mjs
@@ -65,8 +66,9 @@ await page.waitForFunction(() => window.__form0.index.byId.size >= 52, null, { t
   await page.evaluate(() => window.__form0.blossoms.setServers(['https://localhost:8443']))
   const before = await page.evaluate(() => window.__form0.index.byId.size)
 
-  // the REAL publish flow: the studio's publish button (export -> poster ->
-  // blossom -> relays) and the app routes to the new post's viewer
+  // the REAL publish flow: the studio's publish button (export -> blossom ->
+  // relays; format v4 renders no poster at publish time) and the app routes
+  // to the new post's viewer
   await page.evaluate(() => document.querySelector('#btn-studio-publish').click())
   await page.waitForFunction(() => location.hash.startsWith('#/viewer/'), null, { timeout: 120000 })
   const published = await page.evaluate((beforeCount) => {
@@ -77,7 +79,7 @@ await page.waitForFunction(() => window.__form0.index.byId.size >= 52, null, { t
       grew: f.index.byId.size > beforeCount,
       eventId: newest?.eventId,
       urls: newest?.urls,
-      thumb: newest?.thumbUrl,
+      dim: newest ? `${newest.width}x${newest.height}` : undefined,
       size: newest?.size,
       sha: newest?.sha256,
       filename: newest?.filename,
@@ -85,9 +87,9 @@ await page.waitForFunction(() => window.__form0.index.byId.size >= 52, null, { t
   }, before)
   check('publish button completes and routes to the new post', !!published.eventId && published.grew,
     published.eventId?.slice(0, 8))
-  check('event advertises a localhost replica + thumb',
-    (published.urls ?? []).every((u) => u.startsWith('https://localhost:8443/')) && !!published.thumb,
-    JSON.stringify({ urls: published.urls, thumb: published.thumb }))
+  check('event advertises a localhost replica + dim (v4: no thumb)',
+    (published.urls ?? []).every((u) => u.startsWith('https://localhost:8443/')) && !!published.dim,
+    JSON.stringify({ urls: published.urls, dim: published.dim }))
 
   // SHA-verified re-download of the published model via the app's client
   const roundtrip = await page.evaluate(async (m) => {
@@ -133,11 +135,14 @@ await page.waitForFunction(() => window.__form0.index.byId.size >= 52, null, { t
     const f = window.__form0
     f.blossoms.setServers(['https://localhost:8443'])
     const content = await f.studio.getContentForPublish()
-    // pass-through: no user cameras added -> the ORIGINAL bytes ship
-    const poster = await f.assets.renderPosterFor(content.blob, f.studio.tintColor)
+    // pass-through: no user cameras added -> the ORIGINAL bytes ship.
+    // renderPosterFor is a direct pipeline probe (NOT run by the publish
+    // flow any more): it pixel-checks the camera policy every viewer uses.
+    const poster = await f.assets.renderPosterFor(content.blob)
     return {
       passThrough: content.sourceFormat === 'glb' && content.filename === 'a.glb',
       posterBlank: poster.blank,
+      dim: `${poster.width}x${poster.height}`,
       png: [...new Uint8Array(await poster.blob.arrayBuffer())],
     }
   })
@@ -158,7 +163,7 @@ await page.waitForFunction(() => window.__form0.index.byId.size >= 52, null, { t
     }
     return { red: red / opaque, green: green / opaque }
   }, r.png)
-  check('publish poster renders from the authored camera (red only)',
+  check('local poster pipeline renders from the authored camera (red only)',
     !r.posterBlank && px.red > 0.5 && px.green < 0.01,
     `red=${(px.red * 100).toFixed(1)}% green=${(px.green * 100).toFixed(2)}%`)
   await page.screenshot({ path: 'shots/verify-publish.png' })
@@ -226,8 +231,6 @@ await page.waitForFunction(() => window.__form0.index.byId.size >= 52, null, { t
       ...good,
       eventId: 'ab'.repeat(32),
       sha256: '00'.repeat(32),
-      thumbUrl: undefined,
-      thumbSha256: undefined,
       hashFailed: false,
       tombstoned: false,
     }

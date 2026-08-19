@@ -15,6 +15,12 @@ export const DELETE_KIND = 5
 export const BLOSSOM_AUTH_KIND = 24242
 export const MODEL_MIMES = ['model/gltf-binary', 'model/gltf+json'] as const
 
+// v4 post format: posters are NEVER fetched — every client renders them from
+// the model. A post declares its rendered image size via the `dim` tag
+// (`WxH`, e.g. `448x280`); these are the defaults a publisher renders at and
+// the fallback for posts (older format) that carry no `dim`.
+export const POSTER_W = 448
+export const POSTER_H = 280
 // Spec 08 §1 / 07 §4. Enforced BEFORE bytes reach Babylon (crash prevention).
 export const LIMITS = {
   modelBytesHard: 20 * 1024 * 1024,
@@ -36,10 +42,31 @@ export const LIMITS = {
   cameras: 16,
   lights: 32,
   sceneDepth: 128,
-  posterBytesHard: 200 * 1024,
+  // `dim` bounds: a poster is a card image, not a wallpaper. Ratio is
+  // validated separately (postAspect) so a card can never be a sliver.
+  posterDimMin: 64,
+  posterDimMax: 4096,
+  posterAspectMin: 0.5,
+  posterAspectMax: 2.0,
   boardRoots: 48,
   maxEventsPage: 200,
 } as const
+
+/** Validated `dim` tag -> poster pixel size, or null when unusable. */
+export function parsePosterDim(
+  value: string | undefined,
+): { width: number; height: number } | null {
+  const m = /^(\d{1,5})x(\d{1,5})$/.exec(value ?? '')
+  if (!m) return null
+  const width = Number(m[1])
+  const height = Number(m[2])
+  if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height)) return null
+  if (width < LIMITS.posterDimMin || width > LIMITS.posterDimMax) return null
+  if (height < LIMITS.posterDimMin || height > LIMITS.posterDimMax) return null
+  const aspect = width / height
+  if (aspect < LIMITS.posterAspectMin || aspect > LIMITS.posterAspectMax) return null
+  return { width, height }
+}
 
 export const DEFAULTS = {
   relays: ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.primal.net', 'wss://relay.nostr.band'],

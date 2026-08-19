@@ -5,6 +5,49 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 
+- [x] **Studio card preview + full-page resizable preview** (agent arena,
+      2026-08-20, SPEC AMENDMENT 63): the studio's upper-left corner shows
+      a live card preview (local poster render of the current content,
+      debounced on studio.onDirty); click hides it with a "◱ card" pill to
+      reveal, ⤢ opens a full page where the card sits on a drag-resizable
+      canvas (dim limits enforced). The chosen size is published as `dim`.
+      Verified: ad-hoc Playwright round-trip (paint, hide/reveal, resize
+      448x280→560x280 with the aspect cap, publish carries `dim=560x280`)
+      plus verify-publish, offline-verify (tap moved past the new HUD),
+      smoke, interact, features, transfer, settings, network-panel green;
+      tsc, vite build and build:standalone green.
+
+- [x] **Offline rig: seed id collision shrunk the feed to 51** (agent arena,
+      2026-08-20): `makeEvent` stamped `created_at` from per-call
+      `Date.now()`; GLB generation is slow enough that the clock can advance
+      by exactly the `ageSec` delta between two same-flavour roots,
+      producing IDENTICAL events (same id) — the app dedupes by id, so the
+      52-event feed silently became 51 and every `>= 52` gate stalled.
+      `created_at` now derives from one `BOOT_NOW` captured at module load
+      (strictly monotonic ageSec), and the rig loudly reports any seed
+      duplicate at boot. Full format-v4 verification on the rig (this
+      sandbox, SwiftShader): verify-publish, offline-verify, smoke,
+      features, interact, orient, transfer, settings, network-panel — all
+      green; build:standalone emits the single 4.21 MB file.
+
+- [x] **Studio publish generates no poster** (agent arena, 2026-08-20, SPEC
+      AMENDMENT 62 follow-up): the publish flow's local poster render (the
+      "poster…" stage that validated the model and derived `dim`) is gone —
+      the studio stamps the default render size (448x280) into `dim` and
+      uploads only the model. Posters exist solely as on-demand local
+      renders by whoever views a card; `renderPosterFor` stays as a
+      pipeline probe for the verification rig's camera-policy pixel check.
+
+- [x] **Post format v4: local-only posters + `dim` (width/height) in the
+      event** (agent arena, 2026-08-20, SPEC AMENDMENT 62): removed the
+      thumb PNG tags from kind-1063 — posters are now ONLY rendered locally
+      from the model, sized by the new `dim` (`WxH`) tag; publish uploads
+      the model GLB alone. The board and the thread map size their card /
+      node quads from each post's declared aspect (band layout centres
+      shorter cards in a row). Old v3 events parse unchanged (default
+      448x280). Guard: `parsePosterDim` unit checks + updated
+      `offline-rig`/`verify-publish` (format v4 seeds, `dim` assertion).
+
 - [x] **Cancel publish + hash integrity** (agent arena, 2026-08-19, SPEC
       AMENDMENT 58): publish button stays enabled as **cancel** and aborts
       in-flight Blossom PUTs; the studio freezes before export and

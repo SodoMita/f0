@@ -1,9 +1,9 @@
 FORM/0 BUILD SPEC (condensed). A wordless multiplayer game of 3D shapes; browser-only, direct to Nostr relays + Blossom; one canvas, Babylon.js. Player creations = animated GLB models, own cameras, optional embedded audio.
 Goals: (1) real content from public relays on first run, no seeding/config; (2) build:standalone -> ONE .html from file://, fetches only user content.
 
-BUILD (gated): 1 skeleton (scenes==1); 2 relay pool >=20 real GLB events (Node script vs real relays FIRST); 3 Blossom+SHA >=10 match; 4 thumbnails 512x320; 5 board recognizable; 6 RTT pool 4+ animate; 7 viewer/thread/network; 8 studio pass-through; 9 paint editor; 10 standalone file://.
+BUILD (gated): 1 skeleton (scenes==1); 2 relay pool >=20 real GLB events (Node script vs real relays FIRST); 3 Blossom+SHA >=10 match; 4 local poster render at the post's `dim`; 5 board recognizable; 6 RTT pool 4+ animate; 7 viewer/thread/network; 8 studio pass-through; 9 paint editor; 10 standalone file://.
 
-NETWORK [MEASURED]: filter {'#m':['model/gltf-binary','model/gltf+json']} -> 66/66 (bare kinds = 94% junk); never '#t':['3d']. 0/46 events carry poster tags -> render posters locally. url x2 = replicas; ox = hash fallback. relay.nostr.band flaky. form-zero exists (24 posts, 12 replies/7 roots): subscribe {'#t':['form-zero']} + {'#m'} + {kinds:[5]}, merge. >20MiB -> "too large". Draco mandatory, local decoders, no CDN.
+NETWORK [MEASURED]: filter {'#m':['model/gltf-binary','model/gltf+json']} -> 66/66 (bare kinds = 94% junk); never '#t':['3d']. 0/46 events carry poster tags -> render posters locally (format v4: posters are ALWAYS local, `dim` gives the size). url x2 = replicas; ox = hash fallback. relay.nostr.band flaky. form-zero exists (24 posts, 12 replies/7 roots): subscribe {'#t':['form-zero']} + {'#m'} + {kinds:[5]}, merge. >20MiB -> "too large". Draco mandatory, local decoders, no CDN.
 
 TRAPS: 1 SVG utf8 URI never loads -> PNG. 2 emissive+texture=white -> 0,0,0. 3 ScrollViewer calc()=transparent -> pixel heights. 4 GUI can't sample RTT -> meshes 1px=1unit. 5 rejection Map<'STATIC'|'FAILED'>. 6 scene audio emitter distance props reject GLB. 7 import screenshotTools/loaders. 8 SVG needs width/height. 9 BOOT/BOARD share '#/' -> compare names. 10 ARIA active scene only. 11 file dialog trusted click. 12 refreshRate=ceil(active/slotsPerFrame)+phase. 13 re-run npm i; never commit dist/.
 
@@ -15,7 +15,7 @@ VISUAL: wordless = no labels, not no legibility; mandatory first-run legend (reo
 
 RUNTIME: 1 canvas/Engine/context, swap scenes; no per-card canvas; GLB near viewport only; bounded RTT pool; viewer = 1 model + paused feed; empty content; preserve names/hierarchy/cameras/anims. Scenes board/viewer/editor/ui. Cards = meshes 1px=1unit; virtualize ~48. Slots: 8 max (4 low-mem), isolated RTT+layer mask, hysteresis .55/.95, animated-only, adaptive 192-512px, rebind every frame. Budgets: 20MiB/1.5MiB/8MiB/48/240/22ms/3/50k@60fps. Dispose on close; 100 cycles no growth; per-post try/catch.
 
-FEED: placeholder->poster->prefetch->slot->RTT->poster. Load: query+deletions->verify->index->layout->posters->slots; never 48x20MiB. Animated? v3 hints else preflight. Poster: t=0, 512x320, SHA, <=200KB, same camera policy. Camera: preview-camera->animated->imported->auto-fit; anim: preview-anim->camera->model->static; no cuts. Reply: parent never loaded.
+FEED: placeholder->poster->prefetch->slot->RTT->poster. Load: query+deletions->verify->index->layout->posters->slots; never 48x20MiB. Animated? v3 hints else preflight. Poster: t=0, ALWAYS locally rendered at the post's `dim` (default 448x280), same camera policy. Camera: preview-camera->animated->imported->auto-fit; anim: preview-anim->camera->model->static; no cuts. Reply: parent never loaded.
 
 PIPELINE: glb byte-for-byte; gltf/obj via virtual FS -> repack; never auto-rename/merge/bake/center/scale; unknown ext rejected; external URIs forbidden. GLTF2Export.GLBAsync(shouldExportNode); pass-through never exports. PreservationReport: loss blocks publish (fail closed). Audio -> repack, hash changes. Poster from published bytes. Errors name originals.
 
@@ -23,11 +23,11 @@ EDITOR: brush paint in 3D, not CAD. GRID 0.05 != CUBE 0.25, overlap, never dedup
 
 TEXT+ANIM: text = real flat low-poly geometry (NOT textured quad), FORM <120 tris; pixel-font table + run-merge. Anim: tracks -> node props, keyframes {time,value,LINEAR|STEP|CUBICSPLINE}, RECORD keyframing. Camera anim fly-throughs, export real glTF (quaternion sign guard). FRAMING: auto-fit faces content (dominant facing), same policy poster+RTT. Acceptance: <120 tris, round-trips, 30s/200keys >=55fps.
 
-PROTOCOL: relays damus.io/nos.lol/primal.net + nostr.band (flaky). Filters {'#m':[gltf-binary,gltf+json]} + {kinds:[5]}; mime recheck. v2 tags: t/m/x/size/url/server/color/v/e(root/reply); v3 adds thumb(x/size/dim 512x320), preview-camera/animation (index), anim/cameras/camera-anim, filename/source-format/source-filename. Parse: multi-url replicas, x->ox, NIP-10. Publish: empty content, url(xN)/m/x/ox/size/poster/poster-x/f flags/e tags, nostr-tools, 1/3=partial. Kind-5: pubkey match, tombstones. Blossom: blossom.primal.net + cdn.satellite.earth, replicas, SHA-256; BUD-01 (kind-24242). Audio: KHR_audio/MSFT_audio_emitter, append BIN, <=8MiB. IndexedDB: posts/posters/blobs/owned/config, forward-only, never deleteDatabase(), secrets AES-GCM, poster LRU.
+PROTOCOL: relays damus.io/nos.lol/primal.net + nostr.band (flaky). Filters {'#m':[gltf-binary,gltf+json]} + {kinds:[5]}; mime recheck. v2 tags: t/m/x/size/url/server/color/v/e(root/reply); v3 added preview-camera/animation (index), anim/cameras/camera-anim, filename/source-format/source-filename; v4 REMOVES the thumb PNG tags (posters are only ever rendered locally from the model) and adds dim (WxH, the local poster render size; validated 64..4096 px, aspect 0.5..2, default 448x280). Parse: multi-url replicas, x->ox, NIP-10. Publish: empty content, url(xN)/m/x/ox/size/dim/f flags/e tags, nostr-tools, 1/3=partial — model bytes only, no poster upload. Kind-5: pubkey match, tombstones. Blossom: blossom.primal.net + cdn.satellite.earth, replicas, SHA-256; BUD-01 (kind-24242). Audio: KHR_audio/MSFT_audio_emitter, append BIN, <=8MiB. IndexedDB: posts/posters/blobs/owned/config, forward-only, never deleteDatabase(), secrets AES-GCM, poster LRU.
 
 SECURITY: trusted = bundle + nostr-tools + Babylon; else untrusted until verified (sig/schema/size/URL/cycles). Blob: cap, no credentials, timeout, SHA-256, magic/length, no cross-origin redirects. GLB limits: 20MiB, 2MiB JSON, 2k nodes, 500 meshes, 2M verts, 6M idx, 256 mats, 64 tex, 128MP, 32 skins, 16 cams, 32 lights, depth 128; re-verify, dispose on mismatch. GPU: caps, one model, contextlost -> stop. Secrets: per-post keys, envelope only. Endpoints: wss:/https: only, no localhost. Privacy: IP visible, deletion != destroy, per-post key unlinks.
 
-PERF: <=200 events, 48 roots; poster <=200KB; model 8/20MiB. Pool: desktop 6/8 @512, tablet 4 @320, mobile 2 @256, reduced-motion 0. Frame 16.7ms: board<=4/RTT<=7/JS<=3/reserve>=2. Score: visibility x centerProximity x animationValue x readyBonus - loadCost. Adaptive degrade->posters. Gates: 100 cards x10, 100 cycles unchanged.
+PERF: <=200 events, 48 roots; poster is a local render (no transfer); model 8/20MiB. Pool: desktop 6/8 @512, tablet 4 @320, mobile 2 @256, reduced-motion 0. Frame 16.7ms: board<=4/RTT<=7/JS<=3/reserve>=2. Score: visibility x centerProximity x animationValue x readyBonus - loadCost. Adaptive degrade->posters. Gates: 100 cards x10, 100 cycles unchanged.
 
 A11Y: hidden DOM bridge (Babylon GUI = no a11y tree), active scene only. Keys: Board arrows/Enter/T/PgUp/PgDn/Escape; Viewer Left/Right/C cameras/A play (NOT audio)/M/R/T/S sound; Editor G/R/S/numpad. Touch >=44px, threshold, gestures. Reduced motion: 0 slots, dashed. Errors: sheet (code+cause+action); fatal = HTML box, never deleteDatabase; aria-live.
 
@@ -64,7 +64,9 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
    shows the view the author framed, not a synthetic auto-fit (auto-fit is
    only the fallback for models without a camera: worldBounds union AABB +
    dominant facing + fitDistance). A camera that frames nothing still yields
-   a blank poster -> publish falls back to a placeholder. Live previews use
+   a blank poster -> the card shows the quiet failed plate (format v4: the
+   studio neither renders nor uploads a poster, so there is no placeholder
+   PNG to fall back to). Live previews use
    the same policy: preview-camera index -> first imported camera ->
    auto-fit. Authored cameras also belong in the viewer (camera dots / C).
 
@@ -687,3 +689,37 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     (`blobMatchesHash` → `del` + `failHash`) and records a download
     `HashMismatchError` via `failHash`; a network failure stays retryable
     (no flag).
+
+62. POST FORMAT V4 — NO POSTER PNG IN THE EVENT; `dim` DECLARES THE POSTER
+    SIZE (2026-08-20): the thumb/thumb-x/thumb-size/thumb-dim tags are GONE
+    from the kind-1063 format. Posters are ONLY ever rendered locally from
+    the model bytes (poster scene, camera policy per §6) at the size the
+    event declares in `dim` (`WxH`, e.g. `448x280`; validated 64..4096 px
+    per side and aspect 0.5..2, falling back to 448x280 when absent or
+    unusable — so older v3 posts parse unchanged). The studio generates NO poster at
+    all — publish just stamps `dim` with the default render size (448x280)
+    and uploads the model GLB as the ONLY blob. Downstream: `ThreadMeta`
+    carries width/height instead of thumbUrl/thumbSha256/thumbSize;
+    `AssetCache` renders posters at `dim` (POSTER_CACHE_V p5, cache key
+    includes the size; the PNG download path is deleted — blossom download
+    is GLB-magic only); owned-post records no longer store poster fields;
+    the board sizes each card quad from the post's aspect (width fixed at
+    16 world units, band layout = tallest card in the row of N columns,
+    shorter cards centred in the band) and the thread map sizes each node
+    quad the same way; the shared live-preview RTT keeps the 16:10
+    reference aspect. `v` tag is `form-zero:4`.
+
+63. STUDIO CARD PREVIEW + FULL-PAGE RESIZABLE PREVIEW; `dim` IS AUTHOR
+    CHOSEN (2026-08-20): the studio shows the exact card a creation will
+    get — a corner preview in the stage's upper-left (a live local poster
+    render of the current content, debounced ~600 ms after any edit:
+    paint/text/gizmo/camera changes fire `studio.onDirty`). Clicking the
+    image hides it (state persists in localStorage); a "◱ card" pill
+    reveals it again. The ⤢ button opens a FULL PAGE: the card on a canvas
+    with a corner drag handle. Dragging resizes the canvas (live CSS
+    stretch during the drag; re-render at the released resolution), bound
+    by the format's `dim` limits (64..4096 px, aspect 0.5..2). The chosen
+    size becomes the event's `dim` at publish (reset to the 448x280
+    default on entering the studio for a fresh post). offline-verify's
+    empty-stage tap now hides the preview first (covering the hide/reveal
+    pair as a side effect).

@@ -16,12 +16,14 @@ import { dominantFacing, worldBox, frameDistance } from './facing'
 import { validateGLBCached } from './limits'
 import { graphics } from '../render/graphics'
 
-// Cards display at roughly 320x200 CSS px; 448x280 keeps them sharp on
-// HiDPI while costing ~24% fewer pixels per offscreen render than 512x320.
+import { POSTER_W as DEFAULT_W, POSTER_H as DEFAULT_H } from '../theme'
 import EncodeWorker from './encode.worker?worker&inline'
 
-export const POSTER_W = 448
-export const POSTER_H = 280
+// Default render size (cards display at roughly 320x200 CSS px; 448x280
+// keeps them sharp on HiDPI). A post may declare its own size via the `dim`
+// tag — see render(bytes, sha256, width, height).
+export const POSTER_W = DEFAULT_W
+export const POSTER_H = DEFAULT_H
 
 export function toFile(blob: Blob, name: string): File {
   return new File([blob], name, { type: blob.type || 'application/octet-stream' })
@@ -48,7 +50,9 @@ export interface PosterResult {
 }
 
 /**
- * Local thumbnail pipeline (step 4): GLB -> one frame -> 512x320 PNG.
+ * Local poster pipeline: GLB -> one frame -> RGBA/PNG, rendered by EVERY
+ * client from the model (format v4 — no thumb is ever fetched). Renders at
+ * the post's declared `dim` size, defaulting to POSTER_W x POSTER_H.
  * A File (not a blob URL) keeps the .glb extension so the glTF plugin loads.
  * Uses the model's own camera when one exists (spec 04 §5), else auto-fit
  * facing the content.
@@ -56,9 +60,11 @@ export interface PosterResult {
 export class PosterRenderer {
   readonly scene: Scene
   private headlight: DirectionalLight
-  /** reused readback buffer (0.5 MB per poster otherwise) */
+  /** reused readback buffer (sized up on demand; one alloc per size) */
   private readbackBuf = new Uint8Array(POSTER_W * POSTER_H * 4)
   private rtt: RenderTargetTexture
+  private rttW = POSTER_W
+  private rttH = POSTER_H
   // Renders share one scene (shared activeCamera + env); a promise-chain mutex
   // serializes them so concurrent calls can never stomp each other's camera.
   private chain: Promise<unknown> = Promise.resolve()
@@ -95,14 +101,37 @@ export class PosterRenderer {
     this.rtt.clearColor = new Color4(0, 0, 0, 0)
   }
 
-  render(bytes: Uint8Array, sha256: string): Promise<PosterResult> {
-    const run = () => this.doRender(bytes, sha256)
+  render(bytes: Uint8Array, sha256: string, width = POSTER_W, height = POSTER_H): Promise<PosterResult> {
+    const run = () => this.doRender(bytes, sha256, width, height)
     const result = this.chain.then(run, run)
     this.chain = result.then(() => undefined, () => undefined)
     return result
   }
 
-  private async doRender(bytes: Uint8Array, sha256: string): Promise<PosterResult> {
+  /**
+   * Size the shared render target for the next render. Safe between renders
+   * only — every render goes through the promise-chain mutex, so two renders
+   * can never race a resize. One RTT is still shared: same-size posts (the
+   * common case) reuse it without any reallocation.
+   */
+  private ensureSize(width: number, height: number): void {
+    if (width === this.rttW && height === this.rttH) return
+    this.rttW = width
+    this.rttH = height
+    this.rtt.dispose()
+    this.rtt = new RenderTargetTexture('poster-rtt', { width, height }, this.scene)
+    this.rtt.renderTargetOptions.generateDepthBuffer = true
+    this.rtt.renderTargetOptions.generateMipMaps = false
+    this.rtt.samples = 1
+    // Transparent background: posters composite over any page/board backdrop.
+    this.rtt.clearColor = new Color4(0, 0, 0, 0)
+    if (this.readbackBuf.byteLength < width * height * 4) {
+      this.readbackBuf = new Uint8Array(width * height * 4)
+    }
+  }
+
+  private async doRender(bytes: Uint8Array, sha256: string, width: number, height: number): Promise<PosterResult> {
+    this.ensureSize(width, height)
     let container: AssetContainer | null = null
     let ownCamera: FreeCamera | null = null
     // ONE render target for the whole session — allocating and freeing a
@@ -150,9 +179,9 @@ export class PosterRenderer {
           return authored
         }
         const facing = dominantFacing(loaded)
-        // Tight, aspect-aware framing: wide models must fill the 16:10 card.
+        // Tight, aspect-aware framing: wide models must fill the card.
         const fov = 0.7
-        const dist = frameDistance(min, max, center, facing.scale(-1), fov, POSTER_W / POSTER_H, 0.86)
+        const dist = frameDistance(min, max, center, facing.scale(-1), fov, this.rttW / this.rttH, 0.86)
         this.headlight.direction = facing.scale(-1)
         const fallback = ownCamera as FreeCamera
         fallback.position = center.add(facing.scale(dist))
@@ -201,11 +230,11 @@ export class PosterRenderer {
       out.set(src)
       return {
         pixels: out,
-        width: POSTER_W,
-        height: POSTER_H,
+        width: this.rttW,
+        height: this.rttH,
         animated,
         footprint,
-        toPng: () => encodePoster(out, POSTER_W, POSTER_H),
+        toPng: () => encodePoster(out, this.rttW, this.rttH),
       }
     } finally {
       ownCamera?.dispose()
@@ -243,7 +272,7 @@ export class PosterRenderer {
       const previous = engine._currentFramebuffer ?? null
       gl.bindFramebuffer(gl.FRAMEBUFFER, engine._dummyFramebuffer)
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, resource, 0)
-      const out = await engine._readPixelsAsync(0, 0, POSTER_W, POSTER_H, gl.RGBA, gl.UNSIGNED_BYTE, this.readbackBuf)
+      const out = await engine._readPixelsAsync(0, 0, this.rttW, this.rttH, gl.RGBA, gl.UNSIGNED_BYTE, this.readbackBuf)
       gl.bindFramebuffer(gl.FRAMEBUFFER, previous)
       return out ?? this.readbackBuf
     } catch {

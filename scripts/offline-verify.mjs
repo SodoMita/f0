@@ -478,6 +478,11 @@ const fetchModel = (name) => page.evaluate(async (u) => {
     `radius ${rBefore.toFixed(2)} -> ${fit.radius.toFixed(2)}`)
 
   // click empty space in the stage -> deselect (proves taps reach the scene)
+  // the card-preview HUD occupies the stage's top-left corner (format v4):
+  // click it away first — the empty-stage tap below lands on the canvas as
+  // it did before, and the hide/reveal pair gets covered as a side effect.
+  await page.evaluate(() => document.getElementById('studio-preview-canvas')?.click())
+  await page.waitForTimeout(120)
   await page.mouse.click(150, 250)
   await page.waitForTimeout(300)
   const desel = await page.evaluate(() => window.__form0.studio.selected === null)
@@ -560,6 +565,9 @@ const fetchModel = (name) => page.evaluate(async (u) => {
   await page.evaluate(() => window.__form0.studio.setCameraState({ projection: 'perspective' }))
   await page.waitForTimeout(200)
   await page.screenshot({ path: 'shots/verify-studio.png' })
+
+  // restore the card preview for the remaining checks
+  await page.evaluate(() => document.getElementById('btn-preview-reveal')?.click())
 
   // back to board
   await page.evaluate(() => { location.hash = '#/' })

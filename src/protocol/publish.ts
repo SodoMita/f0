@@ -10,7 +10,10 @@ export type PublishRole = 'root' | 'reply'
 
 export interface PublishInput {
   model: Blob
-  poster: Blob
+  /** Poster render size (px) — goes into the `dim` tag. Posters are only
+   *  ever rendered locally from the model; no PNG is uploaded. */
+  width: number
+  height: number
   tint: string
   filename?: string
   sourceFormat?: 'glb' | 'gltf' | 'obj' | 'generated'
@@ -32,7 +35,7 @@ export interface PublishResult {
 }
 
 export interface PublishProgress {
-  stage: 'hash' | 'poster' | 'blossom' | 'relay' | 'done' | 'error'
+  stage: 'hash' | 'blossom' | 'relay' | 'done' | 'error'
   detail?: string
   ok?: number
   failed?: number
@@ -42,11 +45,14 @@ const ROOT_TAG = 'form-zero-root'
 const REPLY_TAG = 'form-zero-reply'
 
 /**
- * Full BUD-01 + kind-1063 publish path:
- *  1. hash model + poster
- *  2. upload both to every configured Blossom server (BUD-01, kind-24242 auth)
- *  3. build the signed kind-1063 event with v2 + v3 tags
+ * Full BUD-01 + kind-1063 publish path (format v4):
+ *  1. hash the model
+ *  2. upload it to every configured Blossom server (BUD-01, kind-24242 auth)
+ *  3. build the signed kind-1063 event with v2 + v3 tags + `dim`
  *  4. persist the encrypted deletion capability, then broadcast to relays
+ *
+ * No poster PNG is published: every client renders posters locally from the
+ * model, sized by the `dim` tag.
  *
  * Partial relay failure is reported (amber), not thrown. Blossom failure on
  * every replica is thrown — there is no point publishing an event with no
@@ -62,31 +68,22 @@ export async function publishModel(
     signal?: AbortSignal
   },
 ): Promise<PublishResult> {
-  const { model, poster, tint } = input
+  const { model, tint } = input
   if (model.size > LIMITS.modelBytesHard) {
     throw new Error(`Model is ${(model.size / 1048576).toFixed(1)} MiB; limit is ${LIMITS.modelBytesHard / 1048576} MiB.`)
-  }
-  if (poster.size > LIMITS.posterBytesHard) {
-    throw new Error(`Poster is ${(poster.size / 1024).toFixed(0)} KiB; limit is ${LIMITS.posterBytesHard / 1024} KiB.`)
   }
 
   throwIfAborted(deps.signal)
   deps.onProgress?.({ stage: 'hash' })
   // Freeze first so later studio edits cannot change the bytes we hash
   // and then PUT. The event `x` tag is this snapshot.
-  const [modelSnap, posterSnap] = await Promise.all([freezeBlob(model), freezeBlob(poster)])
+  const modelSnap = await freezeBlob(model)
   const modelSha = modelSnap.sha256
-  const posterSha = posterSnap.sha256
   throwIfAborted(deps.signal)
 
   const secret = generateSecretKey()
   try {
     const blossom = new BlossomClient(deps.blossoms)
-
-    deps.onProgress?.({ stage: 'poster' })
-    const posterUploads = await blossom.upload(posterSnap.blob, secret, deps.signal)
-    if (!posterUploads.length) throw new Error('Poster upload failed on every Blossom server.')
-    throwIfAborted(deps.signal)
 
     deps.onProgress?.({ stage: 'blossom' })
     const modelUploads = await blossom.upload(modelSnap.blob, secret, deps.signal)
@@ -103,14 +100,11 @@ export async function publishModel(
       ['ox', modelSha],
       ['size', String(model.size)],
       ['color', tint],
-      ['v', 'form-zero:3'],
+      ['dim', `${input.width}x${input.height}`],
+      ['v', 'form-zero:4'],
     ]
     for (const u of modelUploads) tags.push(['url', u.url])
     for (const s of new Set(modelUploads.map((u) => new URL(u.url).origin))) tags.push(['server', s])
-    tags.push(['thumb', posterUploads[0].url])
-    tags.push(['thumb-x', posterSha])
-    tags.push(['thumb-size', String(posterSnap.bytes.byteLength)])
-    tags.push(['thumb-dim', '512x320'])
     if (input.filename) tags.push(['filename', input.filename.slice(0, 120)])
     if (input.sourceFormat) tags.push(['source-format', input.sourceFormat])
     if (typeof input.previewCamera === 'number') tags.push(['preview-camera', String(input.previewCamera)])
@@ -139,8 +133,6 @@ export async function publishModel(
       secretKey: bytesToHex(secret),
       modelSha256: modelSha,
       modelUrls: modelUploads.map((u) => u.url),
-      posterUrl: posterUploads[0].url,
-      posterSha256: posterSha,
       relays: deps.relays,
       createdAt: now,
       rootId: role === 'reply' ? input.rootId : eventId,

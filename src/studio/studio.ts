@@ -205,7 +205,12 @@ export class Studio {
 
   get isFrozen(): boolean { return this.frozen }
 
-  markDirty(): void { if (!this.frozen) this.contentDirty = true }
+  markDirty(): void { if (!this.frozen) { this.contentDirty = true; this.notifyEdit() } }
+
+  /** Fired on any content-affecting change (the HUD card preview listens to
+   *  re-render; this has NO publish semantics — contentDirty is separate). */
+  onDirty: (() => void) | null = null
+  private notifyEdit(): void { try { this.onDirty?.() } catch { /* HUD only */ } }
 
   get isPaintMode(): boolean { return this.paintMode }
 
@@ -619,6 +624,7 @@ export class Studio {
     const node = this.makeCameraNode(toStore, `studio-user-cam-${idx}`)
     this.storedCameraNodes.push(node)
     this.activeCamIndex = idx
+    this.notifyEdit()
     this.kick(200)
     return idx
   }
@@ -644,6 +650,7 @@ export class Studio {
     if (this.activeCamIndex === index) {
       this.setCameraState(this.storedCameras[index])
     }
+    if (!this.frozen) this.notifyEdit()
     this.kick(200)
   }
 
@@ -658,6 +665,7 @@ export class Studio {
     this.storedCameraNodes.forEach((n, i) => { n.name = `studio-user-cam-${i}` })
     if (this.activeCamIndex === index) this.activeCamIndex = -1
     else if (this.activeCamIndex > index) this.activeCamIndex--
+    this.notifyEdit()
     this.kick(200)
   }
 
@@ -692,6 +700,7 @@ export class Studio {
     const imported: ImportedModel = { file, bytes, report, sourceFormat: result.sourceFormat }
     this.imported = imported
     this.contentDirty = false
+    this.notifyEdit()
     const first = result.container.meshes.find((m) => m.name !== '__root__') ?? null
     if (first) this.select(first as AbstractMesh)
     this.form.kick(1000)

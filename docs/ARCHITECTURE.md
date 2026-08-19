@@ -8,8 +8,9 @@ src/
   core/
     engine.ts        ONE canvas / ONE Engine / ONE context; scene swap + render loop
     router.ts        hash routes: board | thread/:id | viewer/:id | studio | network
-    assets.ts        poster+model cache (IndexedDB by SHA-256), ≤3 concurrent dl,
-                     serialized poster renders (promise-chain mutex)
+    assets.ts        local-render poster + model cache (IndexedDB by SHA-256
+                     + `dim` size), ≤3 concurrent downloads, serialized
+                     poster renders (promise-chain mutex)
     transfer.ts      app-wide download/upload meter: per-transfer handles,
                      2s sliding-window byte rate, 200ms tick that stops when
                      idle, sliced BY SERVER ORIGIN as well as globally; feeds
@@ -22,7 +23,7 @@ src/
                      delivered; ping() times a REQ->EOSE round trip
     blossom.ts       download (replicas→SHA-256→GLB magic) + BUD-01 upload (XHR,
                      for upload.onprogress) + auth; both report into core/transfer
-    events.ts        kind-1063 parse/validate (mime, x/ox, size, urls, v3 tags)
+    events.ts        kind-1063 parse/validate (mime, x/ox, size, urls, dim, v4 tags)
     thread-index.ts  ThreadIndex: roots, children, tombstones, childCount, flatten
     storage.ts       IndexedDB (+in-memory fallback): model/poster cache, validated
                      settings/network config, AES-GCM owned-post envelopes + keyring
@@ -34,8 +35,9 @@ src/
     limits.ts        validateGLB() — pre-load GLB complexity caps (crash guard)
     facing.ts        worldBox (union AABB) + dominantFacing (thin-axis / authored
                      normals) + frameDistance (aspect-aware tight fit); auto-fit math
-    poster.ts        GLB → 512×320 PNG via scene.render() + camera.outputRenderTarget;
-                     blank-frame retry loop
+    poster.ts        GLB → local RGBA/PNG via scene.render() + camera.outputRenderTarget,
+                     rendered at the post's declared `dim` (default 448×280),
+                     blank-frame retry loop; format v4: never fetched, never uploaded
   board/
     board.ts         responsive 1–3 col grid, scroll+inertia, tap→viewer, reply badges
     cardMaterial.ts  unlit quad ShaderMaterial (tex.rgb*tint, tex.a*opacity),
