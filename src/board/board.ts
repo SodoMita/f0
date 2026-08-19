@@ -104,6 +104,9 @@ const SCROLL_SETTLE_MS = 150
 const SPIN_MAX_MS = 25_000
 const BADGE_W = 3.4
 const BADGE_H = 1.25
+// Pixels of pointer travel before a press becomes a scroll. Below this we
+// treat the gesture as a tap on the card that was under the POINTERDOWN.
+const TAP_SLOP = 8
 
 export class Board {
   readonly scene: Scene
@@ -130,6 +133,7 @@ export class Board {
   private isDark = true
   // tap vs drag + inertia
   private dragging = false
+  private downPointerX = 0
   private downPointerY = 0
   private downScrollY = 0
   private moved = 0
@@ -767,6 +771,7 @@ export class Board {
           this.activePointers.add(ev.pointerId)
           if (this.activePointers.size > 1) { this.dragging = false; return }
           this.dragging = true
+          this.downPointerX = this.scene.pointerX
           this.downPointerY = this.scene.pointerY
           this.downScrollY = this.scrollY
           this.moved = 0
@@ -775,8 +780,13 @@ export class Board {
         }
         case PointerEventTypes.POINTERMOVE: {
           if (!this.dragging || this.activePointers.size > 1) return
+          const dx = this.scene.pointerX - this.downPointerX
           const dy = this.scene.pointerY - this.downPointerY
-          this.moved = Math.max(this.moved, Math.abs(dy))
+          this.moved = Math.max(this.moved, Math.abs(dx), Math.abs(dy))
+          // Do not shift the feed until this is a real drag. A tap's natural
+          // jitter used to scroll the row above under the pointer, so the
+          // POINTERUP pick opened the wrong model.
+          if (this.moved < TAP_SLOP) return
           const prev = this.scrollY
           this.setScroll(this.downScrollY - dy / this.pxPerUnit)
           this.velocity = this.scrollY - prev
@@ -786,8 +796,12 @@ export class Board {
           this.activePointers.delete(ev.pointerId)
           if (!this.dragging) return
           this.dragging = false
+          if (this.moved < TAP_SLOP) {
+            this.velocity = 0
+            this.tapAt(this.downPointerX, this.downPointerY)
+            break
+          }
           if (this.inertia === 0) this.velocity = 0
-          if (this.moved < 8) this.tapAt(this.scene.pointerX, this.scene.pointerY)
           break
         }
         case PointerEventTypes.POINTERWHEEL: {
@@ -868,13 +882,39 @@ export class Board {
   }
 
   private tapAt(x: number, y: number): void {
-    const pick = this.scene.pick(x, y, (m) => Boolean(m.metadata?.card))
-    if (!pick?.hit || !pick.pickedMesh?.metadata?.card) return
-    const slot = pick.pickedMesh.metadata.card as CardSlot
-    if (!slot.meta) return
-    // badge = reply button (opens the thread); card body opens the viewer
-    if (pick.pickedMesh.metadata.badge) this.cb.onOpenThread(slot.meta)
-    else this.cb.onOpenModel(slot.meta)
+    // Hit-test in the same CSS→world space as screenPosOf. scene.pick can
+    // disagree with the ortho layout (hardware scale, jittered scroll),
+    // which opened the post one row above the one that was pressed.
+    const eng = this.scene.getEngine()
+    const cssW = eng.getRenderWidth() * eng.getHardwareScalingLevel()
+    const cssH = eng.getRenderHeight() * eng.getHardwareScalingLevel()
+    if (cssW <= 0 || cssH <= 0 || this.pxPerUnit <= 0) return
+    const wx = (x - cssW / 2) / this.pxPerUnit
+    const wy = this.halfH - (y / cssH) * (2 * this.halfH)
+
+    let best: { slot: CardSlot; d: number; badge: boolean } | null = null
+    for (const slot of this.cards) {
+      const row = slot.row
+      if (!slot.meta || !row || !slot.mesh.isEnabled()) continue
+      const cx = this.colX(row.col)
+      const cy = this.worldY(row)
+      if (slot.replyCount > 0 && slot.badge.isEnabled()) {
+        const bx = slot.badge.position.x
+        const by = slot.badge.position.y
+        if (Math.abs(wx - bx) <= BADGE_W / 2 && Math.abs(wy - by) <= BADGE_H / 2) {
+          const d = (wx - bx) ** 2 + (wy - by) ** 2
+          if (!best || d < best.d) best = { slot, d, badge: true }
+          continue
+        }
+      }
+      if (Math.abs(wx - cx) <= CARD_W / 2 && Math.abs(wy - cy) <= CARD_H / 2) {
+        const d = (wx - cx) ** 2 + (wy - cy) ** 2
+        if (!best || d < best.d) best = { slot, d, badge: false }
+      }
+    }
+    if (!best?.slot.meta) return
+    if (best.badge) this.cb.onOpenThread(best.slot.meta)
+    else this.cb.onOpenModel(best.slot.meta)
   }
 
   private drive(slot: CardSlot): void {
@@ -1006,6 +1046,28 @@ export class Board {
     const eng = this.scene.getEngine()
     const w = eng.getRenderWidth()
     const h = eng.getRenderHeight()
+    this.aspect = w / Math.max(1, h)
+    this.halfH = 20
+    const cssH = h * eng.getHardwareScalingLevel()
+    this.pxPerUnit = cssH / (2 * this.halfH)
+    this.camera.orthoTop = this.halfH
+    this.camera.orthoBottom = -this.halfH
+    this.camera.orthoLeft = -this.halfH * this.aspect
+    this.camera.orthoRight = this.halfH * this.aspect
+    this.backdrop.scaling.set((this.halfH * this.aspect * 2 + 1) / 4, (this.halfH * 2 + 1) / 4, 1)
+    this.backdrop.position.set(0, 0, 2)
+    this.layout()
+  }
+
+  dispose(): void {
+    for (const c of this.cards) this.release(c)
+    for (const l of this.seps) l.dispose()
+    this.seps = []
+    this.previewPool.dispose()
+    this.scene.dispose()
+  }
+}
+erHeight()
     this.aspect = w / Math.max(1, h)
     this.halfH = 20
     const cssH = h * eng.getHardwareScalingLevel()
