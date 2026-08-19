@@ -87,7 +87,10 @@ export class ThreadIndex {
       if (seen.has(id)) continue
       seen.add(id)
       const m = this.byId.get(id)
-      if (m) out.push(m)
+      // Confirmed hash mismatch / tombstone must not become a tree node.
+      // Children are still walked so a valid reply of a hidden parent can
+      // land as an orphan rather than vanish with the bad parent.
+      if (m && !m.hashFailed && !m.tombstoned) out.push(m)
       const kids = this.children.get(id)
       if (kids) for (const k of kids) stack.push(k)
     }

@@ -495,12 +495,14 @@ export class ThreadView {
       this.spinObserver = true
     }
     if (!this.assets || !this.index) return
-    const metas = this.index.flatten(rootId)
+    const metas = this.index.flatten(rootId).filter((m) => !m.hashFailed && !m.tombstoned)
     if (metas.length === 0) return
 
     const pos = this.layout(metas, rootId)
 
     for (const meta of metas) {
+      if (meta.hashFailed || meta.tombstoned) continue
+      if (this.assets.isHashFailed(meta.eventId)) continue
       const p = pos.get(meta.eventId)
       if (!p) continue
       const root = meta.eventId === rootId
@@ -871,6 +873,29 @@ export class ThreadView {
 
   resize(): void {
     this.applyCamera()
+  }
+
+  /** True when the open map currently has a node for this post. */
+  hasNode(eventId: string): boolean { return this.nodes.has(eventId) }
+
+  /**
+   * Tear down one node (confirmed hash mismatch). Disposes the plate /
+   * poster / live slot and rebuilds connectors. Does not bump `generation`
+   * so in-flight posters for OTHER nodes can still land.
+   */
+  dropNode(eventId: string): void {
+    const n = this.nodes.get(eventId)
+    if (!n) return
+    this.previewPool.release(eventId)
+    n.mesh.dispose(); n.mat.dispose(); n.frame.dispose(); n.frameMat.dispose()
+    n.spinner.dispose(); n.spinnerMat.dispose()
+    n.reply.dispose(); n.replyMat.dispose()
+    this.nodes.delete(eventId)
+    this.edges = this.edges.filter((e) => e.parent !== eventId && e.child !== eventId)
+    for (const l of this.lineMeshes) l.dispose()
+    this.lineMeshes = []
+    this.buildEdges()
+    this.form.kick()
   }
 
   clear(): void {
