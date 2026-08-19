@@ -2,8 +2,8 @@ import { Texture } from '@babylonjs/core/Materials/Textures/texture'
 import { RawTexture } from '@babylonjs/core/Materials/Textures/rawTexture'
 import { Scene } from '@babylonjs/core/scene'
 import { clearStore, del, get, put } from '../protocol/storage'
-import { sha256Hex, BlossomClient } from '../protocol/blossom'
-import { blobMatchesHash, isHashMismatch } from '../protocol/hash'
+import { BlossomClient } from '../protocol/blossom'
+import { blobMatchesHash, blobToBytes, isHashMismatch, isSha256Hex, sha256Hex } from '../protocol/hash'
 import type { ThreadMeta } from '../protocol/thread-index'
 import { PosterRenderer, POSTER_W, POSTER_H, type Footprint } from '../model/poster'
 
@@ -33,6 +33,8 @@ export class AssetCache {
   private animatedBySha = new Map<string, boolean>()
   private footprintBySha = new Map<string, Footprint | null>()
   private hashFailed = new Set<string>()
+  /** Blob / byte-array objects already verified against a hex64 digest. */
+  private verified = new WeakMap<object, string>()
   private queue: Job[] = []
   private inflight = new Map<string, Promise<Texture | undefined>>()
   private active = 0
@@ -52,9 +54,25 @@ export class AssetCache {
     this.hashFailed.add(meta.eventId)
     this.posterTex.get(meta.eventId)?.dispose()
     this.posterTex.delete(meta.eventId)
-    this.modelBlobs.delete(meta.sha256)
-    this.modelBytes.delete(meta.sha256)
     this.onHashFailed?.(meta)
+  }
+
+  /** Re-hash `data` against the claimed sha. Key-exists ≠ bytes match. */
+  private async matchesClaimed(data: Blob | Uint8Array, claimed: string): Promise<boolean> {
+    if (!isSha256Hex(claimed)) return false
+    const expect = claimed.toLowerCase()
+    const known = this.verified.get(data)
+    if (known) return known === expect
+    const ok = data instanceof Blob
+      ? await blobMatchesHash(data, expect)
+      : (await sha256Hex(data)) === expect
+    if (ok) this.verified.set(data, expect)
+    return ok
+  }
+
+  private dropModelRam(sha: string): void {
+    this.modelBlobs.delete(sha)
+    this.modelBytes.delete(sha)
   }
 
   getModelBlobByPostId(postId: string): Promise<Blob | undefined> {
@@ -80,11 +98,20 @@ export class AssetCache {
    */
   async getModelBytes(meta: ThreadMeta): Promise<Uint8Array | undefined> {
     if (this.hashFailed.has(meta.eventId) || meta.hashFailed) return undefined
+    if (!isSha256Hex(meta.sha256)) { this.failHash(meta); return undefined }
     const hit = this.modelBytes.get(meta.sha256)
-    if (hit) return hit
+    if (hit) {
+      if (await this.matchesClaimed(hit, meta.sha256)) return hit
+      this.dropModelRam(meta.sha256)
+    }
     const blob = await this.getModel(meta)
     if (!blob) return undefined
-    const bytes = new Uint8Array(await blob.arrayBuffer())
+    const bytes = await blobToBytes(blob)
+    if (!(await this.matchesClaimed(bytes, meta.sha256))) {
+      this.dropModelRam(meta.sha256)
+      this.failHash(meta)
+      return undefined
+    }
     this.modelBytes.set(meta.sha256, bytes)
     // bytes are heavier than blobs (blobs can live on disk) — keep very few
     while (this.modelBytes.size > 3) {
@@ -209,22 +236,13 @@ export class AssetCache {
       // to a RawTexture. The old path went pixels -> PNG -> Image -> canvas ->
       // getImageData -> texture, i.e. an encode and a decode per poster.
       const direct = await this.renderLocalPixels(meta)
-      if (direct) {
-        const tex = RawTexture.CreateRGBATexture(
-          direct.pixels, direct.width, direct.height, this.scene, false, false, Texture.BILINEAR_SAMPLINGMODE,
-        )
-        tex.name = 'poster-' + meta.eventId.slice(0, 8)
-        tex.wrapU = Texture.CLAMP_ADDRESSMODE
-        tex.wrapV = Texture.CLAMP_ADDRESSMODE
-        this.posterTex.set(meta.eventId, tex)
-        this.evictPosters()
-        return tex
-      }
+      if (direct) return this.commitRawPoster(meta, direct.pixels, direct.width, direct.height)
       // No fresh render (model > AUTO_POSTER_MAX_BYTES, render failed…):
       // decode a previously rendered (locally cached) copy if one exists.
       // Format v4: a poster PNG is NEVER fetched from a server.
       const blob = await this.cachedPoster(meta)
       if (!blob) return undefined
+      if (this.hashFailed.has(meta.eventId) || meta.hashFailed) return undefined
       // Decode the PNG to raw RGBA and upload directly (RawTexture). This
       // sidesteps both the async blob-URL Texture load and DynamicTexture's
       // canvas handling, which blank out on strict drivers.
@@ -237,6 +255,7 @@ export class AssetCache {
       const ctx = c.getContext('2d')!
       ctx.drawImage(img, 0, 0)
       const id = ctx.getImageData(0, 0, w, h)
+      if (this.hashFailed.has(meta.eventId) || meta.hashFailed) return undefined
       const tex = RawTexture.CreateRGBATexture(id.data, w, h, this.scene, false, true, Texture.BILINEAR_SAMPLINGMODE)
       tex.name = 'poster-' + meta.eventId.slice(0, 8)
       tex.wrapU = Texture.CLAMP_ADDRESSMODE
@@ -249,6 +268,21 @@ export class AssetCache {
   /** Cache key for a post's locally rendered poster at its declared size. */
   private static posterKey(meta: ThreadMeta): string {
     return `${POSTER_CACHE_V}${meta.sha256}@${meta.width}x${meta.height}`
+  }
+
+  private commitRawPoster(
+    meta: ThreadMeta, pixels: Uint8Array, width: number, height: number,
+  ): Texture | undefined {
+    if (this.hashFailed.has(meta.eventId) || meta.hashFailed) return undefined
+    const tex = RawTexture.CreateRGBATexture(
+      pixels, width, height, this.scene, false, false, Texture.BILINEAR_SAMPLINGMODE,
+    )
+    tex.name = 'poster-' + meta.eventId.slice(0, 8)
+    tex.wrapU = Texture.CLAMP_ADDRESSMODE
+    tex.wrapV = Texture.CLAMP_ADDRESSMODE
+    this.posterTex.set(meta.eventId, tex)
+    this.evictPosters()
+    return tex
   }
 
   /** Previously rendered poster (PNG) from IndexedDB, if any. */
@@ -297,6 +331,9 @@ export class AssetCache {
 
   async getModel(meta: ThreadMeta): Promise<Blob | undefined> {
     this.byPostId.set(meta.eventId, meta)
+    if (this.hashFailed.has(meta.eventId) || meta.hashFailed) return undefined
+    // parse already requires hex64 `x`. Empty / garbage hash is a refuse.
+    if (!isSha256Hex(meta.sha256)) { this.failHash(meta); return undefined }
     // Key the RAM blob cache and the in-flight dedup by the CONTENT hash
     // (sha256), not by eventId. Two posts that embed the same GLB are the
     // same bytes: keying by eventId downloaded/held one blob per post, so a
@@ -304,39 +341,49 @@ export class AssetCache {
     // the network once per post instead of once per model.
     const hit = this.modelBlobs.get(meta.sha256)
     if (hit) {
-      // refresh LRU position
-      this.modelBlobs.delete(meta.sha256)
-      this.modelBlobs.set(meta.sha256, hit)
-      return hit
+      if (await this.matchesClaimed(hit, meta.sha256)) {
+        this.modelBlobs.delete(meta.sha256)
+        this.modelBlobs.set(meta.sha256, hit)
+        return hit
+      }
+      this.dropModelRam(meta.sha256)
     }
     const inflight = this.modelInflight.get(meta.sha256)
-    if (inflight) return inflight
+    if (inflight) {
+      const blob = await inflight
+      if (blob && await this.matchesClaimed(blob, meta.sha256)) return blob
+      return undefined
+    }
     const job = (async () => {
       try {
         const cached = await get<Blob>('modelCache', meta.sha256)
         if (cached) {
-          // Cached bytes must still match the event `x` tag: a poisoned
-          // IndexedDB entry (torn upload, pre-hash-check build) must not
-          // render. Drop it and flag the post so the board hides the card.
-          if (!(await blobMatchesHash(cached, meta.sha256))) {
-            await del('modelCache', meta.sha256)
-            this.failHash(meta)
-            return undefined
+          // Key exists ≠ bytes match. A poisoned IndexedDB entry (torn
+          // upload, pre-hash-check build) must not reach Babylon. Drop it
+          // and redownload — do NOT failHash: the event `x` may be honest.
+          if (await this.matchesClaimed(cached, meta.sha256)) {
+            this.modelBlobs.set(meta.sha256, cached)
+            this.evictModels()
+            return cached
           }
-          this.modelBlobs.set(meta.sha256, cached)
-          this.evictModels()
-          return cached
+          await del('modelCache', meta.sha256)
         }
         let blob: Blob
         try {
           blob = await this.blossoms.download(meta.urls, meta.sha256, meta.size)
         } catch (err) {
           // A hash mismatch is permanent for this post (hide the card); a
-          // network failure is not — the caller may retry, so only the
-          // mismatch is recorded.
+          // network / oversize failure is not — the caller may retry.
           if (isHashMismatch(err)) this.failHash(meta)
           throw err
         }
+        if (!(await this.matchesClaimed(blob, meta.sha256))) {
+          this.failHash(meta)
+          return undefined
+        }
+        // Hash wins: a stale size tag is not corruption. Fix local meta so
+        // the next transfer meter is honest.
+        if (meta.size !== blob.size) meta.size = blob.size
         void put('modelCache', meta.sha256, blob)
         this.modelBlobs.set(meta.sha256, blob)
         this.evictModels()

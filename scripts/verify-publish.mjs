@@ -178,6 +178,7 @@ await page.waitForFunction(() => window.__form0.index.byId.size >= 52, null, { t
 
   const cancelled = await page.evaluate(async () => {
     const f = window.__form0
+    const origUpload = f.blossoms.upload.bind(f.blossoms)
     f.blossoms.upload = (_blob, _secret, signal) => new Promise((_resolve, reject) => {
       const boom = () => {
         const err = new Error('upload aborted')
@@ -207,6 +208,7 @@ await page.waitForFunction(() => window.__form0.index.byId.size >= 52, null, { t
       }
       tick()
     })
+    f.blossoms.upload = origUpload
     return {
       labeled,
       frozen,
@@ -223,6 +225,9 @@ await page.waitForFunction(() => window.__form0.index.byId.size >= 52, null, { t
       && cancelled.button === 'publish',
     JSON.stringify(cancelled))
 
+  // Don't re-upload a thumb here: the cancel test stubs blossoms.upload and
+  // a full produce()+decode can hang while the studio is the active scene.
+  // verify-hash.mjs covers the thumb+tree path; this asserts failHash + hide.
   const hidden = await page.evaluate(async () => {
     const f = window.__form0
     const good = [...f.index.byId.values()].find((m) => m.role === 'root' && m.urls?.length)
@@ -233,23 +238,33 @@ await page.waitForFunction(() => window.__form0.index.byId.size >= 52, null, { t
       sha256: '00'.repeat(32),
       hashFailed: false,
       tombstoned: false,
+      role: 'root',
+      refs: {},
     }
     f.index.add(bad)
     const before = [...f.index.byId.values()].filter((m) => m.role === 'root' && !m.tombstoned && !m.hashFailed)
       .some((m) => m.eventId === bad.eventId)
     await f.assets.getModel(bad)
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
     const after = [...f.index.byId.values()].filter((m) => m.role === 'root' && !m.tombstoned && !m.hashFailed)
       .some((m) => m.eventId === bad.eventId)
+    const onBoard = f.board.rows.some((row) => row.meta.eventId === bad.eventId)
+    const listed = f.index.flatten(bad.eventId).some((m) => m.eventId === bad.eventId)
     return {
       ok: true,
       before,
       after,
+      onBoard,
+      listed,
       flagged: !!f.index.byId.get(bad.eventId)?.hashFailed,
       cache: f.assets.isHashFailed(bad.eventId),
     }
-  })
+  }, { timeout: 20000 })
   check('a wrong-hash model is hidden from the board',
-    hidden.ok && hidden.before && !hidden.after && hidden.flagged && hidden.cache,
+    hidden.ok && hidden.before && !hidden.after && hidden.flagged && hidden.cache && !hidden.onBoard,
+    JSON.stringify(hidden))
+  check('a wrong-hash model is not a thread node (flatten skips hashFailed)',
+    hidden.ok && !hidden.listed,
     JSON.stringify(hidden))
 }
 

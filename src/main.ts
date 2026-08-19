@@ -216,6 +216,11 @@ async function boot(): Promise<void> {
   assets.onHashFailed = (meta) => {
     index.rejectHash(meta.eventId)
     refreshBoard()
+    threadView.dropNode(meta.eventId)
+    const route = router.current
+    if (route.name === 'thread' && route.rootId === meta.eventId) {
+      router.go({ name: 'board' })
+    }
     if (currentMeta?.eventId === meta.eventId) {
       errorSheet.show(ERRORS.MODEL_DOWNLOAD(() => router.go({ name: 'board' })))
       router.go({ name: 'board' })

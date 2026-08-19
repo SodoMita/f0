@@ -945,8 +945,16 @@ export class Board {
     const meta = slot.meta
     const assets = this.assets
     if (!meta || !assets) return
+    if (meta.hashFailed || assets.isHashFailed(meta.eventId)) return
     void assets.getPoster(meta).then((tex) => {
       if (slot.meta?.eventId !== meta.eventId) return
+      if (meta.hashFailed || assets.isHashFailed(meta.eventId)) {
+        slot.failed = true
+        slot.spinner.setEnabled(false)
+        this.fadeOpacityTo(slot, 0.09)
+        this.invalidate(2)
+        return
+      }
       if (!tex) {
         // No poster (too big / render failed / offline): stop the ring and
         // leave a quiet plate. A ring that spins forever also means the board

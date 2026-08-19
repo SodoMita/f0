@@ -20,7 +20,8 @@
     "check:transfer": "node scripts/transfer.mjs",
     "check:network-panel": "node scripts/network-panel.mjs",
     "check:paint": "bun scripts/paint-unit.mjs",
-    "check:publish": "node --experimental-strip-types scripts/publish-unit.mjs"
+    "check:publish": "node --experimental-strip-types scripts/publish-unit.mjs",
+    "check:hash": "bun scripts/hash-unit.mjs"
   },
   "dependencies": {
     "@babylonjs/core": "8.10.1",

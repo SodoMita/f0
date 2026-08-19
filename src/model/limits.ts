@@ -101,14 +101,16 @@ export function dataUriImageHead(uri: string, maxBytes = 64 * 1024): Uint8Array 
  * preview pool and the viewer all validate the SAME model; parsing the JSON
  * chunk three times per post is pure waste.
  */
-const reportBySha = new Map<string, LimitReport>()
+// Identity of the ACTUAL buffer, never the claimed sha. A poisoned cache
+// under a real `x` used to reuse the previous verdict for those bytes.
+let cacheEpoch = 0
+const reportByBytes = new WeakMap<Uint8Array, { epoch: number; report: LimitReport }>()
 
-export function validateGLBCached(bytes: Uint8Array, sha256: string): LimitReport {
-  const hit = reportBySha.get(sha256)
-  if (hit) return hit
+export function validateGLBCached(bytes: Uint8Array, _sha256?: string): LimitReport {
+  const hit = reportByBytes.get(bytes)
+  if (hit && hit.epoch === cacheEpoch) return hit.report
   const report = validateGLB(bytes)
-  if (reportBySha.size > 256) reportBySha.clear()
-  reportBySha.set(sha256, report)
+  reportByBytes.set(bytes, { epoch: cacheEpoch, report })
   return report
 }
 
@@ -120,7 +122,7 @@ const overrides: { textureSide?: number; decodedPixels?: number } = {}
 
 export function setLimitOverrides(next: { textureSide?: number; decodedPixels?: number }): void {
   Object.assign(overrides, next)
-  reportBySha.clear()   // previous verdicts were made under different caps
+  cacheEpoch++   // previous verdicts were made under different caps
 }
 
 export function limitTextureSide(): number { return overrides.textureSide ?? LIMITS.textureSide }

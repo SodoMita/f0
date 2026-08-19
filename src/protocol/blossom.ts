@@ -1,9 +1,12 @@
 import { finalizeEvent, generateSecretKey, type EventTemplate } from 'nostr-tools'
 import { BLOSSOM_AUTH_KIND, LIMITS } from '../theme'
 import { transfers, originOf } from '../core/transfer'
-import { freezeBlob, HashMismatchError, isAbortError, isSha256Hex, sha256Hex, throwIfAborted } from './hash'
+import {
+  bytesToBlob, freezeBlob, HashMismatchError, isAbortError, isOversize, isSha256Hex,
+  OversizeError, sha256Hex, throwIfAborted,
+} from './hash'
 
-export { sha256Hex, freezeBlob } from './hash'
+export { sha256Hex, freezeBlob, HashMismatchError, OversizeError } from './hash'
 
 function normalizeBlossom(value: string): string | null {
   try {
@@ -69,6 +72,12 @@ export class BlossomClient {
    */
   async download(urls: string[], hash: string, expectedSize: number, maxBytes = LIMITS.modelBytesHard): Promise<Blob> {
     let hashMismatch = false
+    let oversize = false
+    // Size is a meter + a cap, never a refuse. A stale `size` tag with a
+    // hash-valid body used to skip every replica before SHA ran ("false
+    // refuse"). Cap at max(claimed size, hard limit) so a too-small tag
+    // cannot truncate a good body, and a missing tag cannot run unbounded.
+    const cap = Math.max(expectedSize > 0 ? expectedSize : 0, maxBytes)
     for (const url of urls) {
       // One meter entry per replica attempt: a replica that stalls stops
       // contributing bytes and the reported speed drops, which is exactly
@@ -88,13 +97,14 @@ export class BlossomClient {
           if (done) break
           total += value.length
           xfer.advance(value.length)
-          if (total > maxBytes) throw new Error('stream exceeded size cap')
+          if (total > cap) throw new OversizeError()
           chunks.push(value)
         }
-        if (expectedSize > 0 && total !== expectedSize) continue
         const bytes = new Uint8Array(total)
         let off = 0
         for (const c of chunks) { bytes.set(c, off); off += c.length }
+        // ALWAYS hash. Hash matches `x` → accept even if the size tag is
+        // wrong. Hash mismatch → this replica is garbage; try the next.
         // Models MUST match the event `x` tag. An empty hash used to skip
         // the check, which let a wrong-hash replica render on the board.
         const expect = hash.toLowerCase()
@@ -104,12 +114,16 @@ export class BlossomClient {
           continue
         }
         if (!magicOk(bytes)) continue
-        return new Blob([bytes], { type: 'model/gltf-binary' })
-      } catch { /* next replica */ } finally {
+        return bytesToBlob(bytes, 'model/gltf-binary')
+      } catch (err) {
+        if (isOversize(err)) oversize = true
+        /* next replica */
+      } finally {
         xfer.end()
       }
     }
     if (hashMismatch) throw new HashMismatchError()
+    if (oversize) throw new OversizeError()
     throw new Error('No verified replica available.')
   }
 
