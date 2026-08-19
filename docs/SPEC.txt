@@ -49,6 +49,10 @@ shows its real model through the model's MAIN camera applied as the MODEL
 transform vs a static camera (model rotated by inverse of main-cam rotation, at
 the node's camera position; thread camera is only a position) — when centered,
 thread view == model's main-camera view. Fall back to auto-fit when no camera.
+50-53 preview width slider, viewer live-preview hand-off, zoom-scaled
+thread RTTs, hotkey typing guard. 54 PAINT EDITOR: packed store + thin
+instances + DDA + native coalesced pointer events; bake before
+GLTF2Export; undo = inverse commands (cap 100). Guard: paint-unit.mjs.
 44-47 SECURITY: owned-post deletion secrets are AES-256-GCM envelopes under a
 non-extractable IndexedDB key (event-id AAD; plaintext migration); persisted
 settings/network shapes are schema/type/range validated; sidecar imports are

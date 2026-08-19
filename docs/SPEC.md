@@ -503,3 +503,24 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     (model prev/next) and the thread map's 0/+/-/Escape fired while the
     user was editing a settings input (e.g. typing the preview width),
     switching models under the caret.
+
+54. PAINT EDITOR (2026-08-19). Studio paint tab is the hand-writing ink
+    tool (AMENDMENT 10), not a voxel editor. Implementation notes that
+    later agents must not "clean up":
+    - Packed Float32Array store + swap-last delete; spatial hash on GRID
+      0.05; Amanatides–Woo DDA for eraser traversal. Stamps overlap —
+      never dedupe by cell.
+    - Native pointer events on the canvas (getCoalescedEvents, pressure,
+      setPointerCapture). Babylon's pointer observable does not expose
+      coalesced sub-frame points. Left button paints; right/middle orbit
+      (`camera.inputs.attached.pointers.buttons = [1,2]` while painting).
+    - Depth-lock: the first hit of a stroke freezes the writing plane
+      (default XY / z=0 facing +Z, matching the studio orbit). Surface
+      mode raycasts existing meshes and offsets by the hit normal.
+    - Thin instances are display-only. GLTF2Export does not expand them,
+      so publish bakes each shape into a real mesh (vertex colours) and
+      excludes `studio-paint-*` helpers from shouldExportNode.
+    - Undo is inverse commands (add/remove stamp snapshots), cap 100,
+      redo tail cleared on new edits. Guard: `bun scripts/paint-unit.mjs`.
+    - Studio paint hotkeys (Z/B/X/V) run only after AMENDMENT 53's typing
+      guard, so they never steal keys from settings / the text textarea.

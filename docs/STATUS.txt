@@ -20,7 +20,7 @@ force-pushed away and restored — unlanded work kept on salvage/dev-rewrite
 (publish.ts, textMesh.ts, gui experiments); CHERRY-PICK from there, don't
 rewrite. Branch protection now blocks force-pushes.
 
-IN PROGRESS: studio polish (preservation report + partial-success UI remain).
+IN PROGRESS: paint editor (hand-writing ink) claimed 2026-08-18.
 
 NEXT — EDITOR CORE FIRST (primary use cases):
  1 paint editor, primary = hand-writing text (ink: pressure, coalesced events,

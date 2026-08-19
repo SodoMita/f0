@@ -34,10 +34,10 @@ CORE USABILITY
 
 FEATURES MISSING (old had them)
 -------------------------------
-9.  [OPEN] PAINT / HAND-WRITING EDITOR — the #1 feature (SPEC AMEND 10).
-    Old: brush stamps (cube/sphere/cylinder/tetra/quad), pointer pressure
-    -> width/alpha, getCoalescedEvents, eraser, color/layer, undo >=20,
-    orbit, thin-instance voxel store + spatial hash. Arena: none.
+9.  [DONE] PAINT / HAND-WRITING EDITOR (SPEC AMEND 10). Brush stamps
+    (cube/sphere/cylinder/tetra/quad), pressure→width/alpha, coalesced
+    events, smoothing, eraser, undo ≥100, thin instances + spatial hash
+    + Amanatides–Woo DDA. Snap/grid is optional (off by default).
 10. [OPEN] AUDIO RECORDING + EMBED (SPEC AMEND 11). Old generated a
     casket WAV, AudioButton, and gltf.ts embedded KHR_audio /
     MSFT_audio_emitter (append BIN). Arena has AudioMixer for

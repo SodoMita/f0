@@ -619,14 +619,16 @@ const fetchModel = (name) => page.evaluate(async (u) => {
       active,
       importVisible: !!rect && rect.width > 0 && rect.height > 0,
       paintDisabled: document.querySelector('[data-tab="paint"]')?.disabled === true,
+      paintPresent: !!document.querySelector('[data-tab="paint"]'),
       symbolsDisabled: document.querySelector('[data-tab="symbols"]')?.disabled === true,
       camCollapsed: document.querySelector('.cam-advanced')?.open === false,
     }
   })
   check('studio opens on the upload tab with a visible import button',
     tabs.active === 'upload' && tabs.importVisible, JSON.stringify(tabs))
-  check('paint + symbols tabs are disabled (later milestones)',
-    tabs.paintDisabled && tabs.symbolsDisabled)
+  check('paint tab is enabled (hand-writing editor)',
+    tabs.paintPresent && !tabs.paintDisabled)
+  check('symbols tab stays disabled (later milestone)', tabs.symbolsDisabled)
   check('camera details collapse by default (publish stays reachable)', tabs.camCollapsed)
 
   // close affordance: the rail X leaves the studio
@@ -654,6 +656,46 @@ const fetchModel = (name) => page.evaluate(async (u) => {
   await page.waitForTimeout(400)
   await page.evaluate(() => { location.hash = '#/' })
   await page.waitForTimeout(400)
+}
+
+// ------------------------------------------------- 8. paint editor
+{
+  await page.evaluate(() => { location.hash = '#/studio' })
+  await page.waitForFunction(() => window.__form0.engine.activeScene === window.__form0.studio.scene, null, { timeout: 10000 })
+  await page.evaluate(() => document.querySelector('[data-tab="paint"]').click())
+  await page.waitForTimeout(200)
+  const painted = await page.evaluate(() => {
+    const s = window.__form0.studio
+    const n = s.paint.drawStroke([
+      { x: -0.6, y: 0.2, z: 0, pressure: 0.85, t: 0 },
+      { x: -0.2, y: 0.35, z: 0, pressure: 0.7, t: 16 },
+      { x: 0.2, y: 0.1, z: 0, pressure: 0.65, t: 32 },
+      { x: 0.6, y: -0.15, z: 0, pressure: 0.5, t: 48 },
+    ])
+    return { n, count: s.paint.count, has: s.hasContent(), tool: s.paint.opts.tool }
+  })
+  check('paint stroke stamps along a path', painted.n >= 3 && painted.count === painted.n,
+    JSON.stringify(painted))
+  check('paint stroke is publishable content', painted.has)
+
+  const undone = await page.evaluate(() => {
+    const s = window.__form0.studio
+    s.paint.undo()
+    return { count: s.paint.count, has: s.hasContent(), canRedo: s.paint.history.canRedo }
+  })
+  check('paint undo removes the stroke (inverse command)', undone.count === 0 && !undone.has && undone.canRedo)
+
+  const pub = await page.evaluate(async () => {
+    const s = window.__form0.studio
+    s.paint.redo()
+    const c = await s.getContentForPublish()
+    return { name: c.filename, size: c.blob.size, format: c.sourceFormat, stamps: s.paint.count }
+  })
+  check('paint export is a generated GLB', pub.format === 'generated' && pub.size > 200 && pub.stamps > 0,
+    JSON.stringify(pub))
+  await page.screenshot({ path: 'shots/verify-paint.png' })
+  await page.evaluate(() => { location.hash = '#/' })
+  await page.waitForTimeout(300)
 }
 
 // ------------------------------------------------------------- legend

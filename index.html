@@ -63,9 +63,7 @@
         <button class="rail-btn" data-tab="type" title="text" aria-label="text">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14"/><path d="M12 5v14"/></svg>
         </button>
-        <!-- paint/symbols are later milestones (SPEC AMEND 10): disabled,
-             never a clickable-but-dead tab -->
-        <button class="rail-btn" data-tab="paint" title="paint editor — later milestone" aria-label="paint (not yet available)" disabled>
+        <button class="rail-btn" data-tab="paint" title="paint — hand-write" aria-label="paint">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17l5-5 6 6-5 5z"/><path d="M14 7l3-3 3 3-3 3z"/></svg>
         </button>
         <button class="rail-btn" data-tab="symbols" title="3D symbols — later milestone" aria-label="symbols (not yet available)" disabled>
@@ -112,7 +110,36 @@
           </section>
 
           <section class="studio-panel" data-panel="paint" hidden>
-            <p class="hint">Hand-writing / cube-trail painting is a later milestone (AMENDMENT 10).</p>
+            <div class="paint-tools" role="toolbar" aria-label="paint tools">
+              <button class="tool-btn active" data-paint="brush" title="brush (B)">ink</button>
+              <button class="tool-btn" data-paint="eraser" title="eraser (X)">erase</button>
+              <button class="tool-btn" data-paint="select" title="select (V)">sel</button>
+              <button class="tool-btn" data-paint="picker" title="pick color">pick</button>
+            </div>
+            <div class="paint-shapes" role="group" aria-label="stamp shape">
+              <button class="tool-btn active" data-shape="cube" title="cube">▣</button>
+              <button class="tool-btn" data-shape="sphere" title="sphere">●</button>
+              <button class="tool-btn" data-shape="cylinder" title="cylinder">▮</button>
+              <button class="tool-btn" data-shape="tetra" title="tetra">▲</button>
+              <button class="tool-btn" data-shape="quad" title="quad">▭</button>
+            </div>
+            <div class="text-controls">
+              <label>size<input id="paint-size" type="number" step="0.01" value="0.25" /></label>
+              <label>gap<input id="paint-spacing" type="number" step="0.05" value="0.32" /></label>
+              <label>ink
+                <span class="align-row">
+                  <input id="paint-color" type="color" value="#FF5C35" title="ink color" />
+                </span>
+              </label>
+            </div>
+            <div class="studio-row paint-toggles">
+              <button id="paint-snap" class="hbtn small" title="snap to fine grid">snap</button>
+              <button id="paint-lock" class="hbtn small active" title="lock stroke depth">lock</button>
+              <button id="paint-surf" class="hbtn small" title="paint on surfaces">surf</button>
+              <button id="paint-undo" class="hbtn small" title="undo (Z)">↶</button>
+              <button id="paint-redo" class="hbtn small" title="redo (Shift+Z)">↷</button>
+            </div>
+            <p class="hint" id="paint-budget">0 stamps · drag to write · right-drag orbits</p>
           </section>
 
           <section class="studio-panel" data-panel="symbols" hidden>
