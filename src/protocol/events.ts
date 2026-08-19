@@ -2,7 +2,7 @@ import { verifyEvent, verifiedSymbol, type Event, type VerifiedEvent } from 'nos
 // Inlined worker: keeps the single-file standalone build working (blob: URL,
 // already allowed by the CSP's worker-src).
 import VerifyWorker from './verify.worker?worker&inline'
-import { LIMITS, MODEL_KIND, MODEL_MIMES } from '../theme'
+import { LIMITS, MODEL_KIND, MODEL_MIMES, POSTER_W, POSTER_H, parsePosterDim } from '../theme'
 import { parseThreadRefs, type ThreadMeta } from './thread-index'
 
 /**
@@ -116,9 +116,11 @@ export function parseModelEvent(event: Event): ThreadMeta | null {
   const f = allTags(tags, 'f')
   const hasF = (name: string) => f.includes(name)
 
-  const thumbUrl = tag(tags, 'thumb')
-  const thumbSha = tag(tags, 'thumb-x')?.toLowerCase()
-  const thumbSize = Number(tag(tags, 'thumb-size'))
+  // v4: no thumb PNG in the format at all — posters are rendered from the
+  // model by every client. `dim` (WxH) declares that render's pixel size;
+  // posts without a usable `dim` (older format) fall back to the default.
+  const dim = parsePosterDim(tag(tags, 'dim')) ?? { width: POSTER_W, height: POSTER_H }
+
   const { role, refs } = parseThreadRefs(tags)
 
   return {
@@ -131,9 +133,8 @@ export function parseModelEvent(event: Event): ThreadMeta | null {
     native: allTags(tags, 't').includes('form-zero'),
     mime,
     urls,
-    thumbUrl: thumbUrl && /^https:\/\//i.test(thumbUrl) ? thumbUrl : undefined,
-    thumbSha256: thumbSha && HEX64.test(thumbSha) ? thumbSha : undefined,
-    thumbSize: Number.isSafeInteger(thumbSize) && thumbSize > 0 ? thumbSize : undefined,
+    width: dim.width,
+    height: dim.height,
     role,
     refs,
     animHint: tag(tags, 'anim') === '1' || hasF('anim'),

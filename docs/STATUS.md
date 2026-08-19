@@ -5,6 +5,16 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 
+- [x] **Post format v4: local-only posters + `dim` (width/height) in the
+      event** (agent arena, 2026-08-20, SPEC AMENDMENT 62): removed the
+      thumb PNG tags from kind-1063 — posters are now ONLY rendered locally
+      from the model, sized by the new `dim` (`WxH`) tag; publish uploads
+      the model GLB alone. The board and the thread map size their card /
+      node quads from each post's declared aspect (band layout centres
+      shorter cards in a row). Old v3 events parse unchanged (default
+      448x280). Guard: `parsePosterDim` unit checks + updated
+      `offline-rig`/`verify-publish` (format v4 seeds, `dim` assertion).
+
 - [x] **Cancel publish + hash integrity** (agent arena, 2026-08-19, SPEC
       AMENDMENT 58): publish button stays enabled as **cancel** and aborts
       in-flight Blossom PUTs; the studio freezes before export and

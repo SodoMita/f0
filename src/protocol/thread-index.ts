@@ -10,9 +10,9 @@ export type ThreadMeta = {
   native: boolean
   mime: string
   urls: string[]
-  thumbUrl?: string
-  thumbSha256?: string
-  thumbSize?: number
+  /** Poster image size (px) from the `dim` tag; always locally rendered. */
+  width: number
+  height: number
   role: ThreadRole
   refs: { rootId?: string; parentId?: string }
   animHint: boolean

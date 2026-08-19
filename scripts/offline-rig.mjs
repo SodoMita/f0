@@ -281,7 +281,8 @@ for (let i = 0; i < N_ROOTS; i++) {
     ['m', 'model/gltf-binary'],
     ['x', sha], ['ox', sha], ['size', String(bytes.length)],
     ['url', `https://localhost:${RELAY_PORT}/models/${flavour}.glb`],
-    ['v', 'form-zero:3'],
+    ['dim', '448x280'],
+    ['v', 'form-zero:4'],
     ['filename', `${flavour}.glb`],
   ]
   if (['a', 'e'].includes(flavour)) tags.push(['cameras', '1'])
@@ -301,7 +302,8 @@ for (const [i, flavour] of ['c', 'b', 'a', 'x'].entries()) {
     ['m', 'model/gltf-binary'],
     ['x', sha], ['ox', sha], ['size', String(bytes.length)],
     ['url', `https://localhost:${RELAY_PORT}/models/${flavour}.glb`],
-    ['v', 'form-zero:3'],
+    ['dim', '448x280'],
+    ['v', 'form-zero:4'],
     ['filename', `${flavour}.glb`],
     ['e', root1.id, '', 'root'],
     ['e', i === 0 ? root1.id : replies[0].id, '', 'reply'],

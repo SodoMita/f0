@@ -39,6 +39,9 @@ interface CardSlot {
   meta?: ThreadMeta
   mesh: Mesh
   mat: ShaderMaterial
+  /** current card quad size (from the bound post's `dim` aspect) */
+  w: number
+  h: number
   poster: Texture | null
   live: RenderTargetTexture | null
   /** poster already requested for the CURRENT meta (avoids re-queueing) */
@@ -90,9 +93,20 @@ interface Row {
   visible: boolean
 }
 
-// All cards share the poster aspect (512x320 = 16:10) so nothing is stretched.
+// Card size follows the post's declared poster size (`dim`, format v4):
+// width is fixed at 16 world units, height follows the post's aspect
+// (16:10 -> 10, exactly the old fixed quad). The texture is rendered at the
+// declared size, so nothing is ever stretched.
 const CARD_W = 16
-const CARD_H = 10
+// Reference card height (16:10) for scroll-sync thresholds and prefetch
+// windows — per-card heights vary with each post's aspect.
+const CARD_H_REF = 10
+
+/** Card quad size in world units for a post's declared poster aspect. */
+function cardSize(meta: ThreadMeta): { w: number; h: number } {
+  return { w: CARD_W, h: CARD_W * (meta.height / meta.width) }
+}
+
 const GAP_X = 3.0
 const GAP_Y = 3.4
 const MARGIN = 2.4
@@ -351,11 +365,12 @@ export class Board {
     this.syncSlots(true)
   }
 
-  /** Settings → Textures: card / preview width. Height is fixed at the
-   *  poster aspect (5:8 = 0.625), so the slot never stretches the model. */
+  /** Settings → Textures: card / preview width. Height follows the 16:10
+   *  reference aspect; the live-preview RTT is shared by all slots, so it
+   *  keeps the reference aspect even for posts that declare another. */
   setPreviewSize(width: number): void {
     const w = Math.max(16, Math.round(width))
-    const h = Math.max(16, Math.round(w * (10 / 16))) // matches CARD_W:CARD_H
+    const h = Math.max(16, Math.round(w * (10 / 16))) // 16:10 reference
     this.previewPool.setRttSize(w, h)
   }
 
@@ -384,7 +399,7 @@ export class Board {
   }
 
   private worldY(row: Row): number {
-    return this.halfH - MARGIN - (row.top + CARD_H / 2) + this.scrollY
+    return this.halfH - MARGIN - (row.top + cardSize(row.meta).h / 2) + this.scrollY
   }
 
   private colX(col: number): number {
@@ -438,7 +453,7 @@ export class Board {
       setCardFlip(badgeMat, 'dyn')
 
       const slot: CardSlot = {
-        mesh, mat, poster: null, live: null, requested: false, row: null, failed: false, spinSince: 0,
+        mesh, mat, w: CARD_W, h: CARD_H_REF, poster: null, live: null, requested: false, row: null, failed: false, spinSince: 0,
         shadow, shadowMat, spinner, spinnerMat,
         badge, badgeMat, badgeTex, replyCount: 0, badgeDrawn: -1, footprint: null,
         opacity: 0, fadeFrom: 0, fadeTo: 0, fadeStart: 0,
@@ -513,13 +528,19 @@ export class Board {
     const viewW = 2 * this.halfH * this.aspect
     this.cols = Math.max(1, Math.min(3, Math.floor((viewW - MARGIN * 2) / (CARD_W + GAP_X))))
     let top = 0
-    for (let i = 0; i < this.rows.length; i++) {
-      const row = this.rows[i]
-      row.top = top
-      row.col = i % this.cols
-      if (i % this.cols === this.cols - 1) top += CARD_H + GAP_Y
+    // Posts fill the grid band by band (one band = one row of `cols` cards).
+    // Card heights vary with each post's `dim` aspect, so a band is as tall
+    // as its tallest card and shorter cards centre inside it — mixed-aspect
+    // posts never collide and never stretch.
+    for (let i = 0; i < this.rows.length; i += this.cols) {
+      const band = this.rows.slice(i, i + this.cols)
+      const bandH = Math.max(...band.map((r) => cardSize(r.meta).h))
+      band.forEach((row, j) => {
+        row.col = j
+        row.top = top + (bandH - cardSize(row.meta).h) / 2
+      })
+      top += bandH + GAP_Y
     }
-    if (this.rows.length % this.cols !== 0) top += CARD_H + GAP_Y
     const contentBottom = top - GAP_Y
     const viewportH = 2 * this.halfH - 2 * MARGIN
     this.maxScroll = Math.max(0, contentBottom - viewportH + GAP_Y)
@@ -540,14 +561,14 @@ export class Board {
    * 24th was never drawn — you scrolled into empty space.
    */
   private syncSlots(force = false): void {
-    if (!force && Math.abs(this.scrollY - this.lastSyncScroll) < CARD_H * 0.34) {
+    if (!force && Math.abs(this.scrollY - this.lastSyncScroll) < CARD_H_REF * 0.34) {
       this.positionBoundSlots()
       return
     }
     this.lastSyncScroll = this.scrollY
 
     // rows worth keeping resident, nearest to the viewport first
-    const keepWindow = this.halfH + CARD_H * 2.2
+    const keepWindow = this.halfH + CARD_H_REF * 2.2
     const wanted = new Map<string, Row>()
     const candidates: { row: Row; d: number }[] = []
     for (const row of this.rows) {
@@ -605,7 +626,10 @@ export class Board {
     slot.spinner.setEnabled(false)
     slot.mesh.setEnabled(true)
     slot.mesh.isPickable = true
-    slot.mesh.scaling.set(CARD_W / 4, CARD_H / 4, 1)
+    const size = cardSize(row.meta)
+    slot.w = size.w
+    slot.h = size.h
+    slot.mesh.scaling.set(size.w / 4, size.h / 4, 1)
 
     // Fast path: poster texture still on the GPU -> rebind synchronously.
     const cached = this.assets?.peekPoster(row.meta)
@@ -649,7 +673,7 @@ export class Board {
    */
   private refreshVisibility(): void {
     this.visiblePosts.clear()
-    const near = this.halfH + CARD_H * 1.6 * Math.max(0.1, this.prefetchScreens)
+    const near = this.halfH + CARD_H_REF * 1.6 * Math.max(0.1, this.prefetchScreens)
     // Don't start downloads/renders for cards that are flying past: a fling
     // through 48 posts would otherwise queue ~40 GLB parses and offscreen
     // renders, and each one blocks a frame. Loads start once scrolling rests.
@@ -664,7 +688,7 @@ export class Board {
       const row = slot.row
       if (!slot.meta || !row) continue
       const y = this.worldY(row)
-      const onScreen = Math.abs(y) < this.halfH + CARD_H * 0.6
+      const onScreen = Math.abs(y) < this.halfH + Math.max(slot.h, CARD_H_REF) * 0.6
       row.visible = onScreen
       if (onScreen) this.visiblePosts.add(row.meta.eventId)
 
@@ -706,22 +730,22 @@ export class Board {
 
   private positionExtras(slot: CardSlot): void {
     slot.badge.scaling.set(BADGE_W / 4, BADGE_H / 4, 1)
-    slot.badge.position.x = slot.mesh.position.x + CARD_W / 2 - BADGE_W / 2 - 0.5
-    slot.badge.position.y = slot.mesh.position.y - CARD_H / 2 + BADGE_H / 2 + 0.5
+    slot.badge.position.x = slot.mesh.position.x + slot.w / 2 - BADGE_W / 2 - 0.5
+    slot.badge.position.y = slot.mesh.position.y - slot.h / 2 + BADGE_H / 2 + 0.5
     slot.badge.position.z = -0.05
     slot.badge.setEnabled(slot.replyCount > 0 && slot.mesh.isEnabled())
 
-    const ring = Math.min(CARD_H * 0.38, CARD_W * 0.18)
+    const ring = Math.min(slot.h * 0.38, slot.w * 0.18)
     slot.spinner.scaling.set(ring / 4, ring / 4, 1)
     slot.spinner.position.set(slot.mesh.position.x, slot.mesh.position.y, -0.02)
 
     const fp = slot.footprint
     if (fp) {
-      const w = Math.max(CARD_W * 0.18, Math.min(CARD_W * 1.05, fp.w * CARD_W * 1.35))
-      const h = Math.min(CARD_H * 0.34, w * 0.34)
+      const w = Math.max(slot.w * 0.18, Math.min(slot.w * 1.05, fp.w * slot.w * 1.35))
+      const h = Math.min(slot.h * 0.34, w * 0.34)
       slot.shadow.scaling.set(w / 4, h / 4, 1)
-      slot.shadow.position.x = slot.mesh.position.x + (fp.cx - 0.5) * CARD_W
-      slot.shadow.position.y = slot.mesh.position.y + (fp.bottom - 0.5) * CARD_H - h * 0.18
+      slot.shadow.position.x = slot.mesh.position.x + (fp.cx - 0.5) * slot.w
+      slot.shadow.position.y = slot.mesh.position.y + (fp.bottom - 0.5) * slot.h - h * 0.18
       slot.shadow.position.z = 0.5
     }
   }
@@ -907,7 +931,7 @@ export class Board {
           continue
         }
       }
-      if (Math.abs(wx - cx) <= CARD_W / 2 && Math.abs(wy - cy) <= CARD_H / 2) {
+      if (Math.abs(wx - cx) <= slot.w / 2 && Math.abs(wy - cy) <= slot.h / 2) {
         const d = (wx - cx) ** 2 + (wy - cy) ** 2
         if (!best || d < best.d) best = { slot, d, badge: false }
       }
