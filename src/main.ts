@@ -211,7 +211,22 @@ async function boot(): Promise<void> {
   const orderedRoots = (): ThreadMeta[] =>
     [...index.byId.values()]
       .filter((m) => m.role === 'root' && !m.tombstoned && !m.hashFailed)
+      .filter((m) => matchesSearch(m))
       .sort((a, b) => b.createdAt - a.createdAt)
+
+  // Search by model name. A model's "name" is its published filename; most
+  // models also carry a stable-ish base name (minus extension). Matching is a
+  // case-insensitive substring across the name + base name + event id (so the
+  // many older posts with no filename tag are still findable by id).
+  let searchQuery = ''
+  function matchesSearch(m: ThreadMeta): boolean {
+    if (!searchQuery) return true
+    const q = searchQuery.toLowerCase()
+    const base = (m.filename || '').replace(/\.[^.]+$/, '')
+    return m.filename?.toLowerCase().includes(q)
+      || base.toLowerCase().includes(q)
+      || m.eventId.toLowerCase().includes(q)
+  }
 
   assets.onHashFailed = (meta) => {
     index.rejectHash(meta.eventId)
@@ -231,6 +246,62 @@ async function boot(): Promise<void> {
   $('btn-studio-close')?.addEventListener('click', () => router.go({ name: 'board' }))
   netDot.addEventListener('click', () => router.go({ name: 'network' }))
   $('btn-add').addEventListener('click', () => router.go({ name: 'studio' }))
+
+  // ---------- search models by name ----------
+  // A small overlay menu (like the network panel) that filters the board.
+  // It is an overlay: opening it keeps whatever view is behind it mounted,
+  // and closing returns to that view.
+  const searchPanel = $('search-panel')
+  const searchInput = $('search-input') as HTMLInputElement
+  const searchBtn = $('btn-search')
+  const searchHint = $('search-hint')
+  let searchOpen = false
+  function setSearchOpen(open: boolean): void {
+    if (searchOpen === open) return
+    searchOpen = open
+    searchPanel.hidden = !open
+    if (open) {
+      searchInput.focus()
+      searchInput.select()
+    }
+  }
+  // NIP-50 fallback: after the instant local filter, also ask nostr.band for
+  // models we don't have yet (unloaded remote models). Debounced so a typed
+  // string doesn't fire a REQ per keystroke; superseded queries are dropped.
+  let searchTimer = 0
+  let searchToken = 0
+  function setSearchQuery(q: string): void {
+    q = q.trim()
+    if (q === searchQuery) return
+    searchQuery = q
+    // Reflect the filter in the hint + the button (accent = board filtered).
+    searchBtn.classList.toggle('active', searchQuery !== '')
+    const total = orderedRoots()
+    searchHint.textContent = searchQuery
+      ? `${total.length} model${total.length === 1 ? '' : 's'} shown for “${searchQuery}”`
+      : 'Type to filter the board by model name.'
+    refreshBoard()
+    clearTimeout(searchTimer)
+    const token = ++searchToken
+    if (searchQuery.length >= 3) {
+      searchTimer = window.setTimeout(() => {
+        if (token !== searchToken) return
+        pool.search(searchQuery)
+      }, 400)
+    } else {
+      pool.cancelSearch()
+    }
+  }
+  searchBtn.addEventListener('click', () => {
+    if (searchOpen) { setSearchOpen(false); return }
+    setSearchOpen(true)
+  })
+  $('btn-search-close').addEventListener('click', () => setSearchOpen(false))
+  searchInput.addEventListener('input', () => setSearchQuery(searchInput.value))
+  searchInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { e.stopPropagation(); setSearchOpen(false) }
+    if (e.key === 'Enter') { searchInput.blur() }
+  })
   $('btn-shuffle').addEventListener('click', () => { board.shuffle(orderedRoots()); engine.kick() })
 
   // ---------- studio (import + publish) ----------
@@ -1273,6 +1344,7 @@ async function boot(): Promise<void> {
     if (e.key === 'Escape' && previewPageEl && !previewPageEl.hidden) { closePreviewPage(); return }
     if (e.key === 'Escape' && errorSheet.isOpen) { errorSheet.hide(); return }
     if (e.key === 'Escape' && networkPanel.isOpen) { networkPanel.close(); return }
+    if (e.key === 'Escape' && searchOpen) { setSearchOpen(false); return }
     // Typing guard: while focus is in an editable control (settings inputs,
     // the studio textarea, a search box…), game hotkeys must NOT fire —
     // arrow keys were switching models while the user edited the preview
@@ -1342,6 +1414,8 @@ async function boot(): Promise<void> {
     // transfer meter: lets scripts/loading-shot.mjs fake a slow transfer and
     // capture the speed readouts without waiting for a real 40 MiB model
     transfers, setLoading,
+    // search: tests drive the filter + inspect state
+    setSearchQuery, search: () => searchQuery, setSearchOpen,
     // publish: tests drive cancel + inspect the frozen snapshot
     cancelPublish, isPublishing: () => publishing,
     // which view is actually on screen (the network panel is an overlay, so

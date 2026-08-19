@@ -5,6 +5,24 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 
+- [x] **Search models by name** (agent arena, 2026-08-19): a search menu
+      (magnifier button in the topbar → overlay panel) filters the board by
+      model name. Matching is a case-insensitive substring over the model's
+      published filename, its base name (extension stripped) and its event id,
+      so older posts without a `filename` tag are still findable. The board
+      re-filters live as you type; a `shown N models for "…"` hint and an
+      accent-highlighted search button reflect the active filter. It is an
+      overlay like `#/network` — it leaves the view behind it mounted and
+      returns to it on close (X / Escape / re-tap). **NIP-50 remote fallback:**
+      after the instant local filter (debounced 400 ms, ≥3 chars), it also
+      opens a NIP-50 `{ search }` REQ on nostr.band (`RelayPool.search()`) to
+      fetch UNLOADED remote models (older than the live feed's 14-day / limit
+      window) and feeds them back through `onEvent` into the index; queries
+      are superseded/cancelled as you type. Best-effort: nostr.band matches
+      relay-defined text indexes and FORM/0 events carry empty content (name
+      lives in the `filename` tag), so reliability is index-dependent. Verified:
+      `tsc --noEmit` clean + `vite build` clean.
+
 - [x] **Wrong-hash / wrong-size models still render** (agent arena, 2026-08-20,
       SPEC AMENDMENT 64): verify on LOAD, rebased onto format v4. `getModel`/
       `getModelBytes` re-hash every RAM/IDB hit (poisoned cache → del +
