@@ -5,6 +5,19 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 
+- [x] **Offline rig: seed id collision shrunk the feed to 51** (agent arena,
+      2026-08-20): `makeEvent` stamped `created_at` from per-call
+      `Date.now()`; GLB generation is slow enough that the clock can advance
+      by exactly the `ageSec` delta between two same-flavour roots,
+      producing IDENTICAL events (same id) — the app dedupes by id, so the
+      52-event feed silently became 51 and every `>= 52` gate stalled.
+      `created_at` now derives from one `BOOT_NOW` captured at module load
+      (strictly monotonic ageSec), and the rig loudly reports any seed
+      duplicate at boot. Full format-v4 verification on the rig (this
+      sandbox, SwiftShader): verify-publish, offline-verify, smoke,
+      features, interact, orient, transfer, settings, network-panel — all
+      green; build:standalone emits the single 4.21 MB file.
+
 - [x] **Studio publish generates no poster** (agent arena, 2026-08-20, SPEC
       AMENDMENT 62 follow-up): the publish flow's local poster render (the
       "poster…" stage that validated the model and derived `dim`) is gone —
