@@ -11,6 +11,7 @@ import { Viewer } from './viewer/viewer'
 import { Studio } from './studio/studio'
 import { AssetCache } from './core/assets'
 import { publishModel, type PublishProgress } from './protocol/publish'
+import { isAbortError } from './protocol/hash'
 import { configureDraco } from './model/draco'
 import { enforceOffline } from './model/offline'
 import { DEFAULTS, theme } from './theme'
@@ -113,6 +114,7 @@ async function boot(): Promise<void> {
   const camRadius = $('cam-radius') as HTMLInputElement
   const fileInput = $('file-input') as HTMLInputElement
   let publishing = false
+  let publishAbort: AbortController | null = null
   const netDot = $('net-dot')
   let relaysOnline = 0
   const btnPlay = $('btn-play') as HTMLButtonElement
@@ -208,8 +210,17 @@ async function boot(): Promise<void> {
 
   const orderedRoots = (): ThreadMeta[] =>
     [...index.byId.values()]
-      .filter((m) => m.role === 'root' && !m.tombstoned)
+      .filter((m) => m.role === 'root' && !m.tombstoned && !m.hashFailed)
       .sort((a, b) => b.createdAt - a.createdAt)
+
+  assets.onHashFailed = (meta) => {
+    index.rejectHash(meta.eventId)
+    refreshBoard()
+    if (currentMeta?.eventId === meta.eventId) {
+      errorSheet.show(ERRORS.MODEL_DOWNLOAD(() => router.go({ name: 'board' })))
+      router.go({ name: 'board' })
+    }
+  }
 
   $('btn-home').addEventListener('click', () => router.go({ name: 'board' }))
   $('btn-studio-close')?.addEventListener('click', () => router.go({ name: 'board' }))
@@ -248,18 +259,48 @@ async function boot(): Promise<void> {
     fileInput.click()
   }
 
+  function setPublishButton(busy: boolean): void {
+    studioEl.classList.toggle('publishing', busy)
+    if (busy) {
+      btnStudioPublish.textContent = 'cancel'
+      btnStudioPublish.classList.add('danger')
+      btnStudioPublish.classList.remove('primary')
+      btnStudioPublish.disabled = false
+      btnStudioPublish.title = 'cancel upload'
+    } else {
+      btnStudioPublish.textContent = 'publish'
+      btnStudioPublish.classList.remove('danger')
+      btnStudioPublish.classList.add('primary')
+      btnStudioPublish.disabled = !studio.hasContent()
+      btnStudioPublish.title = 'publish'
+    }
+  }
+
+  function cancelPublish(): void {
+    if (!publishing) return
+    publishAbort?.abort()
+  }
+
   async function publishStudio(): Promise<void> {
-    if (publishing) return
+    if (publishing) { cancelPublish(); return }
     if (!studio.hasContent()) return
     publishing = true
-    btnStudioPublish.disabled = true
+    publishAbort = new AbortController()
+    const signal = publishAbort.signal
+    // Freeze BEFORE export: gizmo/paint edits during serialize used to
+    // tear the GLB so the hashed snapshot and the uploaded body diverged.
+    studio.setFrozen(true)
+    setPublishButton(true)
     try {
       setStudioStatus('export…', 'busy')
       const content = await studio.getContentForPublish()
+      if (signal.aborted) throw Object.assign(new Error('upload aborted'), { name: 'AbortError' })
       setStudioStatus('poster…', 'busy')
       const { blob: poster, blank } = await assets.renderPosterFor(content.blob, studio.tintColor)
+      if (signal.aborted) throw Object.assign(new Error('upload aborted'), { name: 'AbortError' })
       if (blank) setStudioStatus('poster placeholder', 'busy')
       const onProgress = (p: PublishProgress) => {
+        if (signal.aborted) return
         if (p.stage === 'blossom') setStudioStatus('upload…', 'busy')
         else if (p.stage === 'relay') setStudioStatus('nostr…', 'busy')
         else if (p.stage === 'done') setStudioStatus(`done · ${p.ok ?? 0}/${(p.ok ?? 0) + (p.failed ?? 0)}`, p.failed ? 'err' : 'ok')
@@ -276,7 +317,7 @@ async function boot(): Promise<void> {
           rootId: studioReply?.rootId,
           parentId: studioReply?.parentId,
         },
-        { relays: pool.relayUrls, blossoms: blossoms.servers, pool, onProgress: onProgress },
+        { relays: pool.relayUrls, blossoms: blossoms.servers, pool, onProgress, signal },
       )
       void deletion.refresh().then(syncDeleteButton)
       // The new post enters the index via the relay echo. Routing to its
@@ -285,20 +326,24 @@ async function boot(): Promise<void> {
       // delete button never armed). Wait briefly for the echo instead.
       const t0 = performance.now()
       while (!index.byId.has(result.eventId) && performance.now() - t0 < 8000) {
+        if (signal.aborted) throw Object.assign(new Error('upload aborted'), { name: 'AbortError' })
         await new Promise((r) => setTimeout(r, 40))
       }
       if (studioReply) router.go({ name: 'thread', rootId: studioReply.rootId, focusId: result.eventId })
       else router.go({ name: 'viewer', id: result.eventId })
       studioReply = null
     } catch (err) {
-      setStudioStatus(err instanceof Error ? err.message : 'publish failed', 'err')
-      btnStudioPublish.disabled = false
+      if (isAbortError(err)) setStudioStatus('cancelled')
+      else setStudioStatus(err instanceof Error ? err.message : 'publish failed', 'err')
     } finally {
       publishing = false
+      publishAbort = null
+      studio.setFrozen(false)
+      setPublishButton(false)
     }
   }
 
-  btnStudioImport.addEventListener('click', () => void pickStudioFile())
+  btnStudioImport.addEventListener('click', () => { if (!publishing) void pickStudioFile() })
   btnStudioPublish.addEventListener('click', () => void publishStudio())
 
   // ---- Studio transform toolbar ----
@@ -574,7 +619,8 @@ async function boot(): Promise<void> {
   attachAllDragNumbers(document.body)
 
   const paintHud = bindPaintHud(studio, () => {
-    btnStudioPublish.disabled = !studio.hasContent()
+    studio.markDirty()
+    if (!publishing) btnStudioPublish.disabled = !studio.hasContent()
   })
   void paintHud
 
@@ -826,6 +872,7 @@ async function boot(): Promise<void> {
   let mode: Mode = 'boot'
   function setMode(next: Exclude<Mode, 'boot'>): void {
     if (mode === next) return
+    if (mode === 'studio' && next !== 'studio' && publishing) cancelPublish()
     mode = next
     if (next !== 'thread') threadView.detach()
     if (next !== 'viewer') {
@@ -870,7 +917,13 @@ async function boot(): Promise<void> {
   async function openViewer(id?: string): Promise<void> {
     if (!id) { setMode('board'); return }
     const meta = index.byId.get(id)
-    if (!meta) { setMode('board'); return }
+    if (!meta || meta.hashFailed || assets.isHashFailed(id)) {
+      if (meta?.hashFailed || assets.isHashFailed(id ?? '')) {
+        errorSheet.show(ERRORS.MODEL_DOWNLOAD(() => router.go({ name: 'board' })))
+      }
+      setMode('board')
+      return
+    }
     const nav = ++viewerNav
     currentMeta = meta
     syncDeleteButton()
@@ -1060,7 +1113,12 @@ async function boot(): Promise<void> {
       return
     }
     if (mode === 'studio') {
+      if (publishing && e.key === 'Escape') { cancelPublish(); return }
       // Global typing guard already returned for INPUT/TEXTAREA (AMEND 53).
+      if (studio.isFrozen) {
+        if (e.key === 'Escape') router.go({ name: 'board' })
+        return
+      }
       if (studio.isPaintMode) {
         if ((e.key === 'z' || e.key === 'Z') && (e.ctrlKey || e.metaKey) && e.shiftKey) { studio.paint.redo(); e.preventDefault(); return }
         if ((e.key === 'z' || e.key === 'Z') && (e.ctrlKey || e.metaKey)) { studio.paint.undo(); e.preventDefault(); return }
@@ -1109,6 +1167,8 @@ async function boot(): Promise<void> {
     // transfer meter: lets scripts/loading-shot.mjs fake a slow transfer and
     // capture the speed readouts without waiting for a real 40 MiB model
     transfers, setLoading,
+    // publish: tests drive cancel + inspect the frozen snapshot
+    cancelPublish, isPublishing: () => publishing,
     // which view is actually on screen (the network panel is an overlay, so
     // the route alone no longer tells you) — scripts/network-panel.mjs
     __mode: () => mode,

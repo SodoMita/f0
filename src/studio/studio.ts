@@ -14,6 +14,7 @@ import { GLTF2Export } from '@babylonjs/serializers/glTF/2.0/glTFSerializer'
 import type { FormEngine } from '../core/engine'
 import { toFile } from '../model/poster'
 import { validateGLB, type LimitReport } from '../model/limits'
+import { copyBytes } from '../protocol/hash'
 import { worldCenter, worldRadius, frameDistance } from '../model/facing'
 
 import { theme } from '../theme'
@@ -80,6 +81,9 @@ export class Studio {
   private freeCam: FreeCamera | null = null
   readonly paint: PaintSession
   private paintMode = false
+  private frozen = false
+  private frozenGizmo: 'position' | 'rotation' | 'scale' | 'none' = 'position'
+  private contentDirty = false
 
   // ---- user added cameras (publishable) ----
   private storedCameras: CameraState[] = []
@@ -113,12 +117,17 @@ export class Studio {
     this.gizmos.scaleGizmoEnabled = true
     this.gizmos.usePointerToAttachGizmos = false
     ;(this.gizmos as any).onAttachedToMeshObservable?.add((m: AbstractMesh | null) => { if (m) this.kick(2000) })
+    const markMoved = () => this.markDirty()
+    this.gizmos.gizmos.positionGizmo?.onDragEndObservable.add(markMoved)
+    this.gizmos.gizmos.rotationGizmo?.onDragEndObservable.add(markMoved)
+    this.gizmos.gizmos.scaleGizmo?.onDragEndObservable.add(markMoved)
     this.paint = new PaintSession(this.scene, (ms) => this.kick(ms), () => this.scene.activeCamera ?? this.camera)
+    this.paint.onChange = () => this.markDirty()
     // Tap a mesh to select it; tap empty space to deselect.
     // Paint mode owns the left button (ink / erase / pick) — don't steal taps.
     this.scene.onPointerObservable.add((info) => {
       if (info.type !== PointerEventTypes.POINTERTAP) return
-      if (this.paintMode) return
+      if (this.frozen || this.paintMode) return
       const picked = info.pickInfo?.pickedMesh ?? null
       this.select(picked && this.isEditable(picked) ? picked : null)
     })
@@ -163,11 +172,40 @@ export class Studio {
 
   /** Enable the ink tool: left-drag writes, right/middle still orbit. */
   setPaintMode(on: boolean): void {
+    if (this.frozen) return
     this.paintMode = on
     this.paint.setActive(on)
     this.applyOrbitButtons()
     this.kick(200)
   }
+
+  /**
+   * Lock the scene for publish. Export/hash/upload must see a still model:
+   * gizmo drags and paint strokes used to mutate the same buffers the
+   * serializer / XHR were reading, which corrupted the event `x` tag.
+   */
+  setFrozen(on: boolean): void {
+    if (this.frozen === on) return
+    this.frozen = on
+    if (on) {
+      this.frozenGizmo = this.gizmos.positionGizmoEnabled ? 'position'
+        : this.gizmos.rotationGizmoEnabled ? 'rotation'
+          : this.gizmos.scaleGizmoEnabled ? 'scale' : 'none'
+      this.select(null)
+      this.paint.setActive(false)
+      this.gizmos.positionGizmoEnabled = false
+      this.gizmos.rotationGizmoEnabled = false
+      this.gizmos.scaleGizmoEnabled = false
+    } else {
+      this.setTransformMode(this.frozenGizmo)
+      if (this.paintMode) this.paint.setActive(true)
+    }
+    this.kick(200)
+  }
+
+  get isFrozen(): boolean { return this.frozen }
+
+  markDirty(): void { if (!this.frozen) this.contentDirty = true }
 
   get isPaintMode(): boolean { return this.paintMode }
 
@@ -185,6 +223,7 @@ export class Studio {
   }
 
   select(mesh: AbstractMesh | null): void {
+    if (this.frozen && mesh) return
     this.selection = mesh
     this.gizmos.attachToMesh(mesh)
     this.kick(2000)
@@ -192,6 +231,7 @@ export class Studio {
   get selected(): AbstractMesh | null { return this.selection }
 
   setTransformMode(mode: 'position' | 'rotation' | 'scale' | 'none'): void {
+    if (this.frozen && mode !== 'none') return
     this.gizmos.positionGizmoEnabled = mode === 'position'
     this.gizmos.rotationGizmoEnabled = mode === 'rotation'
     this.gizmos.scaleGizmoEnabled = mode === 'scale'
@@ -200,7 +240,8 @@ export class Studio {
 
   /** Delete the currently selected mesh (text or part of an imported model). */
   deleteSelection(): void {
-    if (this.paint.deleteSelection()) return
+    if (this.frozen) return
+    if (this.paint.deleteSelection()) { this.markDirty(); return }
     if (!this.selection) return
     const m = this.selection
     this.select(null)
@@ -210,6 +251,7 @@ export class Studio {
       this.textValue = ''
     }
     m.dispose(false, true)
+    this.markDirty()
     this.kick(500)
   }
 
@@ -259,6 +301,7 @@ export class Studio {
     this.clearCameras()
     this.imported = null
     this.paint.clear()
+    this.contentDirty = false
   }
 
   // ---- typed text tool (SPEC TEXT+ANIM: flat low-poly geometry) ----
@@ -298,6 +341,8 @@ export class Studio {
 
   /** Build/rebuild the text geometry and frame it. */
   async rebuildText(): Promise<void> {
+    if (this.frozen) return
+    this.markDirty()
     const token = ++this.textBuildToken
     if (this.textMesh) {
       this.textMesh.mesh.dispose()
@@ -565,6 +610,7 @@ export class Studio {
   getActiveCameraIndex(): number { return this.activeCamIndex }
 
   addCamera(): number {
+    if (this.frozen) return this.storedCameras.length - 1
     const state = this.getCameraState()
     // force perspective for stored cameras (free cam stored as perspective at current pos)
     const toStore: CameraState = { ...state, projection: state.projection === 'free' ? 'perspective' : state.projection }
@@ -602,6 +648,7 @@ export class Studio {
   }
 
   removeCamera(index: number): void {
+    if (this.frozen) return
     if (index < 0 || index >= this.storedCameras.length) return
     const node = this.storedCameraNodes[index]
     try { node?.dispose() } catch {}
@@ -628,6 +675,7 @@ export class Studio {
    * The resulting GLB bytes are validated (the crash guard, rule 3).
    */
   async importFiles(files: File[]): Promise<ImportedModel> {
+    if (this.frozen) throw new Error('publish in progress')
     this.clearModel()
     const result = await importModelFiles(this.scene, files)
     this.container = result.container
@@ -643,6 +691,7 @@ export class Studio {
     // model. Framing is explicit (frame / fit-selected / look-at buttons).
     const imported: ImportedModel = { file, bytes, report, sourceFormat: result.sourceFormat }
     this.imported = imported
+    this.contentDirty = false
     const first = result.container.meshes.find((m) => m.name !== '__root__') ?? null
     if (first) this.select(first as AbstractMesh)
     this.form.kick(1000)
@@ -663,10 +712,13 @@ export class Studio {
   async getContentForPublish(): Promise<{ blob: Blob; filename: string; sourceFormat: 'glb' | 'gltf' | 'obj' | 'generated' }> {
     const hasUserCams = this.storedCameras.length > 0
     const hasPaint = this.paint.count > 0
+    const hasText = this.textValue.trim().length > 0
     // Pass-through only when the published bytes are still the imported GLB.
-    if (this.imported && !hasUserCams && !hasPaint) {
+    // A detached copy: the File may alias live import buffers.
+    if (this.imported && !hasUserCams && !hasPaint && !hasText && !this.contentDirty) {
+      const bytes = copyBytes(this.imported.bytes)
       return {
-        blob: this.imported.file,
+        blob: new Blob([bytes.buffer as ArrayBuffer], { type: 'model/gltf-binary' }),
         filename: this.imported.file.name,
         sourceFormat: this.imported.sourceFormat,
       }
@@ -713,7 +765,9 @@ export class Studio {
       shouldExportNode: exportableMeshes.size === 0 && exportableCams.size === 0 ? (n: any) => n === this.textMesh?.mesh : shouldExportNode,
     })
     const file = Object.values((res as any).glTFFiles ?? (res as any).files ?? res)[0] as any
-    const blob = file instanceof Blob ? file : new Blob([file as any], { type: 'model/gltf-binary' })
+    const raw = file instanceof Blob ? new Uint8Array(await file.arrayBuffer()) : new Uint8Array(file as ArrayBuffer)
+    const bytes = copyBytes(raw)
+    const blob = new Blob([bytes.buffer as ArrayBuffer], { type: 'model/gltf-binary' })
     return { blob, filename: this.textMesh ? 'text.glb' : (this.imported?.file.name ?? 'model.glb'), sourceFormat: this.imported ? this.imported.sourceFormat : 'generated' }
   }
 

@@ -80,6 +80,17 @@ export async function getAll<T>(store: StoreName): Promise<T[]> {
   })
 }
 
+export async function del(store: StoreName, key: string): Promise<void> {
+  const db = await open()
+  if (!db) { mstore(store).delete(key); return }
+  return new Promise((resolve) => {
+    const tx = db.transaction(store, 'readwrite')
+    tx.objectStore(store).delete(key)
+    tx.oncomplete = () => { db.close(); resolve() }
+    tx.onabort = tx.onerror = () => { db.close(); resolve() }
+  })
+}
+
 export async function clearStore(store: StoreName): Promise<void> {
   const db = await open()
   if (!db) { mstore(store).clear(); return }

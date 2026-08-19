@@ -5,6 +5,14 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 
+- [x] **Cancel publish + hash integrity** (agent arena, 2026-08-19, SPEC
+      AMENDMENT 58): publish button stays enabled as **cancel** and aborts
+      in-flight Blossom PUTs; the studio freezes before export and
+      `freezeBlob()` snapshots the bytes so editing cannot tear the hash;
+      cache/download re-verify SHA-256 and hide `hashFailed` cards from
+      the board. Guard: `scripts/publish-unit.mjs` + verify-publish cancel
+      / wrong-hash cases.
+
 - [x] **Descriptive per-server network status: ping + per-server speeds**
       (agent arena, 2026-08-18, SPEC AMENDMENT 57): network-panel rows now
       show a worded status (`connected` / `connecting…` / `offline · retry N`

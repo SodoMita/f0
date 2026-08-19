@@ -633,3 +633,26 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
       its painted dot, download attribution to the serving origin (and zero
       for a server that served nothing), a live per-server rate that does not
       leak onto other rows, and the fall back to per-server session totals.
+
+58. CANCEL PUBLISH + HASH INTEGRITY (2026-08-19):
+    - Studio publish used to disable the publish button, so an in-flight
+      upload could not be cancelled. The same button now flips to **cancel**
+      (kept enabled) and aborts every Blossom PUT via `AbortSignal` +
+      `xhr.abort()`. Leaving the studio or Escape also cancels. A cancelled
+      publish never signs or broadcasts the kind-1063 event.
+    - Editing during export/upload tore the GLB: `GLTF2Export` / XHR read
+      live scene buffers while gizmos and paint kept writing them, so the
+      event `x` tag and the uploaded body diverged ("hash corruption").
+      Publish now freezes the studio (no gizmos / paint / import / text
+      rebuild) BEFORE export, then `freezeBlob()` copies the bytes into a
+      private snapshot that later edits cannot touch. The event hash and
+      the PUT body are that snapshot.
+    - Models whose downloaded (or cached) bytes do not match the event `x`
+      tag must not appear on the board. IndexedDB/RAM cache hits are
+      re-hashed; a mismatch deletes the poisoned entry. Blossom download
+      no longer skips the SHA check when the hash is empty (GLB always
+      requires hex64). A confirmed mismatch sets `ThreadMeta.hashFailed`
+      and drops the card from `orderedRoots`. Network-down is NOT a hash
+      fail (`HashMismatchError` is distinct from "no replica").
+    - Guard: `node --experimental-strip-types scripts/publish-unit.mjs`
+      plus the cancel + wrong-hash cases in `scripts/verify-publish.mjs`.

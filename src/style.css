@@ -801,6 +801,24 @@ body[data-theme="light"] .sheet-card { background: rgba(253, 246, 245, 0.97); bo
 .studio-status.err { color: var(--danger); }
 .studio-status.busy { color: var(--warning); }
 #btn-studio-publish:disabled { opacity: 0.4; cursor: not-allowed; }
+#btn-studio-publish.danger {
+  background: transparent;
+  color: var(--danger);
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+}
+#studio.publishing .studio-inspector input,
+#studio.publishing .studio-inspector textarea,
+#studio.publishing .studio-panel button,
+#studio.publishing .studio-tools,
+#studio.publishing .rail-btn[data-tab],
+#studio.publishing .cam-advanced {
+  pointer-events: none;
+  opacity: 0.4;
+}
+#studio.publishing #btn-studio-publish {
+  pointer-events: auto;
+  opacity: 1;
+}
 
 /* delete button (viewer, owned posts only) */
 .hbtn.danger { color: var(--danger); border-color: rgba(255, 103, 75, 0.4); }

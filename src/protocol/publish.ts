@@ -4,6 +4,7 @@ import { RelayPool } from './nostr'
 import { bytesToHex } from '../util/hex'
 import { FORM_ZERO_TAG, MODEL_KIND, LIMITS } from '../theme'
 import { saveOwnedPost } from './storage'
+import { freezeBlob, throwIfAborted } from './hash'
 
 export type PublishRole = 'root' | 'reply'
 
@@ -40,13 +41,6 @@ export interface PublishProgress {
 const ROOT_TAG = 'form-zero-root'
 const REPLY_TAG = 'form-zero-reply'
 
-function sha256Hex(bytes: Uint8Array): Promise<string> {
-  const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
-  return crypto.subtle.digest('SHA-256', buf).then((digest) =>
-    Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join(''),
-  )
-}
-
 /**
  * Full BUD-01 + kind-1063 publish path:
  *  1. hash model + poster
@@ -65,6 +59,7 @@ export async function publishModel(
     blossoms: string[]
     pool: RelayPool
     onProgress?: (p: PublishProgress) => void
+    signal?: AbortSignal
   },
 ): Promise<PublishResult> {
   const { model, poster, tint } = input
@@ -75,22 +70,28 @@ export async function publishModel(
     throw new Error(`Poster is ${(poster.size / 1024).toFixed(0)} KiB; limit is ${LIMITS.posterBytesHard / 1024} KiB.`)
   }
 
+  throwIfAborted(deps.signal)
   deps.onProgress?.({ stage: 'hash' })
-  const modelBytes = new Uint8Array(await model.arrayBuffer())
-  const posterBytes = new Uint8Array(await poster.arrayBuffer())
-  const [modelSha, posterSha] = await Promise.all([sha256Hex(modelBytes), sha256Hex(posterBytes)])
+  // Freeze first so later studio edits cannot change the bytes we hash
+  // and then PUT. The event `x` tag is this snapshot.
+  const [modelSnap, posterSnap] = await Promise.all([freezeBlob(model), freezeBlob(poster)])
+  const modelSha = modelSnap.sha256
+  const posterSha = posterSnap.sha256
+  throwIfAborted(deps.signal)
 
   const secret = generateSecretKey()
   try {
     const blossom = new BlossomClient(deps.blossoms)
 
     deps.onProgress?.({ stage: 'poster' })
-    const posterUploads = await blossom.upload(poster, secret)
+    const posterUploads = await blossom.upload(posterSnap.blob, secret, deps.signal)
     if (!posterUploads.length) throw new Error('Poster upload failed on every Blossom server.')
+    throwIfAborted(deps.signal)
 
     deps.onProgress?.({ stage: 'blossom' })
-    const modelUploads = await blossom.upload(model, secret)
+    const modelUploads = await blossom.upload(modelSnap.blob, secret, deps.signal)
     if (!modelUploads.length) throw new Error('Model upload failed on every Blossom server.')
+    throwIfAborted(deps.signal)
 
     const now = Math.floor(Date.now() / 1000)
     const role = input.role ?? 'root'
@@ -108,7 +109,7 @@ export async function publishModel(
     for (const s of new Set(modelUploads.map((u) => new URL(u.url).origin))) tags.push(['server', s])
     tags.push(['thumb', posterUploads[0].url])
     tags.push(['thumb-x', posterSha])
-    tags.push(['thumb-size', String(poster.size)])
+    tags.push(['thumb-size', String(posterSnap.bytes.byteLength)])
     tags.push(['thumb-dim', '512x320'])
     if (input.filename) tags.push(['filename', input.filename.slice(0, 120)])
     if (input.sourceFormat) tags.push(['source-format', input.sourceFormat])
@@ -122,6 +123,7 @@ export async function publishModel(
       tags.push(['e', input.parentId, input.relayHint ?? '', 'reply'])
     }
 
+    throwIfAborted(deps.signal)
     const template: EventTemplate = { kind: MODEL_KIND, created_at: now, tags, content: '' }
 
     // Compute the event id now (RelayPool.publish re-finalizes the same
