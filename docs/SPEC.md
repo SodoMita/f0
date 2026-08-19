@@ -528,3 +528,49 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
       studio's in-progress text survive the round trip, Escape behaves like
       the close button, a cold `#/network` load closes to the board, and
       navigating away while open still closes the panel.
+
+52. DESCRIPTIVE PER-SERVER NETWORK STATUS (2026-08-18):
+    A row in the network panel was a coloured dot and a hostname; it could
+    not answer "is this relay actually doing anything for me". Each row is
+    now two lines — host, then status / ping / throughput:
+    - **Status in words, not just hue.** Relays: `connected`,
+      `connecting…`, `offline` and `offline · retry N` (the pool's own
+      backoff attempt count). Blossom servers have no persistent connection,
+      so they report probe results: `not probed`, `probing…`, `reachable`,
+      `unreachable`.
+    - **Ping.** `RelayPool.ping()` times a REQ->EOSE round trip on the LIVE
+      connection using a `#t` filter that can match nothing, so the relay
+      does no work and the number is latency rather than query cost (the
+      WebSocket API exposes no ping/pong frame). A relay that is not
+      connected falls back to a fresh handshake via `RelayPool.probe`, and a
+      successful `open()` seeds the ping from its own handshake so a row
+      shows a latency immediately. `BlossomClient.probe` times its HEAD with
+      `cache: 'no-store'` (a cached response would report a fake sub-ms
+      ping). Both probes now return `{ ok, ms }`. Values are bucketed
+      good/fair/slow (<150ms / <400ms / >=400ms) so 2400ms cannot read as
+      fine.
+    - **Per-server throughput.** `transfers.track()` takes a server ORIGIN
+      and fans each transfer into a per-host meter as well as the global
+      one, so a row shows its OWN `↓ 1.4 MiB/s ↑ 90 KiB/s` while busy and its
+      own session totals when idle. Downloads are attributed by the replica
+      URL's origin, uploads by the target server.
+    - **Relays report events, not bytes.** Relay traffic is JSON on a socket
+      we do not byte-meter; the meaningful number is how much of the feed
+      that relay actually delivered, so the column shows `54 events` — or
+      `no events` for a relay that is connected but silent, which is a real
+      diagnostic.
+    - The panel measures on open and re-measures every 8s while open, and
+      repaints once a second (plus on every meter tick). Rows are reused and
+      only their text mutates — `replaceChildren()` five times a second would
+      churn the DOM and fight the remove buttons.
+    - The old global TRAFFIC section is kept as `TOTAL / all servers`.
+    - BUGFIX found by this work: **`--danger` was defined only under
+      `body[data-theme="light"]`**, so in the default dark theme every
+      `var(--danger)` resolved to nothing and the offline dot was invisible
+      (also `.net-remove:hover`, `.studio-status.err`, `.hbtn.danger`). Added
+      to `:root` with theme.ts's value `#FF674B`.
+    - Verified by `scripts/transfer.mjs` (now 25 checks): status wording,
+      bucketed ping, per-relay event counts, an unreachable server's copy and
+      its painted dot, download attribution to the serving origin (and zero
+      for a server that served nothing), a live per-server rate that does not
+      leak onto other rows, and the fall back to per-server session totals.

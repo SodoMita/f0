@@ -12,11 +12,14 @@ src/
                      serialized poster renders (promise-chain mutex)
     transfer.ts      app-wide download/upload meter: per-transfer handles,
                      2s sliding-window byte rate, 200ms tick that stops when
-                     idle; feeds the loading overlay, the topbar readout, the
-                     studio publish status and the network panel TRAFFIC rows
+                     idle, sliced BY SERVER ORIGIN as well as globally; feeds
+                     the loading overlay, the topbar readout, the studio
+                     publish status and the network panel's per-server rows
   protocol/
     nostr.ts         RelayPool on nostr-tools `Relay` (SimplePool.subscribeMany is
-                     broken in 2.24 — nests filters one level too deep)
+                     broken in 2.24 — nests filters one level too deep);
+                     per-relay info() = state + ping + retry count + events
+                     delivered; ping() times a REQ->EOSE round trip
     blossom.ts       download (replicas→SHA-256→GLB magic) + BUD-01 upload (XHR,
                      for upload.onprogress) + auth; both report into core/transfer
     events.ts        kind-1063 parse/validate (mime, x/ox, size, urls, v3 tags)

@@ -130,6 +130,14 @@ bun run build:standalone  # ONE self-contained form-zero-standalone.html
    `advance(delta)` -> `end()` in a `finally`) so the HUD can show a real
    speed instead of an opaque spinner. Upload progress needs XHR — `fetch`
    reports nothing about request-body progress.
+9m. **Every CSS custom property must exist in the DEFAULT theme.** `--danger`
+   was declared only under `body[data-theme="light"]`, so for months every
+   `var(--danger)` in the dark theme resolved to nothing — the offline
+   relay/server dot was invisible, `.net-remove:hover`, `.studio-status.err`
+   and `.hbtn.danger` were unstyled. A missing custom property fails SILENTLY
+   (the declaration is dropped at computed-value time); it never shows up as
+   an error. Add new colours to `:root` first, then override per theme, and
+   keep them in sync with `src/theme.ts` (canvas code reads that copy).
 9l. **Overlays must not be pages.** A HUD surface that sits ON TOP of a view
    (network panel, settings, legend, error sheet) must leave the view behind
    it mounted and return to it on close. `#/network` used to call
@@ -166,7 +174,7 @@ bun scripts/capture.mjs             # board/viewer/thread/light/phone screenshot
 bun scripts/perf.mjs                # PERF: boot, per-view frame cost, 48-card stress, idle, heap
 bun scripts/shaders.mjs             # shader recompiles (repeat model opens must compile 0 programs)
 bun scripts/settings.mjs            # every setting must reach real engine state (20 checks)
-bun scripts/transfer.mjs            # network button hit target + live download/upload speed readouts (needs the rig)
+bun scripts/transfer.mjs            # network button hit target + global AND per-server speed/ping/status readouts (needs the rig)
 bun scripts/network-panel.mjs       # network panel is an overlay: opens over / returns to the current page (needs the rig)
 PHASE=load bun scripts/profile.mjs  # CPU profile of a board load, aggregated by self time
 CPU=4 bun scripts/perf.mjs          #   …the same, throttled to emulate a phone

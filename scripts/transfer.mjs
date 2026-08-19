@@ -135,6 +135,99 @@ async function boot(page) {
   await page.close()
 }
 
+// ------------------------------------------- per-server rows in the panel
+{
+  const page = await browser.newPage({ viewport: { width: 900, height: 980 } })
+  await boot(page)
+  await page.waitForFunction(() => window.__form0.board?.rows?.length > 0, null, { timeout: 40000 })
+  await page.waitForTimeout(1500)
+  // the rig serves its models from https://localhost:8443 — registering it as
+  // a Blossom server gives the per-server rows a host that really moves bytes
+  await page.evaluate(() => window.__form0.blossoms.setServers(
+    ['https://localhost:8443', ...window.__form0.blossoms.servers]))
+  await page.click('#net-dot')
+  await page.waitForTimeout(2500)
+
+  const rowOf = (host) => page.evaluate((h) => {
+    const li = [...document.querySelectorAll('#relay-list .net-item, #blossom-list .net-item')]
+      .find((n) => n.querySelector('.url')?.textContent.includes(h))
+    if (!li) return null
+    const dot = li.querySelector('.net-state')
+    return {
+      list: li.closest('ul').id,
+      status: li.querySelector('.net-status').textContent,
+      statusCls: li.querySelector('.net-status').className,
+      ping: li.querySelector('.net-ping').textContent,
+      pingCls: li.querySelector('.net-ping').className,
+      flow: li.querySelector('.net-flow').textContent,
+      dotCls: dot.className,
+      dotBg: getComputedStyle(dot).backgroundColor,
+    }
+  }, host)
+
+  const relay = await rowOf('localhost:8443')
+  check('relay row says what the connection is doing, not just a colour',
+    relay && /connected|connecting|offline/.test(relay.status), JSON.stringify(relay))
+  check('relay row shows a round-trip ping', /^\d+ ms$/.test(relay.ping), relay.ping)
+  check('ping is bucketed (good/fair/slow), not a bare number',
+    /good|fair|slow/.test(relay.pingCls), relay.pingCls)
+  check('relay row reports how much of the feed it carried',
+    /events?$/.test(relay.flow.trim()), relay.flow)
+
+  // an unreachable server must be visibly, describably down
+  const dead = await rowOf('nostr.download')
+  check('unreachable server says "unreachable"', dead && dead.status === 'unreachable',
+    JSON.stringify(dead))
+  check('offline dot is actually painted (--danger exists in the dark theme)',
+    dead && dead.dotBg !== 'rgba(0, 0, 0, 0)' && dead.dotBg !== 'transparent', dead && dead.dotBg)
+  check('unreachable server shows no ping', dead && dead.ping === '—', dead && dead.ping)
+
+  // real per-server download attribution
+  await page.evaluate(async () => {
+    const f = window.__form0
+    await f.assets.clearCaches()
+    const metas = [...f.index.byId.values()].slice(0, 6)
+    window.__dl = Promise.all(metas.map((m) => f.assets.getModel(m)))
+  })
+  await page.waitForTimeout(1200)
+  const host = await page.evaluate(() =>
+    window.__form0.transfers.hostStats('https://localhost:8443').session.down)
+  check('downloads are attributed to the server that served them', host > 0, `${host} B`)
+  const other = await page.evaluate(() =>
+    window.__form0.transfers.hostStats('https://nostr.download').session.down)
+  check('a server that served nothing stays at zero', other === 0, `${other} B`)
+
+  // a live per-server rate must appear on that row
+  await page.evaluate(() => {
+    const u = window.__form0.transfers.track('up', 6 * 1048576, 'https://localhost:8443')
+    window.__u = u
+    window.__uiv = setInterval(() => u.advance(200 * 1024), 100)
+  })
+  await page.waitForTimeout(1300)
+  const busy = await rowOf('localhost:8443/')
+  const blossomRow = busy && busy.list === 'blossom-list' ? busy : await page.evaluate(() => {
+    const li = [...document.querySelectorAll('#blossom-list .net-item')]
+      .find((n) => n.querySelector('.url')?.textContent.includes('localhost:8443'))
+    return { flow: li.querySelector('.net-flow').textContent, status: li.querySelector('.net-status').textContent }
+  })
+  check('the serving row shows its own live upload rate',
+    /↑ .*\/s/.test(blossomRow.flow), blossomRow.flow)
+  const quiet = await rowOf('blossom.primal.net')
+  check('an idle server row does not borrow another server\'s rate',
+    !/\/s/.test(quiet.flow), quiet.flow)
+
+  await page.evaluate(() => { clearInterval(window.__uiv); window.__u.end() })
+  await page.waitForTimeout(700)
+  const after = await page.evaluate(() => {
+    const li = [...document.querySelectorAll('#blossom-list .net-item')]
+      .find((n) => n.querySelector('.url')?.textContent.includes('localhost:8443'))
+    return li.querySelector('.net-flow').textContent
+  })
+  check('once idle the row falls back to per-server session totals',
+    /↓|↑/.test(after) && !/\/s/.test(after), after)
+  await page.close()
+}
+
 await browser.close()
 console.log(fails.length ? `\n${fails.length} FAILED: ${fails.join(', ')}` : '\nall transfer checks passed')
 process.exit(fails.length ? 1 : 0)

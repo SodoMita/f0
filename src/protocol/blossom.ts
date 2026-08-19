@@ -1,6 +1,6 @@
 import { finalizeEvent, generateSecretKey, type EventTemplate } from 'nostr-tools'
 import { BLOSSOM_AUTH_KIND, LIMITS } from '../theme'
-import { transfers } from '../core/transfer'
+import { transfers, originOf } from '../core/transfer'
 
 export async function sha256Hex(bytes: Uint8Array): Promise<string> {
   const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
@@ -45,14 +45,22 @@ export class BlossomClient {
    * ANY HTTP response (even 404) proves the server answers — network-level
    * failure/timeout is the only "offline". no-cors keeps CORS-restricted
    * servers probeable (opaque responses still resolve).
+   *
+   * Returns the round-trip time too: the panel shows it as the server's
+   * ping. `cache: 'no-store'` matters — a cached response would report a
+   * sub-millisecond "ping" that never touched the network.
    */
-  static async probe(url: string, timeoutMs = 5000): Promise<boolean> {
+  static async probe(url: string, timeoutMs = 5000): Promise<{ ok: boolean; ms: number }> {
     const normalized = normalizeBlossom(url)
-    if (!normalized) return false
+    if (!normalized) return { ok: false, ms: 0 }
+    const t0 = performance.now()
     try {
-      await fetch(normalized + '/', { method: 'HEAD', mode: 'no-cors', credentials: 'omit', signal: AbortSignal.timeout(timeoutMs) })
-      return true
-    } catch { return false }
+      await fetch(normalized + '/', {
+        method: 'HEAD', mode: 'no-cors', credentials: 'omit', cache: 'no-store',
+        signal: AbortSignal.timeout(timeoutMs),
+      })
+      return { ok: true, ms: Math.round(performance.now() - t0) }
+    } catch { return { ok: false, ms: Math.round(performance.now() - t0) } }
   }
 
   /**
@@ -72,7 +80,7 @@ export class BlossomClient {
       // One meter entry per replica attempt: a replica that stalls stops
       // contributing bytes and the reported speed drops, which is exactly
       // what the HUD should show.
-      const xfer = transfers.track('down', expectedSize)
+      const xfer = transfers.track('down', expectedSize, originOf(url))
       try {
         const res = await fetch(url, { credentials: 'omit', redirect: 'error', signal: AbortSignal.timeout(30000) })
         if (!res.ok || !res.body) continue
@@ -128,7 +136,7 @@ export class BlossomClient {
         // fetch call (no credentials, 60 s cap, JSON body).
         const res = await putWithProgress(`${server}/upload`, blob, {
           Authorization: `Nostr ${this.auth('upload', hash, secret)}`,
-        }, 60000)
+        }, 60000, originOf(server))
         if (!res.ok) throw new Error(`${server} upload failed (${res.status})`)
         let json: { url?: string }
         try { json = JSON.parse(res.body) as { url?: string } } catch { throw new Error(`${server} returned invalid JSON`) }
@@ -158,8 +166,9 @@ async function putWithProgress(
   blob: Blob,
   headers: Record<string, string>,
   timeoutMs: number,
+  host?: string,
 ): Promise<{ ok: boolean; status: number; body: string }> {
-  const xfer = transfers.track('up', blob.size)
+  const xfer = transfers.track('up', blob.size, host)
   if (typeof XMLHttpRequest === 'undefined') {
     try {
       const res = await fetch(url, {

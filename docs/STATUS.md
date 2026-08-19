@@ -5,6 +5,22 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 
+- [x] **Descriptive per-server network status: ping + per-server speeds**
+      (agent arena, 2026-08-18, SPEC AMENDMENT 52): network-panel rows now
+      show a worded status (`connected` / `connecting…` / `offline · retry N`
+      / `not probed` / `probing…` / `reachable` / `unreachable`), a bucketed
+      round-trip ping (relay REQ->EOSE on the live socket, Blossom HEAD with
+      `no-store`), and that server's OWN download/upload rate — session
+      totals when idle. Relays show events delivered instead of bytes.
+      `transfers.track()` gained a host origin and a per-host meter;
+      `RelayPool` gained `info()`, `ping()`, `pingAll()` and per-relay event
+      counts; both probes return `{ ok, ms }`. Also fixed a long-standing
+      silent bug: `--danger` existed only in the light theme, so the offline
+      dot (and `.studio-status.err`, `.hbtn.danger`, remove-hover) had no
+      colour in the dark theme. Verified: transfer.mjs (25), offline-verify
+      (39), network-panel (16), verify-publish, settings, interact, smoke,
+      orient, perf (idleBoard still 0 rps).
+
 - [x] **Network panel closes back to the current page** (agent arena,
       2026-08-18, SPEC AMENDMENT 51): `#/network` no longer forces
       `setMode('board')`, so the panel draws over the viewer / thread /

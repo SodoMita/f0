@@ -4,12 +4,28 @@ import { DEFAULTS, DELETE_KIND, FORM_ZERO_TAG, MODEL_KIND } from '../theme'
 
 export type RelayState = 'connecting' | 'online' | 'offline'
 
+/** What the network panel needs to describe a relay beyond a coloured dot. */
+export interface RelayInfo {
+  state: RelayState
+  /** last measured round-trip in ms (0 = never measured) */
+  pingMs: number
+  /** consecutive failed connection attempts (drives "retrying" copy) */
+  attempts: number
+  /** events this relay has delivered since boot */
+  events: number
+  /** epoch ms of the last state change */
+  since: number
+}
+
 export class RelayPool {
   private relays = new Map<string, Relay>()
   private subs: Array<{ close: () => void }> = []
   private urls: string[] = [...DEFAULTS.relays]
   private closed = false
   private attempts = new Map<string, number>()
+  private pings = new Map<string, number>()
+  private events = new Map<string, number>()
+  private changed = new Map<string, number>()
   state = new Map<string, RelayState>()
   onEvent: ((event: Event) => void) | null = null
   onState: ((url: string, state: RelayState) => void) | null = null
@@ -19,6 +35,59 @@ export class RelayPool {
     this.urls = normalized.length ? normalized : [...DEFAULTS.relays]
   }
   get relayUrls(): string[] { return [...this.urls] }
+
+  /** Everything the network panel shows for one relay row. */
+  info(url: string): RelayInfo {
+    return {
+      state: this.state.get(url) ?? 'connecting',
+      pingMs: this.pings.get(url) ?? 0,
+      attempts: this.attempts.get(url) ?? 0,
+      events: this.events.get(url) ?? 0,
+      since: this.changed.get(url) ?? 0,
+    }
+  }
+
+  /**
+   * App-level ping on a LIVE connection: a REQ that can match nothing, timed
+   * to its EOSE. That is the only round trip NIP-01 gives a browser (there is
+   * no ping/pong frame in the WebSocket API), and it measures what actually
+   * matters — how long this relay takes to answer a query.
+   */
+  async ping(url: string, timeoutMs = 6000): Promise<number> {
+    const relay = this.relays.get(url)
+    if (!relay || !relay.connected) {
+      // not in the pool (or down): fall back to a fresh handshake
+      const { ok, ms } = await RelayPool.probe(url, timeoutMs)
+      if (ok) this.pings.set(url, ms)
+      return ok ? ms : 0
+    }
+    const t0 = performance.now()
+    const ms = await new Promise<number>((resolve) => {
+      let done = false
+      const finish = (v: number) => { if (!done) { done = true; resolve(v) } }
+      const timer = setTimeout(() => finish(0), timeoutMs)
+      try {
+        // `#t` with a random tag value matches nothing, so the relay does no
+        // work and sends EOSE immediately — this times the round trip, not a
+        // query. limit:0 alone is not honoured by every implementation.
+        const sub = relay.subscribe([{ kinds: [MODEL_KIND], '#t': ['form-zero-ping-' + Math.random().toString(36).slice(2)], limit: 1 }], {
+          oneose: () => {
+            clearTimeout(timer)
+            try { sub.close() } catch { /* already closed */ }
+            finish(Math.round(performance.now() - t0))
+          },
+          onclose: () => { clearTimeout(timer); finish(0) },
+        })
+      } catch { clearTimeout(timer); finish(0) }
+    })
+    if (ms > 0) { this.pings.set(url, ms); this.onState?.(url, this.state.get(url) ?? 'online') }
+    return ms
+  }
+
+  /** Ping every configured relay at once (network panel refresh). */
+  async pingAll(): Promise<void> {
+    await Promise.allSettled(this.urls.map((u) => this.ping(u)))
+  }
 
   connect(): void {
     for (const url of this.urls) { this.setState(url, 'connecting'); void this.open(url) }
@@ -40,20 +109,35 @@ export class RelayPool {
     this.relays.clear()
     this.attempts.clear()
     for (const url of [...this.state.keys()]) {
-      if (!this.urls.includes(url)) { this.state.delete(url); this.onState?.(url, 'offline') }
+      if (this.urls.includes(url)) continue
+      this.state.delete(url)
+      this.pings.delete(url)
+      this.events.delete(url)
+      this.changed.delete(url)
+      this.onState?.(url, 'offline')
     }
     this.connect()
   }
 
-  /** One-shot reachability probe (network panel). Does not join the pool. */
-  static probe(url: string, timeoutMs = 5000): Promise<boolean> {
+  /**
+   * One-shot reachability probe (network panel). Does not join the pool.
+   * Returns the WebSocket handshake time so an unconnected relay can still
+   * show a ping.
+   */
+  static probe(url: string, timeoutMs = 5000): Promise<{ ok: boolean; ms: number }> {
     return new Promise((resolve) => {
       const normalized = normalizeRelay(url)
-      if (!normalized) { resolve(false); return }
+      if (!normalized) { resolve({ ok: false, ms: 0 }); return }
+      const t0 = performance.now()
       let settled = false
-      const done = (ok: boolean) => { if (!settled) { settled = true; try { ws.close() } catch { /* noop */ } resolve(ok) } }
+      const done = (ok: boolean) => {
+        if (settled) return
+        settled = true
+        try { ws.close() } catch { /* noop */ }
+        resolve({ ok, ms: Math.round(performance.now() - t0) })
+      }
       let ws: WebSocket
-      try { ws = new WebSocket(normalized) } catch { resolve(false); return }
+      try { ws = new WebSocket(normalized) } catch { resolve({ ok: false, ms: 0 }); return }
       const timer = setTimeout(() => done(false), timeoutMs)
       ws.onopen = () => { clearTimeout(timer); done(true) }
       ws.onerror = () => { clearTimeout(timer); done(false) }
@@ -63,6 +147,7 @@ export class RelayPool {
   private setState(url: string, state: RelayState): void {
     if (this.state.get(url) === state) return
     this.state.set(url, state)
+    this.changed.set(url, Date.now())
     this.onState?.(url, state)
   }
 
@@ -82,7 +167,12 @@ export class RelayPool {
       this.scheduleRetry(url)
     }
     try {
+      const t0 = performance.now()
       await relay.connect()
+      // The handshake IS a round trip — seed the ping from it so a row shows
+      // a latency immediately instead of waiting for the first explicit ping.
+      this.pings.set(url, Math.round(performance.now() - t0))
+      this.attempts.set(url, 0)
       this.setState(url, 'online')
       this.subscribe(url, relay)
     } catch {
@@ -114,7 +204,13 @@ export class RelayPool {
         // chatty relay cannot burn the main thread on events we would drop
         onevent: (event) => {
           if (event.kind !== MODEL_KIND && event.kind !== DELETE_KIND) return
-          void verifyFreshAsync(event).then((ok) => { if (ok) this.onEvent?.(event) })
+          void verifyFreshAsync(event).then((ok) => {
+            if (!ok) return
+            // per-relay delivery count: the panel says which relay is
+            // actually carrying the feed, not just which ones are green
+            this.events.set(url, (this.events.get(url) ?? 0) + 1)
+            this.onEvent?.(event)
+          })
         },
         oneose: () => this.setState(url, 'online'),
       },
