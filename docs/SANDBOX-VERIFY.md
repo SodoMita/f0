@@ -136,6 +136,12 @@ facing=(0,0,1) (+axis fallback holds), cubes any axis.
 
 ## Publish round-trip verification
 
+`scripts/hash-unit.mjs` + `scripts/verify-hash.mjs` cover load-path
+integrity: poisoned modelCache under a real sha never reaches Babylon,
+a hash-valid body with a wrong size tag is accepted, a valid thumb does
+not keep a wrong-`x` post on the board or tree, and the thread map
+refuses to build a node for `hashFailed` meta.
+
 `scripts/verify-publish.mjs` (11 checks, green on the production preview
 build) covers the whole publish path the rig can now host:
 studio text export → poster render → `PUT /upload` (kind-24242 auth, CORS

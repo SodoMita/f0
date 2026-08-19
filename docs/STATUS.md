@@ -5,6 +5,17 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 
+- [x] **Wrong-hash / wrong-size models still render** (agent arena, 2026-08-20,
+      SPEC AMENDMENT 64): verify on LOAD, rebased onto format v4. `getModel`/
+      `getModelBytes` re-hash every RAM/IDB hit (poisoned cache → del +
+      redownload, not failHash). Blossom download hashes always — size is
+      cap+meter; hash-valid bodies with a stale size tag are accepted.
+      Format v4 already forces every plate through a local render, so a
+      remote thumb cannot skip the GLB hash. `onHashFailed` drops the board
+      card AND the thread node. `flatten`/`open` skip hashFailed.
+      `validateGLBCached` is keyed by the actual bytes, not the claimed sha.
+      Guard: `scripts/hash-unit.mjs` + `scripts/verify-hash.mjs`.
+
 - [x] **Studio card preview + full-page resizable preview** (agent arena,
       2026-08-20, SPEC AMENDMENT 63): the studio's upper-left corner shows
       a live card preview (local poster render of the current content,
@@ -483,12 +494,6 @@ move it to **Done** with a commit reference. One agent per area.
   onto main instead of rewriting again. Branch protection now blocks force
   pushes to `main`.
 ## In progress
-
-- [ ] **Wrong-hash / wrong-size models still render** — claimed by agent arena,
-      2026-08-19. Verify on LOAD (do not redo cancel/freeze). Hash every
-      getModel/getModelBytes return; size is cap+meter not a refuse;
-      thumbs are not a trust shortcut; tear down board card AND thread
-      node on confirmed hash mismatch.
 
 - [ ] **Paint editor (hand-writing ink)** — claimed by agent arena, 2026-08-19.
       Rebased onto main (PR #12: preview width / viewer hand-off / zoom
