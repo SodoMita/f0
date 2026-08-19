@@ -370,12 +370,12 @@ export class AssetCache {
    * verification rig to pixel-check the camera policy. Posters for real
    * posts come from getPoster(); the PNG is returned for pixel checks.
    */
-  async renderPosterFor(model: Blob): Promise<{ blob: Blob; width: number; height: number; blank: boolean }> {
+  async renderPosterFor(model: Blob, width = POSTER_W, height = POSTER_H): Promise<{ blob: Blob; width: number; height: number; blank: boolean }> {
     // PosterRenderer takes shared bytes + a content hash (see SPEC 30)
     const bytes = new Uint8Array(await model.arrayBuffer())
     const sha = await sha256Hex(bytes)
     try {
-      const result = await this.poster.render(bytes, sha)
+      const result = await this.poster.render(bytes, sha, width, height)
       return { blob: await result.toPng(), width: result.width, height: result.height, blank: false }
     } catch (err) {
       if (err instanceof Error && /rendered empty|blank/i.test(err.message)) {

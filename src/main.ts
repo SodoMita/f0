@@ -14,7 +14,7 @@ import { publishModel, type PublishProgress } from './protocol/publish'
 import { isAbortError } from './protocol/hash'
 import { configureDraco } from './model/draco'
 import { enforceOffline } from './model/offline'
-import { DEFAULTS, POSTER_W, POSTER_H, theme } from './theme'
+import { DEFAULTS, LIMITS, POSTER_W, POSTER_H, theme } from './theme'
 import { luminance } from './core/gfx'
 import { loadNetworkConfig } from './protocol/storage'
 import { DeletionService } from './protocol/deletion'
@@ -308,8 +308,9 @@ async function boot(): Promise<void> {
       const result = await publishModel(
         {
           model: content.blob,
-          width: POSTER_W,
-          height: POSTER_H,
+          // the author's chosen card size (full-page preview), else default
+          width: previewDim.width,
+          height: previewDim.height,
           tint: studio.tintColor,
           filename: content.filename,
           sourceFormat: content.sourceFormat,
@@ -345,6 +346,168 @@ async function boot(): Promise<void> {
 
   btnStudioImport.addEventListener('click', () => { if (!publishing) void pickStudioFile() })
   btnStudioPublish.addEventListener('click', () => void publishStudio())
+
+  // ---- Studio card preview (format v4) ----
+  // The card IS a local render, so the studio can show the exact card the
+  // post will get: a corner preview (click to hide / ◱ pill to reveal) and a
+  // full page with a resizable canvas whose size becomes the event's `dim`.
+  const previewPanel = $('studio-preview') as HTMLDivElement | null
+  const previewCanvas = $('studio-preview-canvas') as HTMLCanvasElement | null
+  const btnPreviewReveal = $('btn-preview-reveal') as HTMLButtonElement | null
+  const btnPreviewFull = $('btn-preview-full') as HTMLButtonElement | null
+  const previewPageEl = $('preview-page') as HTMLDivElement | null
+  const previewPageCanvas = $('preview-canvas') as HTMLCanvasElement | null
+  const previewFrameEl = $('preview-frame') as HTMLDivElement | null
+  const previewResizeEl = $('preview-resize') as HTMLDivElement | null
+  const previewSizeLabel = $('preview-size-label') as HTMLSpanElement | null
+  const btnPreviewReset = $('btn-preview-reset') as HTMLButtonElement | null
+  const btnPreviewClose = $('btn-preview-close') as HTMLButtonElement | null
+
+  let previewDim = { width: POSTER_W, height: POSTER_H }
+  let previewHidden = false
+  let previewTimer = 0
+  let previewBusy = false
+  let previewQueued = false
+  let previewBitmap: ImageBitmap | null = null
+
+  try { previewHidden = localStorage.getItem('f0:preview-hidden') === '1' } catch { /* private mode */ }
+
+  function syncPreviewVisibility(): void {
+    if (!previewPanel || !btnPreviewReveal) return
+    const has = studio.hasContent()
+    previewPanel.hidden = previewHidden || !has
+    btnPreviewReveal.hidden = !previewHidden || !has
+  }
+
+  function drawPreviewBitmap(target: HTMLCanvasElement | null, bmp: ImageBitmap): void {
+    if (!target) return
+    if (target.width !== bmp.width || target.height !== bmp.height) {
+      target.width = bmp.width
+      target.height = bmp.height
+    }
+    target.getContext('2d')?.drawImage(bmp, 0, 0)
+  }
+
+  /** Render the CURRENT studio content as a card at `dim` and paint both
+   *  surfaces (corner + full page). Debounced callers only. */
+  async function renderStudioPreview(): Promise<void> {
+    if (publishing || !studio.hasContent()) { syncPreviewVisibility(); return }
+    previewBusy = true
+    try {
+      const content = await studio.getContentForPublish()
+      const r = await assets.renderPosterFor(content.blob, previewDim.width, previewDim.height)
+      const bmp = await createImageBitmap(r.blob)
+      previewBitmap?.close()
+      previewBitmap = bmp
+      drawPreviewBitmap(previewCanvas, bmp)
+      if (previewPageEl && !previewPageEl.hidden) {
+        drawPreviewBitmap(previewPageCanvas, bmp)
+        applyPreviewFrameSize(previewDim.width, previewDim.height)
+      }
+    } catch {
+      /* render failed (limits, blank…) — keep the last preview */
+    } finally {
+      previewBusy = false
+      if (previewQueued) { previewQueued = false; void renderStudioPreview() }
+    }
+  }
+
+  function scheduleStudioPreview(delay = 600): void {
+    syncPreviewVisibility()
+    window.clearTimeout(previewTimer)
+    previewTimer = window.setTimeout(() => {
+      if (previewBusy) { previewQueued = true; return }
+      void renderStudioPreview()
+    }, delay)
+  }
+  studio.onDirty = () => scheduleStudioPreview()
+
+  previewCanvas?.addEventListener('click', () => {
+    previewHidden = true
+    try { localStorage.setItem('f0:preview-hidden', '1') } catch { /* private mode */ }
+    syncPreviewVisibility()
+  })
+  btnPreviewReveal?.addEventListener('click', () => {
+    previewHidden = false
+    try { localStorage.setItem('f0:preview-hidden', '0') } catch { /* private mode */ }
+    syncPreviewVisibility()
+    scheduleStudioPreview(0)
+  })
+
+  function applyPreviewFrameSize(w: number, h: number): void {
+    if (!previewFrameEl || !previewPageCanvas) return
+    // CSS size: the canvas keeps its bitmap until the next render replaces
+    // it — during a drag the last bitmap is simply stretched (instant
+    // feedback), and the release re-renders at the true resolution.
+    previewFrameEl.style.width = `${w}px`
+    previewFrameEl.style.height = `${h}px`
+    previewPageCanvas.style.width = `${w}px`
+    previewPageCanvas.style.height = `${h}px`
+    if (previewSizeLabel) previewSizeLabel.textContent = `${w} × ${h}`
+  }
+
+  function clampPreviewDim(w: number, h: number): { width: number; height: number } {
+    // Same bounds the format enforces (parsePosterDim): a card, not a sliver.
+    const cw = Math.max(LIMITS.posterDimMin, Math.min(LIMITS.posterDimMax, Math.round(w)))
+    const ch = Math.max(LIMITS.posterDimMin, Math.min(LIMITS.posterDimMax, Math.round(h)))
+    const aspect = cw / ch
+    if (aspect > LIMITS.posterAspectMax) return { width: cw, height: Math.round(cw / LIMITS.posterAspectMax) }
+    if (aspect < LIMITS.posterAspectMin) return { width: Math.round(ch * LIMITS.posterAspectMin), height: ch }
+    return { width: cw, height: ch }
+  }
+
+  function openPreviewPage(): void {
+    if (!previewPageEl) return
+    previewPageEl.hidden = false
+    if (previewBitmap) {
+      drawPreviewBitmap(previewPageCanvas, previewBitmap)
+      applyPreviewFrameSize(previewBitmap.width, previewBitmap.height)
+      previewDim = { width: previewBitmap.width, height: previewBitmap.height }
+    } else {
+      applyPreviewFrameSize(previewDim.width, previewDim.height)
+      scheduleStudioPreview(0)
+    }
+  }
+
+  function closePreviewPage(): void {
+    if (!previewPageEl) return
+    previewPageEl.hidden = true
+    previewPageEl.classList.remove('resizing')
+  }
+  btnPreviewFull?.addEventListener('click', openPreviewPage)
+  btnPreviewClose?.addEventListener('click', closePreviewPage)
+  btnPreviewReset?.addEventListener('click', () => {
+    previewDim = { width: POSTER_W, height: POSTER_H }
+    applyPreviewFrameSize(previewDim.width, previewDim.height)
+    scheduleStudioPreview(0)
+  })
+
+  // Resizable canvas: pointer drag on the corner handle. The frame follows
+  // the pointer (CSS only); the release commits the size, re-renders the
+  // card at that resolution and stamps it into `previewDim` (= `dim`).
+  previewResizeEl?.addEventListener('pointerdown', (e) => {
+    if (!previewFrameEl || !previewPageEl) return
+    e.preventDefault()
+    previewResizeEl.setPointerCapture(e.pointerId)
+    previewPageEl.classList.add('resizing')
+    const start = { x: e.clientX, y: e.clientY, w: previewDim.width, h: previewDim.height }
+    const move = (ev: PointerEvent) => {
+      const next = clampPreviewDim(start.w + (ev.clientX - start.x), start.h + (ev.clientY - start.y))
+      previewDim = next
+      applyPreviewFrameSize(next.width, next.height)
+    }
+    const up = (ev: PointerEvent) => {
+      previewResizeEl.removeEventListener('pointermove', move)
+      previewResizeEl.removeEventListener('pointerup', up)
+      previewResizeEl.removeEventListener('pointercancel', up)
+      previewPageEl.classList.remove('resizing')
+      move(ev)
+      scheduleStudioPreview(150)
+    }
+    previewResizeEl.addEventListener('pointermove', move)
+    previewResizeEl.addEventListener('pointerup', up)
+    previewResizeEl.addEventListener('pointercancel', up)
+  })
 
   // ---- Studio transform toolbar ----
   let freeCamOn = false
@@ -1028,6 +1191,12 @@ async function boot(): Promise<void> {
       setStudioStatus(studioReply ? 'replying…' : '')
       refreshCameraControls()
       updateTextBudget()
+      // fresh post: the card goes back to the default size (the author may
+      // pick another on the full-page preview before publishing)
+      previewDim = { width: POSTER_W, height: POSTER_H }
+      closePreviewPage()
+      syncPreviewVisibility()
+      scheduleStudioPreview(0)
     }
     else if (route.name === 'network') {
       // Keep whatever is on screen; only a cold boot straight into
@@ -1096,6 +1265,7 @@ async function boot(): Promise<void> {
   pool.connect()
 
   window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && previewPageEl && !previewPageEl.hidden) { closePreviewPage(); return }
     if (e.key === 'Escape' && errorSheet.isOpen) { errorSheet.hide(); return }
     if (e.key === 'Escape' && networkPanel.isOpen) { networkPanel.close(); return }
     // Typing guard: while focus is in an editable control (settings inputs,

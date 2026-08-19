@@ -1203,3 +1203,76 @@ textarea#studio-text:focus { outline: none; border-color: var(--accent); }
   .text-controls { grid-template-columns: 1fr 1fr; }
 }
 
+
+/* ---- studio card preview (format v4: the card is a local render) ----
+   Upper-left corner of the studio stage. Click the canvas to hide; the
+   ◱ card pill reveals it again. */
+.studio-preview {
+  position: absolute; top: 0; left: 78px; /* 64px rail + 14px gap */
+  z-index: 2; pointer-events: auto;
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 8px; border-radius: 14px;
+  background: rgba(18,18,19,.82); border: 1px solid var(--line);
+  backdrop-filter: blur(12px);
+}
+.studio-preview-bar {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--muted, #827E79);
+}
+.studio-preview-bar .spacer { flex: 1; }
+.studio-preview canvas {
+  display: block; width: 224px; height: auto; /* 16:10 at half poster res */
+  border-radius: 8px; cursor: pointer;
+  /* transparency signal — the poster composites over any backdrop */
+  background:
+    linear-gradient(45deg, rgba(255,255,255,.045) 25%, transparent 25%, transparent 75%, rgba(255,255,255,.045) 75%),
+    linear-gradient(45deg, rgba(255,255,255,.045) 25%, transparent 25%, transparent 75%, rgba(255,255,255,.045) 75%);
+  background-size: 16px 16px; background-position: 0 0, 8px 8px;
+  background-color: #0d0d0e;
+}
+.preview-reveal {
+  position: absolute; top: 0; left: 78px; z-index: 2; pointer-events: auto;
+  padding: 7px 12px; border-radius: 10px; font-size: 11px;
+  background: rgba(18,18,19,.82); border: 1px solid var(--line);
+  color: var(--ink); cursor: pointer; backdrop-filter: blur(12px);
+}
+.preview-reveal:hover { border-color: var(--accent); }
+@media (orientation: portrait) {
+  /* rail moves to the bottom — the corner is the stage's own top-left */
+  .studio-preview, .preview-reveal { left: 0; }
+  .studio-preview canvas { width: 140px; }
+}
+
+/* ---- full-page card preview: resizable canvas, size -> `dim` ---- */
+.preview-page {
+  inset: 0; z-index: 40; /* above the studio (z 30) */
+  display: flex; flex-direction: column;
+  background: rgba(8,8,9,.92); backdrop-filter: blur(14px);
+}
+.preview-top {
+  display: flex; align-items: center; gap: 10px;
+  padding: 14px 18px; font-size: 12px; color: var(--ink);
+}
+.preview-top .spacer { flex: 1; }
+.preview-size-label { font-variant-numeric: tabular-nums; letter-spacing: 0.06em; }
+.preview-wrap { flex: 1; display: grid; place-items: center; padding: 24px; overflow: auto; }
+.preview-frame { position: relative; line-height: 0; }
+.preview-frame canvas {
+  display: block; border-radius: 12px;
+  box-shadow: 0 18px 60px rgba(0,0,0,.5), 0 0 0 1px var(--line);
+  /* transparency signal, same as the corner preview */
+  background:
+    linear-gradient(45deg, rgba(255,255,255,.05) 25%, transparent 25%, transparent 75%, rgba(255,255,255,.05) 75%),
+    linear-gradient(45deg, rgba(255,255,255,.05) 25%, transparent 25%, transparent 75%, rgba(255,255,255,.05) 75%);
+  background-size: 24px 24px; background-position: 0 0, 12px 12px;
+  background-color: #0d0d0e;
+}
+.preview-resize {
+  position: absolute; right: -9px; bottom: -9px; width: 22px; height: 22px;
+  border-radius: 8px; cursor: nwse-resize; touch-action: none;
+  background: rgba(18,18,19,.9); border: 1px solid var(--line);
+  display: grid; place-items: center; color: var(--ink); font-size: 10px;
+}
+.preview-resize::after { content: "◫"; opacity: .8; }
+.preview-resize:hover, .preview-page.resizing .preview-resize { border-color: var(--accent); }

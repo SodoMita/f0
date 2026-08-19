@@ -5,6 +5,18 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 
+- [x] **Studio card preview + full-page resizable preview** (agent arena,
+      2026-08-20, SPEC AMENDMENT 63): the studio's upper-left corner shows
+      a live card preview (local poster render of the current content,
+      debounced on studio.onDirty); click hides it with a "◱ card" pill to
+      reveal, ⤢ opens a full page where the card sits on a drag-resizable
+      canvas (dim limits enforced). The chosen size is published as `dim`.
+      Verified: ad-hoc Playwright round-trip (paint, hide/reveal, resize
+      448x280→560x280 with the aspect cap, publish carries `dim=560x280`)
+      plus verify-publish, offline-verify (tap moved past the new HUD),
+      smoke, interact, features, transfer, settings, network-panel green;
+      tsc, vite build and build:standalone green.
+
 - [x] **Offline rig: seed id collision shrunk the feed to 51** (agent arena,
       2026-08-20): `makeEvent` stamped `created_at` from per-call
       `Date.now()`; GLB generation is slow enough that the clock can advance

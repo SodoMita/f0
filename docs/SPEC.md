@@ -708,3 +708,18 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     shorter cards centred in the band) and the thread map sizes each node
     quad the same way; the shared live-preview RTT keeps the 16:10
     reference aspect. `v` tag is `form-zero:4`.
+
+63. STUDIO CARD PREVIEW + FULL-PAGE RESIZABLE PREVIEW; `dim` IS AUTHOR
+    CHOSEN (2026-08-20): the studio shows the exact card a creation will
+    get — a corner preview in the stage's upper-left (a live local poster
+    render of the current content, debounced ~600 ms after any edit:
+    paint/text/gizmo/camera changes fire `studio.onDirty`). Clicking the
+    image hides it (state persists in localStorage); a "◱ card" pill
+    reveals it again. The ⤢ button opens a FULL PAGE: the card on a canvas
+    with a corner drag handle. Dragging resizes the canvas (live CSS
+    stretch during the drag; re-render at the released resolution), bound
+    by the format's `dim` limits (64..4096 px, aspect 0.5..2). The chosen
+    size becomes the event's `dim` at publish (reset to the 448x280
+    default on entering the studio for a fresh post). offline-verify's
+    empty-stage tap now hides the preview first (covering the hide/reveal
+    pair as a side effect).

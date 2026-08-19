@@ -76,6 +76,18 @@
         </button>
       </aside>
 
+      <!-- Card preview (format v4: the card is a local render). Upper-left
+           corner of the stage; click the image to hide, pill to reveal. -->
+      <button id="btn-preview-reveal" class="preview-reveal" title="show card preview" hidden>◱ card</button>
+      <div id="studio-preview" class="studio-preview" hidden>
+        <div class="studio-preview-bar">
+          <span>card preview</span>
+          <span class="spacer"></span>
+          <button id="btn-preview-full" class="hbtn small" title="full-page preview (resizable canvas)" aria-label="full-page preview">⤢</button>
+        </div>
+        <canvas id="studio-preview-canvas" width="448" height="280" title="click to hide preview"></canvas>
+      </div>
+
       <main class="studio-stage">
         <div class="stage-top">
           <span id="studio-filename" class="studio-filename"></span>
@@ -195,6 +207,23 @@
           <button id="btn-studio-publish" class="big-button primary" disabled>publish</button>
         </div>
       </aside>
+    </div>
+
+    <!-- Full-page card preview: the post card rendered on a resizable
+         canvas. The chosen size becomes the event's `dim`. -->
+    <div id="preview-page" class="hud preview-page" hidden>
+      <div class="preview-top">
+        <span id="preview-size-label" class="preview-size-label">448 × 280</span>
+        <span class="spacer"></span>
+        <button id="btn-preview-reset" class="hbtn small" title="reset to the default card size">reset</button>
+        <button id="btn-preview-close" class="hbtn small" title="close (Esc)" aria-label="close">✕</button>
+      </div>
+      <div class="preview-wrap">
+        <div id="preview-frame" class="preview-frame">
+          <canvas id="preview-canvas" width="448" height="280"></canvas>
+          <div id="preview-resize" class="preview-resize" title="drag to resize the card — this size is published as `dim`" role="slider" aria-label="card size"></div>
+        </div>
+      </div>
     </div>
 
     <!-- Settings drawer: built from src/settings/schema.ts at boot -->
