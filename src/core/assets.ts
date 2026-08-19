@@ -1,8 +1,9 @@
 import { Texture } from '@babylonjs/core/Materials/Textures/texture'
 import { RawTexture } from '@babylonjs/core/Materials/Textures/rawTexture'
 import { Scene } from '@babylonjs/core/scene'
-import { clearStore, get, put } from '../protocol/storage'
+import { clearStore, del, get, put } from '../protocol/storage'
 import { sha256Hex, BlossomClient } from '../protocol/blossom'
+import { blobMatchesHash, isHashMismatch } from '../protocol/hash'
 import type { ThreadMeta } from '../protocol/thread-index'
 import { PosterRenderer, POSTER_W, POSTER_H, type Footprint } from '../model/poster'
 
@@ -32,14 +33,29 @@ export class AssetCache {
   private byPostId = new Map<string, ThreadMeta>()
   private animatedBySha = new Map<string, boolean>()
   private footprintBySha = new Map<string, Footprint | null>()
+  private hashFailed = new Set<string>()
   private queue: Job[] = []
   private inflight = new Map<string, Promise<Texture | undefined>>()
   private active = 0
   private paused = false
   private poster: PosterRenderer
+  /** Fired once per post when downloaded/cached bytes do not match `x`. */
+  onHashFailed: ((meta: ThreadMeta) => void) | null = null
 
   constructor(private blossoms: BlossomClient, private scene: Scene) {
     this.poster = new PosterRenderer(scene.getEngine())
+  }
+
+  isHashFailed(eventId: string): boolean { return this.hashFailed.has(eventId) }
+
+  private failHash(meta: ThreadMeta): void {
+    if (this.hashFailed.has(meta.eventId)) return
+    this.hashFailed.add(meta.eventId)
+    this.posterTex.get(meta.eventId)?.dispose()
+    this.posterTex.delete(meta.eventId)
+    this.modelBlobs.delete(meta.eventId)
+    this.modelBytes.delete(meta.sha256)
+    this.onHashFailed?.(meta)
   }
 
   getModelBlobByPostId(postId: string): Promise<Blob | undefined> {
@@ -64,6 +80,7 @@ export class AssetCache {
    * Babylon's own File/FileReader copy on top).
    */
   async getModelBytes(meta: ThreadMeta): Promise<Uint8Array | undefined> {
+    if (this.hashFailed.has(meta.eventId) || meta.hashFailed) return undefined
     const hit = this.modelBytes.get(meta.sha256)
     if (hit) return hit
     const blob = await this.getModel(meta)
@@ -86,6 +103,7 @@ export class AssetCache {
    * enable/disable, not reload).
    */
   peekPoster(meta: ThreadMeta): Texture | undefined {
+    if (this.hashFailed.has(meta.eventId) || meta.hashFailed) return undefined
     return this.posterTex.get(meta.eventId)
   }
 
@@ -125,6 +143,7 @@ export class AssetCache {
 
   /** Poster: thumb tag = fast path; local render = normal path (00 §2.2). */
   getPoster(meta: ThreadMeta): Promise<Texture | undefined> {
+    if (this.hashFailed.has(meta.eventId) || meta.hashFailed) return Promise.resolve(undefined)
     this.byPostId.set(meta.eventId, meta)
     const hit = this.posterTex.get(meta.eventId)
     if (hit) return Promise.resolve(hit)
@@ -185,6 +204,7 @@ export class AssetCache {
   }
 
   private async produce(meta: ThreadMeta): Promise<Texture | undefined> {
+    if (this.hashFailed.has(meta.eventId) || meta.hashFailed) return undefined
     try {
       // Fast path: freshly rendered posters go straight from the GPU readback
       // to a RawTexture. The old path went pixels -> PNG -> Image -> canvas ->
@@ -284,7 +304,7 @@ export class AssetCache {
   }
 
   private async fetchThumb(meta: ThreadMeta): Promise<Blob | undefined> {
-    if (!meta.thumbUrl) return undefined
+    if (!meta.thumbUrl || this.hashFailed.has(meta.eventId) || meta.hashFailed) return undefined
     const cached = meta.thumbSha256 ? await get<Blob>('posterCache', POSTER_CACHE_V + meta.thumbSha256) : undefined
     if (cached) return cached
     // kind 'png': posters are images; the GLB magic check must not apply

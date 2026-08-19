@@ -23,6 +23,8 @@ export type ThreadMeta = {
   previewCamera?: number
   previewAnimation?: number
   tombstoned?: boolean
+  /** Downloaded bytes did not match `sha256` — hide from the board. */
+  hashFailed?: boolean
 }
 
 const HEX64 = /^[0-9a-f]{64}$/i
@@ -69,6 +71,11 @@ export class ThreadIndex {
   tombstone(eventId: string): void {
     const m = this.byId.get(eventId)
     if (m) m.tombstoned = true
+  }
+
+  rejectHash(eventId: string): void {
+    const m = this.byId.get(eventId)
+    if (m) m.hashFailed = true
   }
 
   flatten(rootId: string): ThreadMeta[] {

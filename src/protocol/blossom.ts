@@ -1,12 +1,9 @@
 import { finalizeEvent, generateSecretKey, type EventTemplate } from 'nostr-tools'
 import { BLOSSOM_AUTH_KIND, LIMITS } from '../theme'
 import { transfers, originOf } from '../core/transfer'
+import { freezeBlob, HashMismatchError, isAbortError, isSha256Hex, sha256Hex, throwIfAborted } from './hash'
 
-export async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
-  const digest = await crypto.subtle.digest('SHA-256', buf)
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('')
-}
+export { sha256Hex, freezeBlob } from './hash'
 
 function normalizeBlossom(value: string): string | null {
   try {
@@ -76,6 +73,7 @@ export class BlossomClient {
    * redirect target, and the event author controls the URL already.
    */
   async download(urls: string[], hash: string, expectedSize: number, maxBytes = LIMITS.modelBytesHard, kind: BlobKind = 'glb'): Promise<Blob> {
+    let hashMismatch = false
     for (const url of urls) {
       // One meter entry per replica attempt: a replica that stalls stops
       // contributing bytes and the reported speed drops, which is exactly
@@ -102,13 +100,21 @@ export class BlossomClient {
         const bytes = new Uint8Array(total)
         let off = 0
         for (const c of chunks) { bytes.set(c, off); off += c.length }
-        if (hash && (await sha256Hex(bytes)) !== hash) continue
+        // Models MUST match the event `x` tag. An empty hash used to skip
+        // the check, which let a wrong-hash replica render on the board.
+        const expect = hash.toLowerCase()
+        if (kind === 'glb' && !isSha256Hex(expect)) continue
+        if (isSha256Hex(expect) && (await sha256Hex(bytes)) !== expect) {
+          hashMismatch = true
+          continue
+        }
         if (!magicOk(bytes, kind)) continue
-        return new Blob([bytes.buffer as ArrayBuffer], { type: kind === 'png' ? 'image/png' : 'model/gltf-binary' })
+        return new Blob([bytes], { type: kind === 'png' ? 'image/png' : 'model/gltf-binary' })
       } catch { /* next replica */ } finally {
         xfer.end()
       }
     }
+    if (hashMismatch) throw new HashMismatchError()
     throw new Error('No verified replica available.')
   }
 
@@ -122,11 +128,16 @@ export class BlossomClient {
     return btoa(JSON.stringify(finalizeEvent(t, secret)))
   }
 
-  /** BUD-01 upload. Returns replica URLs. */
-  async upload(blob: Blob, secret: Uint8Array): Promise<{ url: string; sha256: string }[]> {
+  /** BUD-01 upload. Returns replica URLs. `signal` aborts every in-flight PUT. */
+  async upload(blob: Blob, secret: Uint8Array, signal?: AbortSignal): Promise<{ url: string; sha256: string }[]> {
+    throwIfAborted(signal)
     if (blob.size > LIMITS.modelBytesHard) throw new Error(`Final GLB exceeds ${LIMITS.modelBytesHard / 1048576} MiB.`)
-    const bytes = new Uint8Array(await blob.arrayBuffer())
-    const hash = await sha256Hex(bytes)
+    // Freeze first: the studio scene (and some File/Blob backends) can still
+    // mutate the bytes we were handed. The event `x` tag and the PUT body
+    // must be the same snapshot.
+    const frozen = await freezeBlob(blob)
+    throwIfAborted(signal)
+    const hash = frozen.sha256
     const results = await Promise.allSettled(
       this.servers.map(async (server) => {
         // XHR, not fetch: `fetch` reports nothing about request-body
@@ -134,12 +145,12 @@ export class BlossomClient {
         // completed. XHR's upload.onprogress is the only portable way to
         // show a real upload speed. Semantics kept identical to the old
         // fetch call (no credentials, 60 s cap, JSON body).
-        const res = await putWithProgress(`${server}/upload`, blob, {
+        const res = await putWithProgress(`${server}/upload`, frozen.blob, {
           Authorization: `Nostr ${this.auth('upload', hash, secret)}`,
-        }, 60000, originOf(server))
+        }, 60000, originOf(server), signal)
         if (!res.ok) throw new Error(`${server} upload failed (${res.status})`)
-        let json: { url?: string }
-        try { json = JSON.parse(res.body) as { url?: string } } catch { throw new Error(`${server} returned invalid JSON`) }
+        let json: { url?: string; sha256?: string }
+        try { json = JSON.parse(res.body) as { url?: string; sha256?: string } } catch { throw new Error(`${server} returned invalid JSON`) }
         // A regex check alone lets through parseable-garbage like "https://"
         // (no host), which would later crash publish.ts's `new URL(u.url)`
         // while building the server tags. Parse and require a real host.
@@ -147,11 +158,20 @@ export class BlossomClient {
         let parsedUrl: URL
         try { parsedUrl = new URL(json.url) } catch { throw new Error(`${server} returned invalid URL`) }
         if (parsedUrl.protocol !== 'https:' || !parsedUrl.hostname) throw new Error(`${server} returned invalid URL`)
+        if (json.sha256 && json.sha256.toLowerCase() !== hash) throw new Error(`${server} hash mismatch`)
         return { url: json.url, sha256: hash }
       }),
     )
     const out = results.filter((r): r is PromiseFulfilledResult<{ url: string; sha256: string }> => r.status === 'fulfilled').map((r) => r.value)
-    if (!out.length) throw new Error('No Blossom replica completed.')
+    if (!out.length) {
+      const aborted = signal?.aborted || results.some((r) => r.status === 'rejected' && isAbortError(r.reason))
+      if (aborted) {
+        const err = new Error('upload aborted')
+        err.name = 'AbortError'
+        throw err
+      }
+      throw new Error('No Blossom replica completed.')
+    }
     return out
   }
 }
@@ -167,13 +187,20 @@ async function putWithProgress(
   headers: Record<string, string>,
   timeoutMs: number,
   host?: string,
+  signal?: AbortSignal,
 ): Promise<{ ok: boolean; status: number; body: string }> {
   const xfer = transfers.track('up', blob.size, host)
+  const abortErr = (): Error => {
+    const err = new Error('upload aborted')
+    err.name = 'AbortError'
+    return err
+  }
+  if (signal?.aborted) { xfer.end(); throw abortErr() }
   if (typeof XMLHttpRequest === 'undefined') {
     try {
       const res = await fetch(url, {
         method: 'PUT', headers, body: blob, credentials: 'omit',
-        signal: AbortSignal.timeout(timeoutMs),
+        signal: mergeSignals(signal, timeoutMs),
       })
       xfer.advance(blob.size)
       return { ok: res.ok, status: res.status, body: await res.text() }
@@ -188,23 +215,38 @@ async function putWithProgress(
       for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v)
       let sent = 0
       xhr.upload.onprogress = (e) => {
-        // e.loaded is cumulative; the meter wants deltas
         xfer.advance(e.loaded - sent)
         sent = e.loaded
         if (e.lengthComputable && e.total > 0) xfer.setTotal(e.total)
       }
       xhr.onload = () => {
-        xfer.advance(blob.size - sent) // some agents skip the final progress event
+        xfer.advance(blob.size - sent)
         resolve({ ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status, body: xhr.responseText })
       }
       xhr.onerror = () => reject(new Error('upload network error'))
       xhr.ontimeout = () => reject(new Error('upload timed out'))
-      xhr.onabort = () => reject(new Error('upload aborted'))
+      xhr.onabort = () => reject(abortErr())
+      const onAbort = () => xhr.abort()
+      signal?.addEventListener('abort', onAbort, { once: true })
+      xhr.addEventListener('loadend', () => signal?.removeEventListener('abort', onAbort))
       xhr.send(blob)
     })
   } finally {
     xfer.end()
   }
+}
+
+/** Combine a caller abort with a timeout. `AbortSignal.any` is still patchy. */
+function mergeSignals(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal {
+  const timeout = AbortSignal.timeout(timeoutMs)
+  if (!signal) return timeout
+  if (typeof AbortSignal.any === 'function') return AbortSignal.any([signal, timeout])
+  const ctrl = new AbortController()
+  const abort = () => ctrl.abort()
+  if (signal.aborted || timeout.aborted) { ctrl.abort(); return ctrl.signal }
+  signal.addEventListener('abort', abort, { once: true })
+  timeout.addEventListener('abort', abort, { once: true })
+  return ctrl.signal
 }
 
 export { generateSecretKey }

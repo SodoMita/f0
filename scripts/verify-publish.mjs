@@ -164,6 +164,92 @@ await page.waitForFunction(() => window.__form0.index.byId.size >= 52, null, { t
   await page.screenshot({ path: 'shots/verify-publish.png' })
 }
 
+// -------------------------------------------- cancel mid-upload + hash hide
+{
+  await page.evaluate(() => { location.hash = '#/studio' })
+  await page.waitForFunction(() => window.__form0.engine.activeScene === window.__form0.studio.scene, null, { timeout: 10000 })
+  await page.evaluate(() => document.querySelector('[data-tab="type"]').click())
+  await page.waitForFunction(() => window.__form0.studio.hasContent(), null, { timeout: 20000 })
+
+  const cancelled = await page.evaluate(async () => {
+    const f = window.__form0
+    f.blossoms.upload = (_blob, _secret, signal) => new Promise((_resolve, reject) => {
+      const boom = () => {
+        const err = new Error('upload aborted')
+        err.name = 'AbortError'
+        reject(err)
+      }
+      if (signal?.aborted) { boom(); return }
+      signal?.addEventListener('abort', boom, { once: true })
+    })
+    document.querySelector('#btn-studio-publish').click()
+    await new Promise((r) => {
+      const t0 = performance.now()
+      const tick = () => {
+        if (document.getElementById('btn-studio-publish').textContent === 'cancel' || performance.now() - t0 > 4000) r()
+        else requestAnimationFrame(tick)
+      }
+      tick()
+    })
+    const labeled = document.getElementById('btn-studio-publish').textContent
+    const frozen = f.studio.isFrozen
+    document.querySelector('#btn-studio-publish').click()
+    await new Promise((r) => {
+      const t0 = performance.now()
+      const tick = () => {
+        if (document.getElementById('studio-status').textContent === 'cancelled' || performance.now() - t0 > 4000) r()
+        else requestAnimationFrame(tick)
+      }
+      tick()
+    })
+    return {
+      labeled,
+      frozen,
+      status: document.getElementById('studio-status').textContent,
+      publishing: f.isPublishing(),
+      stillFrozen: f.studio.isFrozen,
+      button: document.getElementById('btn-studio-publish').textContent,
+    }
+  })
+  check('publish button becomes cancel while uploading', cancelled.labeled === 'cancel' && cancelled.frozen,
+    JSON.stringify(cancelled))
+  check('cancel aborts the upload and unfreezes the studio',
+    cancelled.status === 'cancelled' && cancelled.publishing === false && cancelled.stillFrozen === false
+      && cancelled.button === 'publish',
+    JSON.stringify(cancelled))
+
+  const hidden = await page.evaluate(async () => {
+    const f = window.__form0
+    const good = [...f.index.byId.values()].find((m) => m.role === 'root' && m.urls?.length)
+    if (!good) return { ok: false, reason: 'no seed post' }
+    const bad = {
+      ...good,
+      eventId: 'ab'.repeat(32),
+      sha256: '00'.repeat(32),
+      thumbUrl: undefined,
+      thumbSha256: undefined,
+      hashFailed: false,
+      tombstoned: false,
+    }
+    f.index.add(bad)
+    const before = [...f.index.byId.values()].filter((m) => m.role === 'root' && !m.tombstoned && !m.hashFailed)
+      .some((m) => m.eventId === bad.eventId)
+    await f.assets.getModel(bad)
+    const after = [...f.index.byId.values()].filter((m) => m.role === 'root' && !m.tombstoned && !m.hashFailed)
+      .some((m) => m.eventId === bad.eventId)
+    return {
+      ok: true,
+      before,
+      after,
+      flagged: !!f.index.byId.get(bad.eventId)?.hashFailed,
+      cache: f.assets.isHashFailed(bad.eventId),
+    }
+  })
+  check('a wrong-hash model is hidden from the board',
+    hidden.ok && hidden.before && !hidden.after && hidden.flagged && hidden.cache,
+    JSON.stringify(hidden))
+}
+
 // -------------------------------------------------------------- summary
 console.log('--- page errors ---')
 for (const e of errors.slice(0, 10)) console.log('  ' + e)
