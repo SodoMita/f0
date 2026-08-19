@@ -265,6 +265,11 @@ async function boot(): Promise<void> {
       searchInput.select()
     }
   }
+  // NIP-50 fallback: after the instant local filter, also ask nostr.band for
+  // models we don't have yet (unloaded remote models). Debounced so a typed
+  // string doesn't fire a REQ per keystroke; superseded queries are dropped.
+  let searchTimer = 0
+  let searchToken = 0
   function setSearchQuery(q: string): void {
     q = q.trim()
     if (q === searchQuery) return
@@ -276,6 +281,16 @@ async function boot(): Promise<void> {
       ? `${total.length} model${total.length === 1 ? '' : 's'} shown for “${searchQuery}”`
       : 'Type to filter the board by model name.'
     refreshBoard()
+    clearTimeout(searchTimer)
+    const token = ++searchToken
+    if (searchQuery.length >= 3) {
+      searchTimer = window.setTimeout(() => {
+        if (token !== searchToken) return
+        pool.search(searchQuery)
+      }, 400)
+    } else {
+      pool.cancelSearch()
+    }
   }
   searchBtn.addEventListener('click', () => {
     if (searchOpen) { setSearchOpen(false); return }

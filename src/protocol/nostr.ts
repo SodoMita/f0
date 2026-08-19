@@ -26,6 +26,7 @@ export class RelayPool {
   private pings = new Map<string, number>()
   private events = new Map<string, number>()
   private changed = new Map<string, number>()
+  private searchSub: { close: () => void } | null = null
   state = new Map<string, RelayState>()
   onEvent: ((event: Event) => void) | null = null
   onState: ((url: string, state: RelayState) => void) | null = null
@@ -87,6 +88,66 @@ export class RelayPool {
   /** Ping every configured relay at once (network panel refresh). */
   async pingAll(): Promise<void> {
     await Promise.allSettled(this.urls.map((u) => this.ping(u)))
+  }
+
+  /**
+   * NIP-50 text search — the way to reach UNLOADED remote models (older than
+   * the live feed's 14-day / limit window, or never streamed at all).
+   *
+   * Relays implement `{ search }` on an opt-in basis; `wss://relay.nostr.band`
+   * (already a configured relay) is the one we target. Results are fed back
+   * through the normal `onEvent` pipeline, so matches land in the ThreadIndex
+   * and the board just renders them. Replaces any in-flight search REQ.
+   *
+   * Caveat: NIP-50 matches relay-defined text indexes (nostr.band indexes
+   * event content and several tags). FORM/0 model events carry empty content
+   * with the name in a `filename` tag, so match reliability depends on
+   * nostr.band's tag indexing — this is best-effort enrichment on top of the
+   * always-on local filter, never a guarantee.
+   */
+  search(query: string, timeoutMs = 8000): void {
+    this.cancelSearch()
+    const q = query.trim()
+    // nostr.band rejects / ignores very short queries; don't spam it.
+    if (q.length < 3) return
+    const url = 'wss://relay.nostr.band'
+    const relay = this.relays.get(url)
+    if (!relay || !relay.connected) return
+    let timer = 0
+    const close = () => {
+      if (timer) { clearTimeout(timer); timer = 0 }
+      if (this.searchSub === sub) this.searchSub = null
+      try { sub.close() } catch { /* already closed */ }
+    }
+    const sub = relay.subscribe(
+      [{ kinds: [MODEL_KIND], '#t': [FORM_ZERO_TAG], search: q, limit: 50 }],
+      {
+        onevent: (event) => {
+          if (event.kind !== MODEL_KIND) return
+          void verifyFreshAsync(event).then((ok) => {
+            if (!ok) return
+            this.events.set(url, (this.events.get(url) ?? 0) + 1)
+            this.onEvent?.(event)
+          })
+        },
+        oneose: () => {
+          if (this.searchSub === sub) this.searchSub = null
+          try { sub.close() } catch { /* already closed */ }
+        },
+        onclose: () => { if (timer) { clearTimeout(timer); timer = 0 } },
+      },
+    )
+    this.searchSub = sub
+    // Safety net: if a relay never sends EOSE, don't leave the REQ open.
+    timer = window.setTimeout(close, timeoutMs)
+  }
+
+  /** Abort any in-flight NIP-50 search REQ (query cleared / superseded). */
+  cancelSearch(): void {
+    if (this.searchSub) {
+      try { this.searchSub.close() } catch { /* already closed */ }
+      this.searchSub = null
+    }
   }
 
   connect(): void {
