@@ -6,7 +6,7 @@ move it to **Done** with a commit reference. One agent per area.
 ## Done
 
 - [x] **Descriptive per-server network status: ping + per-server speeds**
-      (agent arena, 2026-08-18, SPEC AMENDMENT 56): network-panel rows now
+      (agent arena, 2026-08-18, SPEC AMENDMENT 57): network-panel rows now
       show a worded status (`connected` / `connecting…` / `offline · retry N`
       / `not probed` / `probing…` / `reachable` / `unreachable`), a bucketed
       round-trip ping (relay REQ->EOSE on the live socket, Blossom HEAD with
@@ -22,7 +22,7 @@ move it to **Done** with a commit reference. One agent per area.
       orient, perf (idleBoard still 0 rps).
 
 - [x] **Network panel closes back to the current page** (agent arena,
-      2026-08-18, SPEC AMENDMENT 55): `#/network` no longer forces
+      2026-08-18, SPEC AMENDMENT 56): `#/network` no longer forces
       `setMode('board')`, so the panel draws over the viewer / thread /
       studio instead of destroying them, and closing it (X, Escape, route
       callback) returns to the route it was opened from. The return path only
@@ -32,7 +32,7 @@ move it to **Done** with a commit reference. One agent per area.
       verify-publish, transfer, interact, settings, smoke, features, orient.
 
 - [x] **Network button hit target + live download/upload speeds**
-      (agent arena, 2026-08-18, SPEC AMENDMENT 54):
+      (agent arena, 2026-08-18, SPEC AMENDMENT 55):
       - The topbar network control is a real 42x42 button (was an 8x8 dot —
         ~1/24th of the recommended touch target). The state dot is now a
         `::before` tinted via `--dot`; hover/active/focus affordances added.
@@ -410,23 +410,19 @@ move it to **Done** with a commit reference. One agent per area.
   pushes to `main`.
 ## In progress
 
-
-
-
-
-
-
-
-
-- [ ] Studio: import GLB only. Publish (BUD-01) + audio embed + ownership are
-      **not** implemented (`studio/studio.ts` is a stub).
-
+- [ ] **Paint editor (hand-writing ink)** — claimed by agent arena, 2026-08-19.
+      Rebased onto main (PR #12: preview width / viewer hand-off / zoom
+      RTTs / typing guard). SPEC AMENDMENT 54.
+      SPEC 05 Part B + AMENDMENT 10. Primary use case = writing letterforms
+      with a pen-like brush (pressure, coalesced events, smoothing, eraser,
+      undo ≥100). Packed Float32Array store + thin instances + spatial hash
+      + Amanatides–Woo DDA. Not a voxel editor.
 
 ## Next (priority order — pick one and claim it)
 
 **Editor core (the product's primary use cases — do these first):**
 
-- [ ] **Paint editor, primary = hand-writing text** (Paint 3D ink style; NOT a
+- [ ] ~~**Paint editor, primary = hand-writing text**~~ claimed above (Paint 3D ink style; NOT a
       voxel editor — free overlapping shape strokes, fine grid only for
       snapping; spec 05 Part B + AMENDMENT 10). The brush must feel like a pen:
       `PointerEvent.pressure`→width/alpha, `getCoalescedEvents()`, path
@@ -476,7 +472,9 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Known gaps / debt
 
-- Studio scene is an import stub; no editor tooling.
+- Paint editor: box/lasso + GPUPicker solid/x-ray selection, per-stamp
+  BoundingBoxGizmo transforms, and 5-mode visibility are still open.
+  Ink / erase / undo / export work.
 - Poster/preview pool renders share one scene (serialized by a mutex) — fine
   for now, but per-slot isolation is on the roadmap (spec 03 §5).
 - No service worker / offline caching beyond IndexedDB poster cache.

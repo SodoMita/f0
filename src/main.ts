@@ -29,6 +29,7 @@ import { ErrorSheet, ERRORS } from './hud/errorSheet'
 import { attachAllDragNumbers } from './studio/dragNumber'
 import { transfers, formatRate, formatBytes, formatDirStats, type TransferStats } from './core/transfer'
 import { handoffContainer } from './core/sceneTransfer'
+import { bindPaintHud } from './studio/paintHud'
 
 type Mode = 'boot' | 'board' | 'viewer' | 'studio' | 'thread'
 
@@ -327,12 +328,14 @@ async function boot(): Promise<void> {
     document.querySelectorAll<HTMLElement>('.studio-panel').forEach((p) => {
       p.hidden = p.dataset.panel !== tab
     })
+    studio.setPaintMode(tab === 'paint')
     if (tab === 'type' && !studio.text) {
       studio.setText('/0'); studio.rebuildText()
       // seeding text IS content: publish must enable (it only listened to
       // the textarea's input event, so the seeded '/0' left it dead)
       btnStudioPublish.disabled = !studio.hasContent()
     }
+    if (tab === 'paint') btnStudioPublish.disabled = !studio.hasContent()
     studio.kick(120)
   }
   document.querySelectorAll<HTMLButtonElement>('.rail-btn').forEach((b) =>
@@ -569,6 +572,11 @@ async function boot(): Promise<void> {
 
   // make all number inputs draggable (Blender-like)
   attachAllDragNumbers(document.body)
+
+  const paintHud = bindPaintHud(studio, () => {
+    btnStudioPublish.disabled = !studio.hasContent()
+  })
+  void paintHud
 
   $('btn-close').addEventListener('click', () => router.go({ name: 'board' }))
   $('btn-prev').addEventListener('click', () => void stepViewer(-1))
@@ -1052,24 +1060,30 @@ async function boot(): Promise<void> {
       return
     }
     if (mode === 'studio') {
-      const tag = (document.activeElement?.tagName || '').toUpperCase()
-      const isInput = tag === 'INPUT' || tag === 'TEXTAREA'
-      if (!isInput) {
-        if (e.key === 'w' || e.key === 'W') {
-          studio.setTransformMode('position')
-          document.querySelectorAll<HTMLButtonElement>('[data-xform]').forEach((x) => x.classList.toggle('active', x.dataset.xform === 'position'))
-        } else if (e.key === 'e' || e.key === 'E') {
-          studio.setTransformMode('rotation')
-          document.querySelectorAll<HTMLButtonElement>('[data-xform]').forEach((x) => x.classList.toggle('active', x.dataset.xform === 'rotation'))
-        } else if (e.key === 'r' || e.key === 'R') {
-          studio.setTransformMode('scale')
-          document.querySelectorAll<HTMLButtonElement>('[data-xform]').forEach((x) => x.classList.toggle('active', x.dataset.xform === 'scale'))
-        } else if (e.key === 'Delete' || e.key === 'Backspace') {
-          studio.deleteSelection()
-        } else if (e.key === 'Escape') {
-          if (studio.selected) studio.select(null)
-          else router.go({ name: 'board' })
-        }
+      // Global typing guard already returned for INPUT/TEXTAREA (AMEND 53).
+      if (studio.isPaintMode) {
+        if ((e.key === 'z' || e.key === 'Z') && (e.ctrlKey || e.metaKey) && e.shiftKey) { studio.paint.redo(); e.preventDefault(); return }
+        if ((e.key === 'z' || e.key === 'Z') && (e.ctrlKey || e.metaKey)) { studio.paint.undo(); e.preventDefault(); return }
+        if (e.key === 'y' && (e.ctrlKey || e.metaKey)) { studio.paint.redo(); e.preventDefault(); return }
+        if (e.key === 'z' || e.key === 'Z') { e.shiftKey ? studio.paint.redo() : studio.paint.undo(); e.preventDefault(); return }
+        if (e.key === 'b' || e.key === 'B') { studio.paint.setTool('brush'); return }
+        if (e.key === 'x' || e.key === 'X') { studio.paint.setTool('eraser'); return }
+        if (e.key === 'v' || e.key === 'V') { studio.paint.setTool('select'); return }
+      }
+      if (e.key === 'w' || e.key === 'W') {
+        studio.setTransformMode('position')
+        document.querySelectorAll<HTMLButtonElement>('[data-xform]').forEach((x) => x.classList.toggle('active', x.dataset.xform === 'position'))
+      } else if (e.key === 'e' || e.key === 'E') {
+        studio.setTransformMode('rotation')
+        document.querySelectorAll<HTMLButtonElement>('[data-xform]').forEach((x) => x.classList.toggle('active', x.dataset.xform === 'rotation'))
+      } else if (e.key === 'r' || e.key === 'R') {
+        studio.setTransformMode('scale')
+        document.querySelectorAll<HTMLButtonElement>('[data-xform]').forEach((x) => x.classList.toggle('active', x.dataset.xform === 'scale'))
+      } else if (e.key === 'Delete' || e.key === 'Backspace') {
+        studio.deleteSelection()
+      } else if (e.key === 'Escape') {
+        if (studio.selected) studio.select(null)
+        else router.go({ name: 'board' })
       }
       return
     }

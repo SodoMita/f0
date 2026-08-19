@@ -1168,6 +1168,17 @@ textarea#studio-text:focus { outline: none; border-color: var(--accent); }
 .align-row { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
 .align-row .hbtn.small { width: 32px; height: 32px; }
 
+.paint-tools, .paint-shapes {
+  display: flex; flex-wrap: wrap; gap: 4px;
+}
+.paint-toggles { flex-wrap: wrap; }
+.paint-toggles .hbtn.small {
+  width: auto; min-width: 36px; padding: 0 8px; font-size: 10px;
+}
+.paint-toggles .hbtn.small.active,
+.paint-shapes .tool-btn.active { background: var(--accent); color: #1a0e0a; }
+#paint-color { width: 40px; height: 32px; padding: 0; border: 1px solid var(--line); border-radius: 8px; background: transparent; }
+
 @media (max-width: 720px) {
   .studio { inset: 58px 8px 8px; }
   .num-grid { grid-template-columns: repeat(2,1fr); }

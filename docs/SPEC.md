@@ -503,7 +503,28 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     (model prev/next) and the thread map's 0/+/-/Escape fired while the
     user was editing a settings input (e.g. typing the preview width),
     switching models under the caret.
-54. NETWORK BUTTON + LIVE TRANSFER STATUS (2026-08-18):
+
+54. PAINT EDITOR (2026-08-19). Studio paint tab is the hand-writing ink
+    tool (AMENDMENT 10), not a voxel editor. Implementation notes that
+    later agents must not "clean up":
+    - Packed Float32Array store + swap-last delete; spatial hash on GRID
+      0.05; Amanatides–Woo DDA for eraser traversal. Stamps overlap —
+      never dedupe by cell.
+    - Native pointer events on the canvas (getCoalescedEvents, pressure,
+      setPointerCapture). Babylon's pointer observable does not expose
+      coalesced sub-frame points. Left button paints; right/middle orbit
+      (`camera.inputs.attached.pointers.buttons = [1,2]` while painting).
+    - Depth-lock: the first hit of a stroke freezes the writing plane
+      (default XY / z=0 facing +Z, matching the studio orbit). Surface
+      mode raycasts existing meshes and offsets by the hit normal.
+    - Thin instances are display-only. GLTF2Export does not expand them,
+      so publish bakes each shape into a real mesh (vertex colours) and
+      excludes `studio-paint-*` helpers from shouldExportNode.
+    - Undo is inverse commands (add/remove stamp snapshots), cap 100,
+      redo tail cleared on new edits. Guard: `bun scripts/paint-unit.mjs`.
+    - Studio paint hotkeys (Z/B/X/V) run only after AMENDMENT 53's typing
+      guard, so they never steal keys from settings / the text textarea.
+55. NETWORK BUTTON + LIVE TRANSFER STATUS (2026-08-18):
     - The network control in the topbar is a **42x42 button** (the same size
       as every other HUD control, 10px gap => WCAG 2.5.5 target size), with
       the relay-state dot drawn as a `::before` pseudo-element tinted through
@@ -544,7 +565,7 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
       and the upload readouts) plus the existing offline-verify (39) and
       verify-publish (7, exercising the new XHR upload path) suites.
 
-55. THE NETWORK PANEL IS AN OVERLAY, NOT A PAGE (2026-08-18):
+56. THE NETWORK PANEL IS AN OVERLAY, NOT A PAGE (2026-08-18):
     Opening `#/network` used to run `setMode('board')`, so tapping the network
     button from the viewer, the thread map or the studio tore that view down;
     closing the panel then always landed on the board (and re-entering the
@@ -567,7 +588,7 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
       the close button, a cold `#/network` load closes to the board, and
       navigating away while open still closes the panel.
 
-56. DESCRIPTIVE PER-SERVER NETWORK STATUS (2026-08-18):
+57. DESCRIPTIVE PER-SERVER NETWORK STATUS (2026-08-18):
     A row in the network panel was a coloured dot and a hostname; it could
     not answer "is this relay actually doing anything for me". Each row is
     now two lines — host, then status / ping / throughput:

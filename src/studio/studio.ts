@@ -39,6 +39,7 @@ function normalizeYaw(deg: number): number {
 }
 
 import { buildTextMesh, type TextMeshResult } from './textTool'
+import { PaintSession } from './paint/session'
 import { importModelFiles } from '../model/importSidecar'
 import { UtilityLayerRenderer } from '@babylonjs/core/Rendering/utilityLayerRenderer'
 import { GizmoManager } from '@babylonjs/core/Gizmos/gizmoManager'
@@ -77,6 +78,8 @@ export class Studio {
   private gizmos: GizmoManager
   private selection: AbstractMesh | null = null
   private freeCam: FreeCamera | null = null
+  readonly paint: PaintSession
+  private paintMode = false
 
   // ---- user added cameras (publishable) ----
   private storedCameras: CameraState[] = []
@@ -110,9 +113,12 @@ export class Studio {
     this.gizmos.scaleGizmoEnabled = true
     this.gizmos.usePointerToAttachGizmos = false
     ;(this.gizmos as any).onAttachedToMeshObservable?.add((m: AbstractMesh | null) => { if (m) this.kick(2000) })
+    this.paint = new PaintSession(this.scene, (ms) => this.kick(ms), () => this.scene.activeCamera ?? this.camera)
     // Tap a mesh to select it; tap empty space to deselect.
+    // Paint mode owns the left button (ink / erase / pick) — don't steal taps.
     this.scene.onPointerObservable.add((info) => {
       if (info.type !== PointerEventTypes.POINTERTAP) return
+      if (this.paintMode) return
       const picked = info.pickInfo?.pickedMesh ?? null
       this.select(picked && this.isEditable(picked) ? picked : null)
     })
@@ -127,6 +133,7 @@ export class Studio {
   isAnimating(): boolean {
     // Pointer input already kicks frames while a gizmo is dragged; merely
     // having a selected mesh must not latch the demand loop on forever.
+    if (this.paint.isStroking()) return true
     if (this.scene.activeCamera !== this.camera) return false
     return Math.abs(this.camera.inertialAlphaOffset) > 1e-5
       || Math.abs(this.camera.inertialBetaOffset) > 1e-5
@@ -143,15 +150,36 @@ export class Studio {
   attach(): void {
     if (this.freeCam) this.freeCam.attachControl(true, false)
     else this.camera.attachControl(true)
+    const canvas = this.form.engine.getRenderingCanvas()
+    if (canvas) this.paint.attach(canvas)
+    this.applyOrbitButtons()
   }
   detach(): void {
     this.camera.detachControl()
     this.freeCam?.detachControl()
+    this.paint.setActive(false)
+    this.paint.detach()
+  }
+
+  /** Enable the ink tool: left-drag writes, right/middle still orbit. */
+  setPaintMode(on: boolean): void {
+    this.paintMode = on
+    this.paint.setActive(on)
+    this.applyOrbitButtons()
+    this.kick(200)
+  }
+
+  get isPaintMode(): boolean { return this.paintMode }
+
+  private applyOrbitButtons(): void {
+    const ptr = this.camera.inputs?.attached?.pointers as { buttons?: number[] } | undefined
+    if (ptr) ptr.buttons = this.paintMode ? [1, 2] : [0, 1, 2]
   }
 
   private isEditable(m: AbstractMesh): boolean {
     // The root __root__ container and gizmo-layer meshes are not selectable.
     if (m.name === '__root__') return false
+    if (m.name.startsWith('studio-paint')) return false
     if (m.getScene() !== this.scene) return false
     return true
   }
@@ -172,6 +200,7 @@ export class Studio {
 
   /** Delete the currently selected mesh (text or part of an imported model). */
   deleteSelection(): void {
+    if (this.paint.deleteSelection()) return
     if (!this.selection) return
     const m = this.selection
     this.select(null)
@@ -209,7 +238,9 @@ export class Studio {
   get currentModel(): ImportedModel | null { return this.imported }
 
   hasModel(): boolean { return this.imported !== null }
-  hasContent(): boolean { return this.imported !== null || this.textValue.trim().length > 0 }
+  hasContent(): boolean {
+    return this.imported !== null || this.textValue.trim().length > 0 || this.paint.count > 0
+  }
 
   /** Clear the current preview so a new import does not stack meshes. */
   clearModel(): void {
@@ -227,6 +258,7 @@ export class Studio {
     }
     this.clearCameras()
     this.imported = null
+    this.paint.clear()
   }
 
   // ---- typed text tool (SPEC TEXT+ANIM: flat low-poly geometry) ----
@@ -391,6 +423,7 @@ export class Studio {
     }
     if (this.container) return this.container.meshes.filter((m) => m.name !== '__root__')
     if (this.textMesh) return [this.textMesh.mesh]
+    if (this.paint.count > 0) return this.paint.sourceMeshes().filter((m) => m.thinInstanceCount > 0)
     return []
   }
 
@@ -629,7 +662,9 @@ export class Studio {
    */
   async getContentForPublish(): Promise<{ blob: Blob; filename: string; sourceFormat: 'glb' | 'gltf' | 'obj' | 'generated' }> {
     const hasUserCams = this.storedCameras.length > 0
-    if (this.imported && !hasUserCams) {
+    const hasPaint = this.paint.count > 0
+    // Pass-through only when the published bytes are still the imported GLB.
+    if (this.imported && !hasUserCams && !hasPaint) {
       return {
         blob: this.imported.file,
         filename: this.imported.file.name,
@@ -654,12 +689,16 @@ export class Studio {
         exportableMeshes.add(m)
       }
     }
+    // Thin-instance sources must not export (unit mesh at origin). Bake first.
+    const baked = hasPaint ? this.paint.bake() : []
+    for (const m of baked) exportableMeshes.add(m)
     const exportableCams = new Set<any>(this.storedCameraNodes)
     // include original imported cameras if we have a container (they are already in scene)
     const originalCams: any[] = this.container ? (this.container as any).cameras ?? [] : []
     for (const c of originalCams) exportableCams.add(c)
 
     const shouldExportNode = (n: any): boolean => {
+      if (typeof n?.name === 'string' && n.name.startsWith('studio-paint')) return false
       if (exportableMeshes.has(n)) return true
       if (exportableCams.has(n)) return true
       // also keep transform nodes that are parents of exportable meshes/cameras
@@ -680,6 +719,7 @@ export class Studio {
 
   dispose(): void {
     this.clearModel()
+    this.paint.dispose()
     this.gizmos.dispose()
     this.gizmoLayer.dispose()
     if (this.freeCam) { this.freeCam.dispose(); this.freeCam = null }
