@@ -741,6 +741,55 @@ body[data-theme="light"] .net-item { background: rgba(0, 0, 0, 0.04); border-col
 body[data-theme="light"] .net-add input { background: rgba(0, 0, 0, 0.04); border-color: rgba(0, 0, 0, 0.14); }
 body[data-theme="light"] .net-btn { background: rgba(0, 0, 0, 0.05); border-color: rgba(0, 0, 0, 0.14); }
 
+/* ---------- search menu ---------- */
+#search-panel {
+  top: 68px; left: 50%; transform: translateX(-50%);
+  width: min(360px, calc(100vw - 32px));
+  display: flex; flex-direction: column; gap: 12px;
+  background: rgba(15, 15, 19, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 16px;
+  padding: 14px 16px 16px;
+  pointer-events: auto;
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  z-index: 30;
+}
+#search-panel .drawer-head { margin-bottom: 0; }
+.search-field {
+  display: flex; align-items: center; gap: 9px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 11px;
+  padding: 0 11px;
+}
+.search-field svg {
+  flex: 0 0 auto; width: 15px; height: 15px;
+  fill: none; stroke: var(--muted); stroke-width: 1.8;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+.search-field input {
+  flex: 1; min-width: 0;
+  background: transparent; border: none; outline: none;
+  padding: 10px 0; font: inherit; font-size: 13px; color: var(--ink);
+}
+.search-field input::placeholder { color: var(--muted); }
+.search-field:focus-within { border-color: var(--accent); }
+.search-field:focus-within svg { stroke: var(--accent); }
+.search-hint { margin: 0; font: 10.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); }
+/* Active (filtering) search button: the accent border marks that the board
+   is filtered, not just that the menu is open. */
+#btn-search.active {
+  background: rgba(255, 92, 53, 0.16);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+body[data-theme="light"] #search-panel { background: rgba(252, 252, 254, 0.96); border-color: rgba(0, 0, 0, 0.10); }
+body[data-theme="light"] .search-field { background: rgba(0, 0, 0, 0.05); border-color: rgba(0, 0, 0, 0.14); }
+body[data-theme="light"] .search-field:focus-within { border-color: var(--accent); }
+body[data-theme="light"] .search-field svg { stroke: var(--muted); }
+body[data-theme="light"] .search-field:focus-within svg { stroke: var(--accent); }
+
 /* ---------- error sheet (kestrel) ---------- */
 #error-sheet {
   left: 50%; bottom: 0; transform: translateX(-50%);
