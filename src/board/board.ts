@@ -1067,25 +1067,4 @@ export class Board {
     this.scene.dispose()
   }
 }
-erHeight()
-    this.aspect = w / Math.max(1, h)
-    this.halfH = 20
-    const cssH = h * eng.getHardwareScalingLevel()
-    this.pxPerUnit = cssH / (2 * this.halfH)
-    this.camera.orthoTop = this.halfH
-    this.camera.orthoBottom = -this.halfH
-    this.camera.orthoLeft = -this.halfH * this.aspect
-    this.camera.orthoRight = this.halfH * this.aspect
-    this.backdrop.scaling.set((this.halfH * this.aspect * 2 + 1) / 4, (this.halfH * 2 + 1) / 4, 1)
-    this.backdrop.position.set(0, 0, 2)
-    this.layout()
-  }
 
-  dispose(): void {
-    for (const c of this.cards) this.release(c)
-    for (const l of this.seps) l.dispose()
-    this.seps = []
-    this.previewPool.dispose()
-    this.scene.dispose()
-  }
-}

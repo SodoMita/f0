@@ -27,8 +27,8 @@ interface Job { meta: ThreadMeta; resolve: (tex: Texture | undefined) => void }
 
 export class AssetCache {
   private posterTex = new Map<string, Texture>()
-  private modelBlobs = new Map<string, Blob>() // insertion order == LRU order
-  private modelInflight = new Map<string, Promise<Blob | undefined>>()
+  private modelBlobs = new Map<string, Blob>() // keyed by sha256; insertion order == LRU order
+  private modelInflight = new Map<string, Promise<Blob | undefined>>() // keyed by sha256
   private modelBytes = new Map<string, Uint8Array>() // insertion order == LRU
   private byPostId = new Map<string, ThreadMeta>()
   private animatedBySha = new Map<string, boolean>()
@@ -53,7 +53,7 @@ export class AssetCache {
     this.hashFailed.add(meta.eventId)
     this.posterTex.get(meta.eventId)?.dispose()
     this.posterTex.delete(meta.eventId)
-    this.modelBlobs.delete(meta.eventId)
+    this.modelBlobs.delete(meta.sha256)
     this.modelBytes.delete(meta.sha256)
     this.onHashFailed?.(meta)
   }
@@ -315,30 +315,57 @@ export class AssetCache {
 
   async getModel(meta: ThreadMeta): Promise<Blob | undefined> {
     this.byPostId.set(meta.eventId, meta)
-    const hit = this.modelBlobs.get(meta.eventId)
+    // Key the RAM blob cache and the in-flight dedup by the CONTENT hash
+    // (sha256), not by eventId. Two posts that embed the same GLB are the
+    // same bytes: keying by eventId downloaded/held one blob per post, so a
+    // board full of reposts (or a poster render racing its own preview) hit
+    // the network once per post instead of once per model.
+    const hit = this.modelBlobs.get(meta.sha256)
     if (hit) {
       // refresh LRU position
-      this.modelBlobs.delete(meta.eventId)
-      this.modelBlobs.set(meta.eventId, hit)
+      this.modelBlobs.delete(meta.sha256)
+      this.modelBlobs.set(meta.sha256, hit)
       return hit
     }
-    const inflight = this.modelInflight.get(meta.eventId)
+    const inflight = this.modelInflight.get(meta.sha256)
     if (inflight) return inflight
     const job = (async () => {
       try {
         const cached = await get<Blob>('modelCache', meta.sha256)
-        const blob = cached ?? await this.blossoms.download(meta.urls, meta.sha256, meta.size)
-        if (!cached) void put('modelCache', meta.sha256, blob)
-        this.modelBlobs.set(meta.eventId, blob)
+        if (cached) {
+          // Cached bytes must still match the event `x` tag: a poisoned
+          // IndexedDB entry (torn upload, pre-hash-check build) must not
+          // render. Drop it and flag the post so the board hides the card.
+          if (!(await blobMatchesHash(cached, meta.sha256))) {
+            await del('modelCache', meta.sha256)
+            this.failHash(meta)
+            return undefined
+          }
+          this.modelBlobs.set(meta.sha256, cached)
+          this.evictModels()
+          return cached
+        }
+        let blob: Blob
+        try {
+          blob = await this.blossoms.download(meta.urls, meta.sha256, meta.size)
+        } catch (err) {
+          // A hash mismatch is permanent for this post (hide the card); a
+          // network failure is not — the caller may retry, so only the
+          // mismatch is recorded.
+          if (isHashMismatch(err)) this.failHash(meta)
+          throw err
+        }
+        void put('modelCache', meta.sha256, blob)
+        this.modelBlobs.set(meta.sha256, blob)
         this.evictModels()
         return blob
       } catch {
         return undefined
       } finally {
-        this.modelInflight.delete(meta.eventId)
+        this.modelInflight.delete(meta.sha256)
       }
     })()
-    this.modelInflight.set(meta.eventId, job)
+    this.modelInflight.set(meta.sha256, job)
     return job
   }
 

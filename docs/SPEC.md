@@ -656,3 +656,34 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
       fail (`HashMismatchError` is distinct from "no replica").
     - Guard: `node --experimental-strip-types scripts/publish-unit.mjs`
       plus the cancel + wrong-hash cases in `scripts/verify-publish.mjs`.
+
+59. MODEL CACHE IS KEYED BY CONTENT, NOT POST (2026-08-19):
+    `AssetCache.getModel()` keyed its in-RAM blob cache and its in-flight
+    dedup map by `eventId`. A model is the same bytes no matter how many
+    posts embed it (reposts, replies reusing a GLB, or a poster render racing
+    a live preview), so the same file was fetched once PER POST: a board of
+    N posts sharing one GLB issued N downloads of the identical bytes.
+    Both maps are now keyed by `sha256` (matching the already-content-keyed
+    `modelBytes` and IndexedDB `modelCache`), so one model = one download,
+    one decoded `Uint8Array`, one blob. `failHash()` drops the poisoned blob
+    by sha256 too. Verified with the offline rig: 17 concurrent
+    `getModelBytes()` calls for one sha256 now produce a single
+    `/models/*.glb` request (previously 17).
+
+60. BUILD FIX — PR #13 SHIPPED A DUPLICATED board.ts TAIL (2026-08-19):
+    The board-tap change left the `Board` class followed by a mangled
+    duplicate of the `resize()` tail (`erHeight()` — the `getRend` prefix of
+    `getRenderHeight()` lost) plus a second `dispose()`, so `tsc --noEmit`
+    and `build:standalone` both failed and the Pages deploy went red. The
+    duplicated fragment is removed; the file now ends at the single
+    `dispose()` + class brace.
+
+61. HASH-FAILURE WIRING COMPLETED (2026-08-19):
+    AMENDMENT 58 added the plumbing (`failHash`, `hashFailed`,
+    `onHashFailed`, and the `del` / `blobMatchesHash` / `isHashMismatch`
+    helpers) but `getModel()` never called `failHash`, so wrong-hash models
+    still rendered on the board and `scripts/verify-publish.mjs` failed.
+    `getModel()` now re-verifies an IndexedDB cache hit
+    (`blobMatchesHash` → `del` + `failHash`) and records a download
+    `HashMismatchError` via `failHash`; a network failure stays retryable
+    (no flag).

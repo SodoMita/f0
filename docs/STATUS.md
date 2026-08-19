@@ -13,6 +13,29 @@ move it to **Done** with a commit reference. One agent per area.
       the board. Guard: `scripts/publish-unit.mjs` + verify-publish cancel
       / wrong-hash cases.
 
+- [x] **Model cache keyed by content, not post** (agent arena, 2026-08-19,
+      SPEC AMENDMENT 59): `AssetCache.getModel()` cached downloads and
+      in-flight dedup by `eventId`, so the same GLB embedded in several posts
+      (or a poster render racing a preview) was downloaded once per post.
+      Switched both maps to key by `sha256` — one model, one download.
+      Verified on the offline rig (17 concurrent same-sha requests → one
+      `/models/*.glb` fetch) plus smoke, transfer, features and shaders.
+
+- [x] **Build fix: duplicated board.ts tail from PR #13** (agent arena,
+      2026-08-19, SPEC AMENDMENT 60): the board-tap change left a mangled
+      duplicate of the `resize()` tail + a second `dispose()` after the
+      `Board` class closed, breaking `tsc --noEmit` and the Pages deploy.
+      Removed the duplicated fragment; board.ts ends at the single
+      `dispose()` + class brace.
+
+- [x] **Hash-failure wiring completed** (agent arena, 2026-08-19, SPEC
+      AMENDMENT 61): AMENDMENT 58's `failHash`/`hashFailed`/`onHashFailed`
+      plumbing was never called from `getModel()`, so wrong-hash models
+      still rendered and `verify-publish` failed. `getModel()` now
+      re-verifies IndexedDB cache hits and records download hash
+      mismatches; network failures stay retryable. `scripts/verify-publish.mjs`
+      is green again (wrong-hash card hidden, flagged + cache both true).
+
 - [x] **Descriptive per-server network status: ping + per-server speeds**
       (agent arena, 2026-08-18, SPEC AMENDMENT 57): network-panel rows now
       show a worded status (`connected` / `connecting…` / `offline · retry N`

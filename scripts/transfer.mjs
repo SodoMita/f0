@@ -228,6 +228,44 @@ async function boot(page) {
   await page.close()
 }
 
+// ----------------------------------------- one model = one download (dedup)
+{
+  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
+  await boot(page)
+  await page.waitForFunction(() => window.__form0.board?.rows?.length > 0, null, { timeout: 40000 })
+  const group = await page.evaluate(async () => {
+    const f = window.__form0
+    f.assets.setPaused(true) // hold poster renders out of the measurement window
+    const bySha = new Map()
+    for (const m of f.index.byId.values()) {
+      if (!bySha.has(m.sha256)) bySha.set(m.sha256, [])
+      bySha.get(m.sha256).push(m)
+    }
+    for (const arr of bySha.values()) {
+      if (arr.length >= 2) return { sha256: arr[0].sha256, url: arr[0].urls[0], n: arr.length }
+    }
+    return null
+  })
+  check('rig has posts sharing one model (dedup premise)', !!group && group.n >= 2, group && `n=${group.n}`)
+  if (group) {
+    await page.waitForTimeout(2000) // let any in-flight poster download settle
+    await page.evaluate(() => window.__form0.assets.clearCaches())
+    let modelReqs = 0
+    const onReq = (r) => { if (r.url() === group.url) modelReqs++ }
+    page.on('request', onReq)
+    await page.evaluate(async (sha) => {
+      const f = window.__form0
+      const metas = [...f.index.byId.values()].filter((m) => m.sha256 === sha)
+      await Promise.all(metas.map((m) => f.assets.getModel(m)))
+    }, group.sha256)
+    await page.waitForTimeout(300)
+    page.off('request', onReq)
+    check('N posts sharing one model download it exactly once',
+      modelReqs === 1, `${modelReqs} request(s) for ${group.n} posts`)
+  }
+  await page.close()
+}
+
 await browser.close()
 console.log(fails.length ? `\n${fails.length} FAILED: ${fails.join(', ')}` : '\nall transfer checks passed')
 process.exit(fails.length ? 1 : 0)
