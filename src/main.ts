@@ -87,6 +87,7 @@ async function boot(): Promise<void> {
 
   // ---------- HTML HUD ----------
   const topbar = $('topbar')
+  const threadZoom = $('thread-zoom')
   const viewerBar = $('viewer-bar')
   const drawer = $('meta-drawer')
   const studioEl = $('studio')
@@ -677,6 +678,9 @@ async function boot(): Promise<void> {
   navigator.mediaDevices?.addEventListener?.('devicechange', () => void mixer.refreshDevices())
 
   $('btn-settings').addEventListener('click', () => settingsPanel.toggle())
+  $('btn-tzoom-in').addEventListener('click', () => threadView.zoomBy(1.25))
+  $('btn-tzoom-out').addEventListener('click', () => threadView.zoomBy(1 / 1.25))
+  $('btn-tfit').addEventListener('click', () => threadView.fit())
 
   function syncPlay(): void {
     btnPlay.classList.toggle('playing', viewer.isPlaying())
@@ -760,6 +764,7 @@ async function boot(): Promise<void> {
       viewer.clear()
     }
     studioEl.hidden = next !== 'studio'
+    threadZoom.hidden = next !== 'thread'
     if (next === 'board') {
       engine.setActiveScene(board.scene)
       topbar.hidden = false
@@ -945,9 +950,18 @@ async function boot(): Promise<void> {
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && errorSheet.isOpen) { errorSheet.hide(); return }
     if (e.key === 'Escape' && networkPanel.isOpen) { networkPanel.close(); return }
+    // Typing guard: while focus is in an editable control (settings inputs,
+    // the studio textarea, a search box…), game hotkeys must NOT fire —
+    // arrow keys were switching models while the user edited the preview
+    // width in settings. The editable control handles its own keys.
+    const target = e.target as HTMLElement | null
+    const tag = (target?.tagName ?? '').toUpperCase()
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable === true) return
     if (mode === 'thread') {
       if (e.key === 'Escape') router.go({ name: 'board' })
       if (e.key === '0') threadView.fit()
+      if (e.key === '+' || e.key === '=') threadView.zoomBy(1.25)
+      if (e.key === '-' || e.key === '_') threadView.zoomBy(1 / 1.25)
       return
     }
     if (mode === 'studio') {

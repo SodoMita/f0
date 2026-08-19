@@ -59,6 +59,19 @@ html, body {
 }
 #topbar .spacer { flex: 1; }
 
+/* thread map zoom cluster — shown only while the thread view is active */
+#thread-zoom {
+  display: flex; align-items: center; gap: 6px;
+  padding: 0 6px;
+  pointer-events: auto;
+  background: var(--glass);
+  border: 1px solid var(--glass-line);
+  border-radius: 12px;
+}
+#thread-zoom .hbtn { background: transparent; border: none; }
+#thread-zoom .hbtn:hover { background: rgba(255, 255, 255, 0.10); }
+body[data-theme="light"] #thread-zoom .hbtn:hover { background: rgba(0, 0, 0, 0.07); }
+
 /* ---------- brand ---------- */
 .brand {
   pointer-events: none;
