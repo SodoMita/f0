@@ -28,6 +28,7 @@ import { NetworkPanel } from './hud/networkPanel'
 import { ErrorSheet, ERRORS } from './hud/errorSheet'
 import { attachAllDragNumbers } from './studio/dragNumber'
 import { transfers, formatRate, formatBytes, formatDirStats, type TransferStats } from './core/transfer'
+import { handoffContainer } from './core/sceneTransfer'
 
 type Mode = 'boot' | 'board' | 'viewer' | 'studio' | 'thread'
 
@@ -87,6 +88,7 @@ async function boot(): Promise<void> {
 
   // ---------- HTML HUD ----------
   const topbar = $('topbar')
+  const threadZoom = $('thread-zoom')
   const viewerBar = $('viewer-bar')
   const drawer = $('meta-drawer')
   const studioEl = $('studio')
@@ -738,6 +740,9 @@ async function boot(): Promise<void> {
   navigator.mediaDevices?.addEventListener?.('devicechange', () => void mixer.refreshDevices())
 
   $('btn-settings').addEventListener('click', () => settingsPanel.toggle())
+  $('btn-tzoom-in').addEventListener('click', () => threadView.zoomBy(1.25))
+  $('btn-tzoom-out').addEventListener('click', () => threadView.zoomBy(1 / 1.25))
+  $('btn-tfit').addEventListener('click', () => threadView.fit())
 
   function syncPlay(): void {
     btnPlay.classList.toggle('playing', viewer.isPlaying())
@@ -821,6 +826,7 @@ async function boot(): Promise<void> {
       viewer.clear()
     }
     studioEl.hidden = next !== 'studio'
+    threadZoom.hidden = next !== 'thread'
     if (next === 'board') {
       engine.setActiveScene(board.scene)
       topbar.hidden = false
@@ -862,6 +868,44 @@ async function boot(): Promise<void> {
     syncDeleteButton()
     setMode('viewer')
     camDots.innerHTML = ''
+    // Try to hand off the live preview pool's parsed container BEFORE the
+    // loading indicator. If the post is currently animating on a card, the
+    // pool already has the GLB parsed in previewScene; cloning it into
+    // viewer.scene is far cheaper than re-parsing and avoids the
+    // "loading model" flash on what was already on screen.
+    const live = board.previewPool.acquire(id)
+    if (live) {
+      try {
+        const container = handoffContainer(live.container, board.previewPool.scene, viewer.scene, live.offset, 'viewer')
+        // At this point the clones live in viewer.scene and the source
+        // container is disposed. ANY return below this point MUST commit
+        // (otherwise the preview slot stays bound to a now-empty source).
+        if (nav !== viewerNav) {
+          // The user navigated away while we were cloning (unlikely but
+          // possible across async boundaries). The viewer is about to be
+          // cleared by the next setMode anyway; just commit to release the
+          // preview slot and let the viewer tear-down dispose the clones.
+          live.commit()
+          return
+        }
+        viewer.loadFromContainer(container, meta)
+        if (nav !== viewerNav) {
+          live.commit()
+          return
+        }
+        renderCamDots()
+        syncPlay()
+        live.commit()
+        return
+      } catch (err) {
+        // Hand-off failed (e.g. parse result lost a mesh). Rollback the
+        // reservation so the slot is back to live-animating, then fall
+        // through to the bytes path — the user still gets a working
+        // viewer (with a re-parse).
+        console.warn('viewer handoff failed, falling back to parse:', err)
+        live.rollback()
+      }
+    }
     setLoading('model', true, 'loading model')
     try {
       const bytes = await assets.getModelBytes(meta)
@@ -993,9 +1037,18 @@ async function boot(): Promise<void> {
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && errorSheet.isOpen) { errorSheet.hide(); return }
     if (e.key === 'Escape' && networkPanel.isOpen) { networkPanel.close(); return }
+    // Typing guard: while focus is in an editable control (settings inputs,
+    // the studio textarea, a search box…), game hotkeys must NOT fire —
+    // arrow keys were switching models while the user edited the preview
+    // width in settings. The editable control handles its own keys.
+    const target = e.target as HTMLElement | null
+    const tag = (target?.tagName ?? '').toUpperCase()
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable === true) return
     if (mode === 'thread') {
       if (e.key === 'Escape') router.go({ name: 'board' })
       if (e.key === '0') threadView.fit()
+      if (e.key === '+' || e.key === '=') threadView.zoomBy(1.25)
+      if (e.key === '-' || e.key === '_') threadView.zoomBy(1 / 1.25)
       return
     }
     if (mode === 'studio') {

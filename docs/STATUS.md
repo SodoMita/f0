@@ -6,7 +6,7 @@ move it to **Done** with a commit reference. One agent per area.
 ## Done
 
 - [x] **Descriptive per-server network status: ping + per-server speeds**
-      (agent arena, 2026-08-18, SPEC AMENDMENT 52): network-panel rows now
+      (agent arena, 2026-08-18, SPEC AMENDMENT 56): network-panel rows now
       show a worded status (`connected` / `connecting…` / `offline · retry N`
       / `not probed` / `probing…` / `reachable` / `unreachable`), a bucketed
       round-trip ping (relay REQ->EOSE on the live socket, Blossom HEAD with
@@ -22,7 +22,7 @@ move it to **Done** with a commit reference. One agent per area.
       orient, perf (idleBoard still 0 rps).
 
 - [x] **Network panel closes back to the current page** (agent arena,
-      2026-08-18, SPEC AMENDMENT 51): `#/network` no longer forces
+      2026-08-18, SPEC AMENDMENT 55): `#/network` no longer forces
       `setMode('board')`, so the panel draws over the viewer / thread /
       studio instead of destroying them, and closing it (X, Escape, route
       callback) returns to the route it was opened from. The return path only
@@ -32,7 +32,7 @@ move it to **Done** with a commit reference. One agent per area.
       verify-publish, transfer, interact, settings, smoke, features, orient.
 
 - [x] **Network button hit target + live download/upload speeds**
-      (agent arena, 2026-08-18, SPEC AMENDMENT 50):
+      (agent arena, 2026-08-18, SPEC AMENDMENT 54):
       - The topbar network control is a real 42x42 button (was an 8x8 dot —
         ~1/24th of the recommended touch target). The state dot is now a
         `::before` tinted via `--dot`; hover/active/focus affordances added.
@@ -50,6 +50,50 @@ move it to **Done** with a commit reference. One agent per area.
         interact, settings, smoke, features, shaders, pages, memcheck, perf
         (`idleBoard.rendersPerSec` still 0 — the meter's ticker only runs
         during transfers).
+
+- [x] **Preview resolution scales with camera zoom + hotkey typing guard**
+      (agent arena, 2026-08-19, SPEC AMENDMENTS 52+53):
+      - Thread-map live preview RTTs scale with the map camera zoom
+        (ThreadView.applyPreviewScale: effective width = previewWidth/zoom,
+        clamped 64-2048 px, 32 px snap). Zoomed in → sharper previews;
+        zoomed out → cheaper. No GLB re-parse on zoom (setRttSize +
+        onResize rebind).
+      - Thread map zoom UI added: + / - / fit cluster in the topbar (only
+        in thread mode) + + - = _ hotkeys; wheel/pinch still work.
+      - Window keydown typing guard: INPUT/TEXTAREA/SELECT/contenteditable
+        focus blocks game hotkeys (arrow keys were switching models while
+        editing the preview width in settings). Escape for error
+        sheet/network panel stays first.
+      - Hand-off parity: handoffContainer now clones authored cameras and
+        lights into viewer.scene too (instantiateModelsToScene doesn't),
+        so the viewer's camera dots and authored framing match the
+        byte-loading path.
+
+- [x] **Settings: arbitrary preview width + viewer hand-off from live preview**
+      (agent arena, 2026-08-18, SPEC AMENDMENTS 50+51):
+      - `previewQuality` (select, 4 presets 224/320/448/640 px) renamed to
+        `previewWidth` (slider, 32-4096 px, default 448, step 1). Height
+        is derived from the 16:10 poster aspect. PreviewPool.setRttSize
+        rebuilds every slot's RTT in place; a new `onResize` callback
+        tells the board/thread to swap the card material's texture handle
+        immediately (no fade). Preset keys still recommend the same
+        widths, so picking a tier is unchanged.
+      - Viewer's `openViewer` now hands off the live preview's parsed
+        container to `viewer.loadFromContainer` when the user opens a
+        currently-animating card. New helper `handoffContainer` (in
+        `src/core/sceneTransfer.ts`) clones meshes/materials/skeletons/
+        animationGroups into viewer.scene via Babylon's
+        `instantiateModelsToScene(nameFn, /*cloneMaterials*/ true)` and
+        disposes the source; PreviewPool.acquire() preserves the parsed
+        container for the viewer. Hand-off bypasses LoadAssetContainerAsync
+        entirely, AND skips the "loading model" flash since the model is
+        already on screen. Falls through to the bytes path if the hand-off
+        fails. The pool's staging offset (+800*N per slot) is subtracted
+        so the model lands at the origin in viewer.scene.
+      - Verification: `bun run build` clean (tsc strict + vite build), all
+        new types resolve, no regressions to the existing viewer/poster
+        pipeline (previewQuality consumed by ZERO call sites prior — it
+        was a dead setting).
 
 - [x] **Bugfix round 2 — audit + REGRESSIONS.txt, all verified headlessly**
       (agent arena, 2026-08-18, SPEC AMENDMENT 49, docs/SANDBOX-VERIFY.md):

@@ -82,6 +82,9 @@ export class PreviewPool {
   onLive: ((postId: string, rtt: RenderTargetTexture) => void) | null = null
   /** A live slot was evicted (or scrolled away) — drop the card back to its poster. */
   onRelease: ((postId: string) => void) | null = null
+  /** The RTT backing a live slot was just resized — card material must rebind
+   *  to the new handle, otherwise it samples a disposed texture. */
+  onResize: ((postId: string, rtt: RenderTargetTexture) => void) | null = null
   /** A load finished (success or not) — callers may retry queued requests. */
   onLoadDone: (() => void) | null = null
 
@@ -115,6 +118,39 @@ export class PreviewPool {
   get scene(): Scene { return this.stage }
 
   get activeCount(): number { return this.byPost.size }
+
+  /** Settings → Textures: rebuild all slot RTTs at a new size.
+   *  Disposes the old RenderTargetTextures (which the card shader was sampling)
+   *  and creates new ones at (w,h); the slot's loaded model is kept in the
+   *  scene (its handle doesn't change), so cards rebind to a fresh RTT without
+   *  re-parsing the GLB. Posts that were waiting for a free slot don't move
+   *  — setMaxSlots/load handle that ordering. */
+  setRttSize(width: number, height: number): void {
+    const w = Math.max(16, Math.round(width))
+    const h = Math.max(16, Math.round(height))
+    if (w === this.opts.rttWidth && h === this.opts.rttHeight) return
+    this.opts.rttWidth = w
+    this.opts.rttHeight = h
+    for (const slot of this.slots) {
+      // Allocate the new RTT FIRST so the caller can bind it to the card
+      // material BEFORE we release the GPU handle the material currently
+      // samples. (Disposing then re-assigning in the same tick is fine in
+      // JS, but the caller's setCardTexture may run a render immediately
+      // via invalidate(2) — we must not be holding a disposed handle.)
+      const oldRtt = slot.rtt
+      slot.rtt = new RenderTargetTexture(`slot-${slot.index}`, { width: w, height: h }, this.stage)
+      slot.rtt.renderTargetOptions.generateDepthBuffer = true
+      slot.rtt.renderTargetOptions.generateMipMaps = false
+      slot.rtt.wrapU = Texture.CLAMP_ADDRESSMODE
+      slot.rtt.wrapV = Texture.CLAMP_ADDRESSMODE
+      // Transparent background: see comment in makeSlot().
+      slot.rtt.clearColor = new Color4(0, 0, 0, 0)
+      // Card material still holds the OLD RTT handle; tell the board to swap
+      // immediately. Empty slots (no live post) need no notification.
+      if (slot.postId) this.onResize?.(slot.postId, slot.rtt)
+      oldRtt.dispose()
+    }
+  }
 
   /** Settings → Memory: how many cards may animate at once. */
   setMaxSlots(n: number): void {
@@ -225,6 +261,74 @@ export class PreviewPool {
     if (slot.root) { slot.root.dispose(true); slot.root = null }
     slot.postId = null
     slot.visible = false
+  }
+
+  /**
+   * Hand off the LIVE container for a post atomically. The caller MUST
+   * invoke either `commit()` (the handoff succeeded — release the slot)
+   * or `rollback()` (the handoff failed — restore the slot to its live,
+   * animating state). Calling neither leaks the parsed container in
+   * previewScene; calling both is a no-op. Returns null when the post
+   * is not live (caller falls back to a fresh parse).
+   *
+   * Why a transaction instead of a one-shot handoff: the parse result
+   * already lives in previewScene, so a "soft" reservation (slot stays in
+   * byPost, anims paused, slot.root detached) lets the caller either keep
+   * the slot free post-handoff OR put everything back if the hand-off
+   * throws. Without the rollback path, a parse error in handoffContainer
+   * would silently strand the meshes in previewScene with no slot to
+   * bind them to.
+   */
+  acquire(postId: string): {
+    container: AssetContainer
+    offset: Vector3
+    anims: AnimationGroup[]
+    commit(): void
+    rollback(): void
+  } | null {
+    const slot = this.byPost.get(postId)
+    if (!slot || !slot.container) return null
+    const container = slot.container
+    const offset = slot.root ? slot.root.position.clone() : new Vector3(0, 0, 0)
+    const anims = slot.anims.slice()
+    for (const a of slot.anims) a.stop()
+    // Detach rootNodes from slot.root so handoffContainer's
+    // instantiateModelsToScene finds them at the root level and the move
+    // does not warn about the soon-to-be-disposed offset root.
+    for (const n of container.rootNodes) n.parent = null
+
+    type State = 'open' | 'committed' | 'rolledback'
+    let state: State = 'open'
+    const self = this
+    const reservation = {
+      container,
+      offset,
+      anims,
+      commit(): void {
+        if (state !== 'open') return
+        state = 'committed'
+        slot.root?.dispose()
+        slot.root = null
+        slot.container = null
+        slot.anims = []
+        slot.postId = null
+        slot.visible = false
+        // Tell the board/thread this post is no longer live - their cards
+        // fall back to posters. byPost is removed last so the slot is still
+        // "intact" until every local ref is cleared.
+        self.byPost.delete(postId)
+        self.onRelease?.(postId)
+      },
+      rollback(): void {
+        if (state !== 'open') return
+        state = 'rolledback'
+        // The model is still in previewScene with parent=null (we detached
+        // above). The slot stays in byPost, so tick() will re-render it
+        // once the anims spin back up.
+        for (const a of anims) a.start(true)
+      },
+    }
+    return reservation
   }
 
   /** Advance one frame; render only the slots whose turn it is.
