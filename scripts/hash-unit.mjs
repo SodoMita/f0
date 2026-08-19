@@ -62,6 +62,8 @@ function meta(over = {}) {
     native: true,
     mime: 'model/gltf-binary',
     urls: ['https://example.com/m.glb'],
+    width: 448,
+    height: 280,
     role: 'root',
     refs: {},
     animHint: false,

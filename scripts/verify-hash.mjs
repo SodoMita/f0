@@ -130,31 +130,21 @@ await page.waitForFunction(() => window.__form0.index.byId.size >= 52, null, { t
     JSON.stringify(r))
 }
 
-// --------- wrong x + valid GLB + valid thumb must not stay on board or tree
+// --------- wrong x + valid GLB must not stay on board or tree
+// Format v4: posters are local renders, so getPoster goes through getModelBytes
+// and a wrong `x` failHashes before a plate can land.
 {
   const r = await page.evaluate(async () => {
     const f = window.__form0
     const good = [...f.index.byId.values()].find((m) => m.role === 'root' && m.urls?.length)
     if (!good) return { ok: false, reason: 'no seed' }
-    const c = document.createElement('canvas')
-    c.width = 8; c.height = 8
-    const ctx = c.getContext('2d')
-    ctx.fillStyle = '#3af'
-    ctx.fillRect(0, 0, 8, 8)
-    const png = await new Promise((res) => c.toBlob(res, 'image/png'))
     f.blossoms.setServers(['https://localhost:8443'])
-    const up = await f.blossoms.upload(png, crypto.getRandomValues(new Uint8Array(32)))
-    const thumbBytes = new Uint8Array(await png.arrayBuffer())
-    const thumbSha = [...new Uint8Array(await crypto.subtle.digest('SHA-256', thumbBytes))]
-      .map((b) => b.toString(16).padStart(2, '0')).join('')
+    f.assets.setPaused(false)
     const badId = 'cd'.repeat(32)
     const bad = {
       ...good,
       eventId: badId,
       sha256: '11'.repeat(32),
-      thumbUrl: up[0]?.url,
-      thumbSha256: thumbSha,
-      thumbSize: png.size,
       hashFailed: false,
       tombstoned: false,
       role: 'root',
@@ -166,8 +156,6 @@ await page.waitForFunction(() => window.__form0.index.byId.size >= 52, null, { t
       .sort((a, b) => b.createdAt - a.createdAt)
     f.board.setMetas(roots)
     const poster = await f.assets.getPoster(bad)
-    // produce() kicks getModel in the background; also call it so the
-    // wait is bounded if the kick races.
     void f.assets.getModel(bad)
     const t0 = performance.now()
     while (!f.assets.isHashFailed(badId) && performance.now() - t0 < 8000) {
@@ -186,10 +174,10 @@ await page.waitForFunction(() => window.__form0.index.byId.size >= 52, null, { t
       threadSize: f.threadView.nodes.size,
     }
   })
-  check('wrong x + valid GLB + valid thumb does not stay on the board',
-    r.ok && r.flagged && r.cache && !r.onBoard && !r.peek,
+  check('wrong x + valid GLB does not stay on the board',
+    r.ok && r.flagged && r.cache && !r.onBoard && !r.peek && !r.hadPoster,
     JSON.stringify(r))
-  check('wrong x + valid GLB + valid thumb does not stay on the tree',
+  check('wrong x + valid GLB does not stay on the tree',
     r.ok && !r.threadNode && r.threadSize === 0,
     JSON.stringify(r))
 }
