@@ -27,13 +27,12 @@ import type { Texture as TextureT } from '@babylonjs/core/Materials/Textures/tex
 // world +X == screen right, u=0 is on the left, v=0 is at the bottom, and
 // all three texture kinds land the right way up with zero shader flips:
 //
-//   RawTexture (posters)        CreateRGBATexture(..., invertY=true) flips
-//                               the top-down PNG rows at upload -> v=0 is
-//                               the image bottom. Correct.
+//   RawTexture (cached posters) CreateRGBATexture(..., invertY=false) keeps
+//                               GL bottom-up rows (same as an RTT). Correct.
+//   RenderTargetTexture (posters + live)  GL renders bottom-up -> v=0 is
+//                               the bottom of the rendered frame. Correct.
 //   DynamicTexture (badges/HUD) invertY defaults to true -> canvas row 0
 //                               lands at v=1 (top). Correct.
-//   RenderTargetTexture (live)  GL renders bottom-up -> v=0 is the bottom
-//                               of the rendered frame. Correct.
 //
 // The `flip` uniform is kept (cheap, and gives us an escape hatch for a
 // future texture kind) but every production path passes (0,0).
@@ -66,7 +65,15 @@ void main() {
   vec4 a = texture2D(tex, uv);
   vec4 b = texture2D(tex2, uv);
   vec4 t = mix(a, b, blend);
-  gl_FragColor = vec4(t.rgb * mix(tint, tint2, blend), t.a * opacity);
+  // Some opaque glTF materials write RGB but leave alpha at 0 (the
+  // framebuffer clear). Treat any non-black RGB as coverage so those
+  // models still show on a transparent card.
+  float cover = t.a;
+  if (cover < 0.016) {
+    float m = max(t.r, max(t.g, t.b));
+    if (m > 0.016) cover = 1.0;
+  }
+  gl_FragColor = vec4(t.rgb * mix(tint, tint2, blend), cover * opacity);
 }`
 
 export type CardTextureKind = 'raw' | 'dyn' | 'rtt'

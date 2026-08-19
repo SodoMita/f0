@@ -143,26 +143,23 @@ await page.waitForFunction(() => window.__form0.index.byId.size >= 52, null, { t
       passThrough: content.sourceFormat === 'glb' && content.filename === 'a.glb',
       posterBlank: poster.blank,
       dim: `${poster.width}x${poster.height}`,
-      png: [...new Uint8Array(await poster.blob.arrayBuffer())],
+      pixels: [...poster.pixels],
     }
   })
   check('camera model passes through byte-for-byte (no re-export)', r.passThrough)
 
   // the publish poster must show the AUTHORED camera view: red only
-  const px = await page.evaluate(async (pngBytes) => {
-    const bmp = await createImageBitmap(new Blob([new Uint8Array(pngBytes)]))
-    const c = document.createElement('canvas'); c.width = bmp.width; c.height = bmp.height
-    const ctx = c.getContext('2d'); ctx.drawImage(bmp, 0, 0)
-    const d = ctx.getImageData(0, 0, c.width, c.height).data
+  const px = (() => {
+    const d = r.pixels
     let red = 0, green = 0, opaque = 0
     for (let i = 0; i < d.length; i += 4) {
-      if (d[i + 3] < 16) continue
+      if (d[i + 3] < 16 && d[i] < 16 && d[i + 1] < 16 && d[i + 2] < 16) continue
       opaque++
       if (d[i] > 140 && d[i + 1] < 120 && d[i + 2] < 120) red++
       if (d[i] < 120 && d[i + 1] > 140 && d[i + 2] < 150) green++
     }
-    return { red: red / opaque, green: green / opaque }
-  }, r.png)
+    return { red: opaque ? red / opaque : 0, green: opaque ? green / opaque : 0 }
+  })()
   check('local poster pipeline renders from the authored camera (red only)',
     !r.posterBlank && px.red > 0.5 && px.green < 0.01,
     `red=${(px.red * 100).toFixed(1)}% green=${(px.green * 100).toFixed(2)}%`)

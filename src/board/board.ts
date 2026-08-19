@@ -639,7 +639,7 @@ export class Board {
       setCardTexture(slot.mat, cached)
       setCardWhite(slot.mat)
       this.setOpacityNow(slot, 1)
-      setCardFlip(slot.mat, 'raw')
+      setCardFlip(slot.mat, 'rtt')
       slot.footprint = this.assets?.getFootprint(row.meta) ?? null
       slot.shadow.setEnabled(!!slot.footprint && this.contactStrength > 0)
     } else {
@@ -967,7 +967,7 @@ export class Board {
       }
       if (slot.live) return
       slot.poster = tex
-      this.crossfadeTo(slot, tex, '#FFFFFF', 'raw')
+      this.crossfadeTo(slot, tex, '#FFFFFF', 'rtt')
       slot.footprint = assets.getFootprint(meta) ?? null
       slot.spinSince = 0
       slot.spinner.setEnabled(false)
@@ -1052,7 +1052,7 @@ export class Board {
   /** Show the card's poster texture (fallback after a live preview is released). */
   private showPoster(slot: CardSlot): void {
     if (slot.poster) {
-      this.crossfadeTo(slot, slot.poster, '#FFFFFF', 'raw')
+      this.crossfadeTo(slot, slot.poster, '#FFFFFF', 'rtt')
     } else {
       setCardTexture(slot.mat, null)
       setCardTint(slot.mat, slot.meta?.tint || theme.panel)

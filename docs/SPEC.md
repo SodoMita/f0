@@ -240,8 +240,8 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     only as a fallback (WebGL1 / missing internals).
 
 29. Heavy CPU work goes to inline workers. Signature verification
-    (`protocol/verify.worker.ts`) and poster encoding
-    (`model/encode.worker.ts`) are `?worker&inline` — blob workers, which the
+    (`protocol/verify.worker.ts`) is `?worker&inline` (poster PNGs were removed
+    in AMENDMENT 65). Blob workers, which the
     CSP already allows (`worker-src 'self' blob:`) and which are verified to
     work from `file://` in the standalone build. Both have main-thread
     fallbacks. ALSO: nostr-tools' Relay verifies every matching event itself,
@@ -752,3 +752,22 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     - `validateGLBCached` is memoised by the actual `Uint8Array` identity
       (WeakMap), not the claimed sha.
     - Guard: `scripts/hash-unit.mjs` + `scripts/verify-hash.mjs`.
+
+65. POSTERS RENDER TO A TRANSPARENT RTT, NEVER A PNG (2026-08-19):
+    The card texture IS the offscreen render target. PosterRenderer allocates
+    a dedicated transparent RTT per post (`scene.clearColor = (0,0,0,0)`,
+    `refreshRate = RENDER_ONCE`, then detached from `customRenderTargets` so
+    the next poster.scene.render() cannot wipe earlier cards). No PNG is
+    encoded, cached, or decoded — IndexedDB stores raw GL-order RGBA (cache
+    key p6). Why some models never appeared:
+    - `isBlank` sampled every 397th pixel's *alpha only*, so thin text and
+      opaque-but-no-alpha materials threw "poster rendered empty" and the
+      card stayed a quiet plate forever.
+    - An authored camera that framed nothing burned the whole retry budget
+      before auto-fit.
+    - The PNG encode/decode path dropped RGB-only writes (alpha stayed 0).
+    Fixes: frustum test skips a camera that misses the AABB; denser RGB+alpha
+    blank check; opaque materials forced to write alpha=1; card shader treats
+    non-black RGB as coverage; never throw on a still-blank frame (return the
+    transparent texture). Studio preview paints pixels with putImageData.
+    Guard: offline-verify + verify-publish sample raw pixels, not a PNG blob.
