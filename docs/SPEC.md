@@ -524,3 +524,112 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
       redo tail cleared on new edits. Guard: `bun scripts/paint-unit.mjs`.
     - Studio paint hotkeys (Z/B/X/V) run only after AMENDMENT 53's typing
       guard, so they never steal keys from settings / the text textarea.
+55. NETWORK BUTTON + LIVE TRANSFER STATUS (2026-08-18):
+    - The network control in the topbar is a **42x42 button** (the same size
+      as every other HUD control, 10px gap => WCAG 2.5.5 target size), with
+      the relay-state dot drawn as a `::before` pseudo-element tinted through
+      a `--dot` custom property. It used to be an 8x8 `<button class=net-dot>`
+      — a 64px^2 target, roughly 1/24th of the recommended minimum, so on
+      touch it was mostly a miss. The dot's meaning is unchanged (grey none /
+      amber partial / green all connected) and the legend glyph still renders
+      as the plain 8px span.
+    - **Loading statuses now report throughput.** `src/core/transfer.ts` is a
+      single app-wide meter: every Blossom download (models AND posters) and
+      every Blossom upload registers a handle, reports byte deltas, and ends
+      in a `finally`. Speed is measured over a 2s sliding window of
+      cumulative-byte samples ticked at 200ms, so a stalled replica visibly
+      drops to 0 instead of being hidden by a whole-transfer average. The
+      ticker only runs while something is in flight (idle board still renders
+      ~0 fps — see perf.mjs `idleBoard.rendersPerSec`).
+    - Four surfaces read that one meter:
+      (a) the loading overlay — one line per active direction
+          `↓ 4.2 MiB/s · 9.7/18 MiB · 54%` plus a determinate bar once a total
+          size is known;
+      (b) the topbar — a compact `↓ 4.2 MiB/s` readout beside the network
+          button (slot reserved so the toolbar never jumps; hidden < 560px)
+          and a pulse ring on the button itself while bytes move;
+      (c) the studio publish status — the live upload rate + percent instead
+          of a static `upload…`;
+      (d) the network panel — a TRAFFIC section with a live row per direction
+          that falls back to `idle · N MiB this session`.
+    - Uploads had NO progress signal because `fetch` does not report
+      request-body progress. `BlossomClient.upload` now PUTs through
+      XMLHttpRequest (`upload.onprogress`), same semantics as before (no
+      credentials, 60s cap, JSON response, URL validation), with a `fetch`
+      fallback where XHR is unavailable.
+    - Downloads late-bind their total from `Content-Length` when the event
+      carried no `size` tag.
+    - Verified with `scripts/transfer.mjs` (13 checks: 42x42 target,
+      no overlap, off-centre tap opens the panel, a real rig download is
+      metered end-to-end, determinate totals, return-to-idle, session totals,
+      and the upload readouts) plus the existing offline-verify (39) and
+      verify-publish (7, exercising the new XHR upload path) suites.
+
+56. THE NETWORK PANEL IS AN OVERLAY, NOT A PAGE (2026-08-18):
+    Opening `#/network` used to run `setMode('board')`, so tapping the network
+    button from the viewer, the thread map or the studio tore that view down;
+    closing the panel then always landed on the board (and re-entering the
+    studio route wipes an imported model, so work in progress was lost).
+    - `#/network` now leaves the current mode alone — the panel simply draws
+      over the viewer / thread / studio, which keep rendering behind it. Only
+      a cold load straight into `#/network` falls back to the board, because
+      there is nothing behind the panel.
+    - `main.ts` records the last non-overlay route (`networkReturn`) and, on
+      close (X button, Escape, or the route callback), rewrites the hash back
+      to it. That rewrite sets `skipNextApply` so `applyRoute` does NOT
+      rebuild the view: the view was never replaced, and re-applying `studio`
+      would clear the imported model while `viewer`/`thread` would reload the
+      model / rebuild the tree for nothing.
+    - Navigating away while the panel is open (home button, any route change)
+      still closes it, unchanged.
+    - Verified by `scripts/network-panel.mjs` (16 checks): opens over and
+      returns to board / viewer / thread / studio, the viewer's meshes and the
+      studio's in-progress text survive the round trip, Escape behaves like
+      the close button, a cold `#/network` load closes to the board, and
+      navigating away while open still closes the panel.
+
+57. DESCRIPTIVE PER-SERVER NETWORK STATUS (2026-08-18):
+    A row in the network panel was a coloured dot and a hostname; it could
+    not answer "is this relay actually doing anything for me". Each row is
+    now two lines — host, then status / ping / throughput:
+    - **Status in words, not just hue.** Relays: `connected`,
+      `connecting…`, `offline` and `offline · retry N` (the pool's own
+      backoff attempt count). Blossom servers have no persistent connection,
+      so they report probe results: `not probed`, `probing…`, `reachable`,
+      `unreachable`.
+    - **Ping.** `RelayPool.ping()` times a REQ->EOSE round trip on the LIVE
+      connection using a `#t` filter that can match nothing, so the relay
+      does no work and the number is latency rather than query cost (the
+      WebSocket API exposes no ping/pong frame). A relay that is not
+      connected falls back to a fresh handshake via `RelayPool.probe`, and a
+      successful `open()` seeds the ping from its own handshake so a row
+      shows a latency immediately. `BlossomClient.probe` times its HEAD with
+      `cache: 'no-store'` (a cached response would report a fake sub-ms
+      ping). Both probes now return `{ ok, ms }`. Values are bucketed
+      good/fair/slow (<150ms / <400ms / >=400ms) so 2400ms cannot read as
+      fine.
+    - **Per-server throughput.** `transfers.track()` takes a server ORIGIN
+      and fans each transfer into a per-host meter as well as the global
+      one, so a row shows its OWN `↓ 1.4 MiB/s ↑ 90 KiB/s` while busy and its
+      own session totals when idle. Downloads are attributed by the replica
+      URL's origin, uploads by the target server.
+    - **Relays report events, not bytes.** Relay traffic is JSON on a socket
+      we do not byte-meter; the meaningful number is how much of the feed
+      that relay actually delivered, so the column shows `54 events` — or
+      `no events` for a relay that is connected but silent, which is a real
+      diagnostic.
+    - The panel measures on open and re-measures every 8s while open, and
+      repaints once a second (plus on every meter tick). Rows are reused and
+      only their text mutates — `replaceChildren()` five times a second would
+      churn the DOM and fight the remove buttons.
+    - The old global TRAFFIC section is kept as `TOTAL / all servers`.
+    - BUGFIX found by this work: **`--danger` was defined only under
+      `body[data-theme="light"]`**, so in the default dark theme every
+      `var(--danger)` resolved to nothing and the offline dot was invisible
+      (also `.net-remove:hover`, `.studio-status.err`, `.hbtn.danger`). Added
+      to `:root` with theme.ts's value `#FF674B`.
+    - Verified by `scripts/transfer.mjs` (now 25 checks): status wording,
+      bucketed ping, per-relay event counts, an unreachable server's copy and
+      its painted dot, download attribution to the serving origin (and zero
+      for a server that served nothing), a live per-server rate that does not
+      leak onto other rows, and the fall back to per-server session totals.

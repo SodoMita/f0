@@ -1,6 +1,6 @@
 import './style.css'
 import { FormEngine } from './core/engine'
-import { Router } from './core/router'
+import { Router, type Route } from './core/router'
 import { RelayPool } from './protocol/nostr'
 import { BlossomClient } from './protocol/blossom'
 import { parseModelEvent } from './protocol/events'
@@ -27,6 +27,7 @@ import { Legend } from './hud/legend'
 import { NetworkPanel } from './hud/networkPanel'
 import { ErrorSheet, ERRORS } from './hud/errorSheet'
 import { attachAllDragNumbers } from './studio/dragNumber'
+import { transfers, formatRate, formatBytes, formatDirStats, type TransferStats } from './core/transfer'
 import { handoffContainer } from './core/sceneTransfer'
 import { bindPaintHud } from './studio/paintHud'
 
@@ -113,6 +114,7 @@ async function boot(): Promise<void> {
   const fileInput = $('file-input') as HTMLInputElement
   let publishing = false
   const netDot = $('net-dot')
+  let relaysOnline = 0
   const btnPlay = $('btn-play') as HTMLButtonElement
   const camDots = $('cam-dots')
   const metaText = $('meta-text')
@@ -121,6 +123,9 @@ async function boot(): Promise<void> {
   // ---------- loading ring ----------
   const loading = $('loading')
   const loadingLabel = $('loading-label')
+  const loadingRate = $('loading-rate')
+  const loadingBar = $('loading-bar')
+  const loadingBarFill = loadingBar.firstElementChild as HTMLElement
   const loadingReasons = new Set<string>()
   function setLoading(reason: string, on: boolean, label = ''): void {
     if (on === loadingReasons.has(reason)) return
@@ -129,8 +134,65 @@ async function boot(): Promise<void> {
     engine.kick()
     loading.hidden = loadingReasons.size === 0
     if (!loading.hidden) loadingLabel.textContent = label || reason
+    if (loading.hidden) { loadingRate.hidden = true; loadingBar.hidden = true }
+    else paintTransfers(transfers.stats())
   }
   ;(window as any).__loading = loadingReasons
+
+  // ---------- live transfer readouts ----------
+  // One meter feeds three surfaces: the loading overlay (speed + progress
+  // bar), the topbar readout next to the network button, and the network
+  // panel's TRAFFIC rows. A spinner alone can't tell "downloading a 40 MiB
+  // model at 300 KiB/s" from "hung"; the byte rate can.
+  const netRate = $('net-rate')
+  const netDown = $('net-down')
+  const netUp = $('net-up')
+
+  function paintTransfers(s: TransferStats): void {
+    // The "primary" transfer drives the single-value surfaces (topbar
+    // readout, progress bar): whichever active direction is moving the most
+    // bytes. Picking a fixed direction made the bar disagree with the line
+    // above it whenever a publish overlapped a poster fetch.
+    const primary = !s.up.active ? s.down
+      : !s.down.active ? s.up
+      : s.up.total > s.down.total ? s.up : s.down
+    const primaryArrow = primary === s.up ? '↑' : '↓'
+
+    // --- topbar: compact, one direction at a time
+    const compact = s.active ? `${primaryArrow} ${formatRate(primary.bps)}` : ''
+    netRate.textContent = compact
+    netRate.hidden = compact === ''
+    netRate.classList.toggle('up', primaryArrow === '↑')
+    netDot.classList.toggle('busy', s.active)
+    netDot.title = `${relaysOnline}/${pool.relayUrls.length} relays` + (compact ? ` · ${compact}` : '')
+
+    // --- loading overlay: full detail + a determinate bar when size is known
+    if (!loading.hidden) {
+      const lines: string[] = []
+      if (s.down.active) lines.push(formatDirStats('↓', s.down))
+      if (s.up.active) lines.push(formatDirStats('↑', s.up))
+      loadingRate.textContent = lines.join('\n')
+      loadingRate.hidden = lines.length === 0
+      const pct = primary.total > 0 ? Math.min(100, (primary.bytes / primary.total) * 100) : 0
+      loadingBar.hidden = !(primary.active && primary.total > 0)
+      if (!loadingBar.hidden) loadingBarFill.style.width = pct.toFixed(1) + '%'
+    }
+
+    // --- studio: publishing shows the live upload rate, not a bare 'upload…'
+    if (publishing && s.up.active) {
+      const pct = s.up.total > 0 ? ` · ${Math.min(100, Math.round((s.up.bytes / s.up.total) * 100))}%` : ''
+      setStudioStatus(`↑ ${formatRate(s.up.bps)}${pct}`, 'busy')
+    }
+
+    // --- network panel: persistent rows, so 'idle' is a real state, and
+    // an idle row still reports what this session has moved.
+    const idle = (moved: number) => moved > 0 ? `idle · ${formatBytes(moved)} this session` : 'idle'
+    netDown.textContent = s.down.active ? formatDirStats('', s.down) : idle(s.session.down)
+    netUp.textContent = s.up.active ? formatDirStats('', s.up) : idle(s.session.up)
+    netDown.parentElement?.classList.toggle('live', s.down.active > 0)
+    netUp.parentElement?.classList.toggle('live', s.up.active > 0)
+  }
+  transfers.subscribe(paintTransfers)
 
   let toastTimer = 0
   function showToast(msg: string): void {
@@ -868,7 +930,23 @@ async function boot(): Promise<void> {
     }
   }
 
+  // The network panel is an OVERLAY, not a page. `#/network` used to force
+  // setMode('board'), so opening it from the viewer/thread/studio tore that
+  // view down and closing it dumped you on the board. Now the view behind it
+  // is left alone and closing returns to the route it was opened from.
+  let networkReturn: Route | null = null
+  // Leaving #/network only rewrites the hash — the view underneath was never
+  // replaced, so re-applying the route would be destructive (applying
+  // 'studio' clears the imported model; 'viewer'/'thread' would reload).
+  let skipNextApply = false
+
   function applyRoute(route = router.current): void {
+    if (skipNextApply) {
+      skipNextApply = false
+      if (networkPanel.isOpen) networkPanel.close()
+      return
+    }
+    if (route.name !== 'network') networkReturn = route
     if (route.name === 'board') setMode('board')
     else if (route.name === 'thread') {
       setMode('thread')
@@ -899,8 +977,14 @@ async function boot(): Promise<void> {
       updateTextBudget()
     }
     else if (route.name === 'network') {
-      setMode('board')
-      networkPanel.open(() => { if (router.current.name === 'network') router.go({ name: 'board' }) })
+      // Keep whatever is on screen; only a cold boot straight into
+      // #/network has nothing behind the panel.
+      if (mode === 'boot') setMode('board')
+      networkPanel.open(() => {
+        if (router.current.name !== 'network') return
+        skipNextApply = true
+        router.go(networkReturn ?? { name: 'board' })
+      })
     }
     if (route.name !== 'network' && networkPanel.isOpen) networkPanel.close()
   }
@@ -943,8 +1027,11 @@ async function boot(): Promise<void> {
     const online = states.filter((s) => s === 'online').length
     const state = online === 0 ? 'none' : online < pool.relayUrls.length ? 'partial' : 'online'
     const color = { none: theme.muted, partial: theme.warning, online: theme.success }[state]
-    netDot.style.background = color
-    netDot.title = `${online}/${pool.relayUrls.length} relays`
+    // The dot is a pseudo-element now (the button itself is a 42px hit
+    // target), so the state colour travels through a custom property.
+    relaysOnline = online
+    netDot.style.setProperty('--dot', color)
+    paintTransfers(transfers.stats())
     const allOffline = states.length >= pool.relayUrls.length && states.every((s) => s === 'offline')
     if (allOffline && !warnedOffline) {
       warnedOffline = true
@@ -1019,6 +1106,12 @@ async function boot(): Promise<void> {
   ;(window as any).__form0 = {
     engine, pool, blossoms, index, board, viewer, studio, threadView, router, assets,
     legend, networkPanel, errorSheet, settings, settingsPanel, graphics, mixer, caps,
+    // transfer meter: lets scripts/loading-shot.mjs fake a slow transfer and
+    // capture the speed readouts without waiting for a real 40 MiB model
+    transfers, setLoading,
+    // which view is actually on screen (the network panel is an overlay, so
+    // the route alone no longer tells you) — scripts/network-panel.mjs
+    __mode: () => mode,
   }
 }
 

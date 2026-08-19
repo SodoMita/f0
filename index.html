@@ -25,6 +25,11 @@
       </button>
       <span id="brand" class="brand">FORM<span class="brand-zero">/0</span></span>
       <div class="spacer"></div>
+      <!-- Network: a 42x42 tap target (an 8px dot was far below the 44px
+           minimum and near-impossible to hit on touch). The dot itself is
+           the ::before pseudo-element, tinted via --dot; the ring animates
+           while bytes are moving. -->
+      <span id="net-rate" class="net-rate" hidden></span>
       <button id="net-dot" class="net-dot" title="network relays" aria-label="network relays"></button>
       <button id="btn-shuffle" class="hbtn" title="shuffle" aria-label="shuffle">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5h3.6c1.4 0 2.2.7 3 1.8l4.8 7c.8 1.1 1.6 1.8 3 1.8H21"/><path d="M3 17.5h3.6c1.4 0 2.2-.7 3-1.8l1.3-1.9"/><path d="M13.6 8.4l.8-1.1c.8-1.1 1.6-1.8 3-1.8H21"/><path d="M18.4 3.4L21 5.5l-2.6 2.1"/><path d="M18.4 15L21 17.1l-2.6 2.1"/></svg>
@@ -246,6 +251,10 @@
     <div id="loading" class="hud" hidden>
       <svg class="ring" viewBox="0 0 48 48" aria-hidden="true"><circle cx="24.00" cy="7.50" r="3.00" opacity="1.0"/><circle cx="32.25" cy="9.71" r="2.88" opacity="0.859"/><circle cx="38.29" cy="15.75" r="2.77" opacity="0.731"/><circle cx="40.50" cy="24.00" r="2.65" opacity="0.615"/><circle cx="38.29" cy="32.25" r="2.53" opacity="0.511"/><circle cx="32.25" cy="38.29" r="2.42" opacity="0.419"/><circle cx="24.00" cy="40.50" r="2.30" opacity="0.34"/><circle cx="15.75" cy="38.29" r="2.18" opacity="0.273"/><circle cx="9.71" cy="32.25" r="2.07" opacity="0.218"/><circle cx="7.50" cy="24.00" r="1.95" opacity="0.175"/><circle cx="9.71" cy="15.75" r="1.83" opacity="0.144"/><circle cx="15.75" cy="9.71" r="1.72" opacity="0.126"/></svg>
       <span id="loading-label" class="loading-label"></span>
+      <!-- Live throughput: real download/upload speed + progress, so a
+           slow model reads as "still moving" rather than "hung". -->
+      <span id="loading-rate" class="loading-rate" hidden></span>
+      <span id="loading-bar" class="loading-bar" hidden><i></i></span>
     </div>
 
     <div id="toast" class="hud" hidden></div>
@@ -292,6 +301,13 @@
           <input type="text" inputmode="url" placeholder="https://blossom.example.com" spellcheck="false" autocomplete="off" />
           <button type="submit" class="hbtn small" title="add server" aria-label="add server"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg></button>
         </form>
+      </div>
+      <div class="net-section">
+        <div class="net-title">TOTAL <span class="net-hint">all servers</span></div>
+        <ul class="net-list net-traffic">
+          <li class="net-item"><span class="net-arrow">↓</span><span class="url" id="net-down">idle</span></li>
+          <li class="net-item"><span class="net-arrow">↑</span><span class="url" id="net-up">idle</span></li>
+        </ul>
       </div>
       <div class="net-actions">
         <button id="btn-net-probe" class="net-btn">probe all</button>

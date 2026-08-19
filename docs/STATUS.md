@@ -5,6 +5,52 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 
+- [x] **Descriptive per-server network status: ping + per-server speeds**
+      (agent arena, 2026-08-18, SPEC AMENDMENT 57): network-panel rows now
+      show a worded status (`connected` / `connecting…` / `offline · retry N`
+      / `not probed` / `probing…` / `reachable` / `unreachable`), a bucketed
+      round-trip ping (relay REQ->EOSE on the live socket, Blossom HEAD with
+      `no-store`), and that server's OWN download/upload rate — session
+      totals when idle. Relays show events delivered instead of bytes.
+      `transfers.track()` gained a host origin and a per-host meter;
+      `RelayPool` gained `info()`, `ping()`, `pingAll()` and per-relay event
+      counts; both probes return `{ ok, ms }`. Also fixed a long-standing
+      silent bug: `--danger` existed only in the light theme, so the offline
+      dot (and `.studio-status.err`, `.hbtn.danger`, remove-hover) had no
+      colour in the dark theme. Verified: transfer.mjs (25), offline-verify
+      (39), network-panel (16), verify-publish, settings, interact, smoke,
+      orient, perf (idleBoard still 0 rps).
+
+- [x] **Network panel closes back to the current page** (agent arena,
+      2026-08-18, SPEC AMENDMENT 56): `#/network` no longer forces
+      `setMode('board')`, so the panel draws over the viewer / thread /
+      studio instead of destroying them, and closing it (X, Escape, route
+      callback) returns to the route it was opened from. The return path only
+      rewrites the hash (`skipNextApply`) so the studio's imported model and
+      the viewer's loaded meshes survive. Verified by the new
+      `scripts/network-panel.mjs` (16 checks) plus offline-verify (40),
+      verify-publish, transfer, interact, settings, smoke, features, orient.
+
+- [x] **Network button hit target + live download/upload speeds**
+      (agent arena, 2026-08-18, SPEC AMENDMENT 55):
+      - The topbar network control is a real 42x42 button (was an 8x8 dot —
+        ~1/24th of the recommended touch target). The state dot is now a
+        `::before` tinted via `--dot`; hover/active/focus affordances added.
+      - New `src/core/transfer.ts`: one app-wide transfer meter (2s sliding
+        window, 200ms tick, idle-stops) fed by every Blossom download and
+        upload.
+      - Loading overlay shows `↓ 4.2 MiB/s · 9.7/18 MiB · 54%` per direction
+        plus a determinate bar; topbar shows a compact rate + a pulse ring on
+        the network button; studio publish shows the live upload rate;
+        network panel gained a TRAFFIC section (live rows, session totals).
+      - `BlossomClient.upload` switched from `fetch` to XHR so upload
+        progress exists at all (`fetch` has no request-body progress).
+      - Verified: `scripts/transfer.mjs` (13 checks, new), offline-verify
+        (39), verify-publish (7, covers the new XHR upload), orient,
+        interact, settings, smoke, features, shaders, pages, memcheck, perf
+        (`idleBoard.rendersPerSec` still 0 — the meter's ticker only runs
+        during transfers).
+
 - [x] **Preview resolution scales with camera zoom + hotkey typing guard**
       (agent arena, 2026-08-19, SPEC AMENDMENTS 52+53):
       - Thread-map live preview RTTs scale with the map camera zoom
