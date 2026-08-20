@@ -110,7 +110,8 @@ export function bindLibraryHud(studio: Studio, onChange: () => void): void {
   const place = async (id: string): Promise<void> => {
     try {
       const bytes = await libraryBytes(id)
-      await studio.addLibraryItem(bytes, id + '.glb')
+      const item = LIBRARY.find((entry) => entry.id === id)
+      await studio.addLibraryItem(bytes, id + '.glb', { faceCamera: item?.dim === '2d' })
       onChange()
     } catch (err) {
       console.warn('library place failed', err)

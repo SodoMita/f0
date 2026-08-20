@@ -256,7 +256,14 @@ export class Studio {
       this.textMesh = null
       this.textValue = ''
     }
-    m.dispose(false, true)
+    const extra = this.extras.find((c) => c.meshes.includes(m) || c.rootNodes.includes(m) || c.meshes.some((x) => x === m.parent))
+    if (extra) {
+      extra.removeAllFromScene()
+      extra.dispose()
+      this.extras = this.extras.filter((c) => c !== extra)
+    } else {
+      m.dispose(false, true)
+    }
     this.markDirty()
     this.kick(500)
   }
@@ -324,23 +331,33 @@ export class Studio {
    * Drop a studio-library GLB into the scene WITHOUT clearing existing
    * content. Used by the symbols tab (emotions / reactions / primitives).
    */
-  async addLibraryItem(bytes: Uint8Array, filename: string): Promise<void> {
+  async addLibraryItem(bytes: Uint8Array, filename: string, opts?: { faceCamera?: boolean }): Promise<void> {
     if (this.frozen) throw new Error('publish in progress')
     const report = validateGLB(bytes)
     if (!report.ok) throw new Error(report.reason)
     const container = await LoadAssetContainerAsync(bytes, this.scene, { pluginExtension: '.glb' })
     const n = this.extras.length
+    const cam = this.scene.activeCamera
     for (const root of container.rootNodes) {
-      const anyRoot = root as { position?: { x: number; z: number } }
+      const anyRoot = root as { position?: { x: number; y: number; z: number }; lookAt?: (t: Vector3) => void }
       if (!anyRoot.position) continue
       anyRoot.position.x += (n % 6) * 1.2
       anyRoot.position.z += Math.floor(n / 6) * 1.2
+      // 2D plates are authored facing +Z; the studio orbit sits on +X, so
+      // without this they land edge-on.
+      if (opts?.faceCamera && cam && anyRoot.lookAt) {
+        anyRoot.lookAt(cam.globalPosition ?? cam.position)
+      }
+    }
+    for (const mesh of container.meshes) {
+      if (mesh.material) mesh.material.backFaceCulling = false
     }
     container.addAllToScene()
     this.extras.push(container)
     this.markDirty()
     const first = container.meshes.find((m) => m.name !== '__root__' && m.getTotalVertices() > 0) ?? null
     if (first) this.select(first)
+    this.fitSelected()
     this.form.kick(800)
     void filename
   }

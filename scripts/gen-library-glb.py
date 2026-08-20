@@ -80,27 +80,37 @@ class Mesh:
         out.i = list(self.i)
         return out
 
-    def finish(self) -> "Mesh":
-        """Compute outward vertex normals; flip inward faces."""
+    def finish(self, prefer: str = "outward") -> "Mesh":
+        """Compute vertex normals.
+
+        prefer='outward' flips a face only when it clearly points at the
+        centroid (closed 3D). prefer='+z' keeps plates facing +Z — a flat
+        mesh has a centroid in-plane, so the outward test is noise and
+        used to invert features.
+        """
         if not self.v:
             return self
         cx = sum(p[0] for p in self.v) / len(self.v)
         cy = sum(p[1] for p in self.v) / len(self.v)
         cz = sum(p[2] for p in self.v) / len(self.v)
         acc = [[0.0, 0.0, 0.0] for _ in self.v]
-        tris = list(zip(self.i[0::3], self.i[1::3], self.i[2::3]))
         new_idx: list[int] = []
-        for ia, ib, ic in tris:
+        for ia, ib, ic in zip(self.i[0::3], self.i[1::3], self.i[2::3]):
             a, b, c = self.v[ia], self.v[ib], self.v[ic]
             e1 = (b[0] - a[0], b[1] - a[1], b[2] - a[2])
             e2 = (c[0] - a[0], c[1] - a[1], c[2] - a[2])
             nx = e1[1] * e2[2] - e1[2] * e2[1]
             ny = e1[2] * e2[0] - e1[0] * e2[2]
             nz = e1[0] * e2[1] - e1[1] * e2[0]
-            mx = (a[0] + b[0] + c[0]) / 3 - cx
-            my = (a[1] + b[1] + c[1]) / 3 - cy
-            mz = (a[2] + b[2] + c[2]) / 3 - cz
-            if nx * mx + ny * my + nz * mz < 0:
+            flip = False
+            if prefer == "+z":
+                flip = nz < 0
+            else:
+                mx = (a[0] + b[0] + c[0]) / 3 - cx
+                my = (a[1] + b[1] + c[1]) / 3 - cy
+                mz = (a[2] + b[2] + c[2]) / 3 - cz
+                flip = nx * mx + ny * my + nz * mz < -1e-8
+            if flip:
                 ia, ic = ic, ia
                 nx, ny, nz = -nx, -ny, -nz
             new_idx.extend([ia, ib, ic])
@@ -382,44 +392,52 @@ def spark_flat(color=(0.95, 0.85, 0.3), z=0.05) -> Mesh:
     return m
 
 
+def slab_disc(r=0.5, segs=16, color=(0.9, 0.9, 0.9), thick=0.08) -> Mesh:
+    """A coin-thick disc so 2D icons have a front AND a back."""
+    return lathe([(0.0, -thick / 2), (r, -thick / 2), (r, thick / 2), (0.0, thick / 2)], segs, color)
+
+
 def face(mouth="smile", extra=None) -> Mesh:
     skin = (0.96, 0.82, 0.42)
-    ink = (0.18, 0.12, 0.08)
-    m = disc(0.5, 18, skin, 0.0)
-    m.merge(disc(0.07, 8, ink, 0.03).translated((-0.16, 0.12, 0)))
-    m.merge(disc(0.07, 8, ink, 0.03).translated((0.16, 0.12, 0)))
+    ink = (0.12, 0.08, 0.06)
+    z = 0.05
+    # lathe is Y-up (a coin on the floor); rotate so the face looks down +Z
+    m = slab_disc(0.52, 18, skin, 0.08).rotated("x", 90)
+    # default eyes (skipped when a variant draws its own)
+    if extra not in ("wink", "dead", "love", "cool"):
+        m.merge(disc(0.08, 10, ink, z).translated((-0.18, 0.12, 0)))
+        m.merge(disc(0.08, 10, ink, z).translated((0.18, 0.12, 0)))
     if extra == "wink":
-        # replace right eye with a bar
-        m.merge(plane(0.16, 0.045, ink, 0.035).translated((0.16, 0.12, 0)))
+        m.merge(disc(0.08, 10, ink, z).translated((-0.18, 0.12, 0)))
+        m.merge(plane(0.18, 0.05, ink, z).translated((0.18, 0.12, 0)))
     if extra == "dead":
-        m.merge(x_flat(ink, 0.035).scaled(0.22).translated((-0.16, 0.12, 0)))
-        m.merge(x_flat(ink, 0.035).scaled(0.22).translated((0.16, 0.12, 0)))
+        m.merge(x_flat(ink, z).scaled(0.28).translated((-0.18, 0.12, 0)))
+        m.merge(x_flat(ink, z).scaled(0.28).translated((0.18, 0.12, 0)))
     if extra == "love":
-        m.merge(heart_flat((0.9, 0.2, 0.28), 0.04).scaled(0.18).translated((-0.16, 0.12, 0)))
-        m.merge(heart_flat((0.9, 0.2, 0.28), 0.04).scaled(0.18).translated((0.16, 0.12, 0)))
+        m.merge(heart_flat((0.9, 0.16, 0.24), z).scaled(0.28).translated((-0.18, 0.12, 0)))
+        m.merge(heart_flat((0.9, 0.16, 0.24), z).scaled(0.28).translated((0.18, 0.12, 0)))
     if extra == "cool":
-        m.merge(box(0.52, 0.12, 0.06, (0.12, 0.12, 0.12), (0, 0.12, 0.04)))
-        m.merge(box(0.16, 0.14, 0.05, (0.15, 0.15, 0.18), (-0.16, 0.12, 0.06)))
-        m.merge(box(0.16, 0.14, 0.05, (0.15, 0.15, 0.18), (0.16, 0.12, 0.06)))
+        m.merge(box(0.58, 0.14, 0.06, (0.08, 0.08, 0.1), (0, 0.12, 0.04)))
+        m.merge(box(0.18, 0.16, 0.05, (0.12, 0.12, 0.16), (-0.18, 0.12, 0.06)))
+        m.merge(box(0.18, 0.16, 0.05, (0.12, 0.12, 0.16), (0.18, 0.12, 0.06)))
     if extra == "angry":
-        m.merge(plane(0.18, 0.04, ink, 0.035).rotated("z", 22).translated((-0.16, 0.22, 0)))
-        m.merge(plane(0.18, 0.04, ink, 0.035).rotated("z", -22).translated((0.16, 0.22, 0)))
-    # mouth
+        m.merge(plane(0.2, 0.05, ink, z).rotated("z", 24).translated((-0.18, 0.24, 0)))
+        m.merge(plane(0.2, 0.05, ink, z).rotated("z", -24).translated((0.18, 0.24, 0)))
     if mouth == "smile":
-        for k in range(5):
-            t = (k / 4) * math.pi
-            m.merge(disc(0.045, 6, ink, 0.03).translated((0.2 * math.cos(t + math.pi), -0.12 - 0.1 * math.sin(t), 0)))
+        for k in range(6):
+            t = math.pi * (0.15 + 0.7 * k / 5)
+            m.merge(disc(0.055, 8, ink, z).translated((0.22 * math.cos(t), -0.08 - 0.16 * math.sin(t), 0)))
     elif mouth == "sad":
-        for k in range(5):
-            t = (k / 4) * math.pi
-            m.merge(disc(0.045, 6, ink, 0.03).translated((0.18 * math.cos(t + math.pi), -0.28 + 0.1 * math.sin(t), 0)))
+        for k in range(6):
+            t = math.pi * (0.15 + 0.7 * k / 5)
+            m.merge(disc(0.055, 8, ink, z).translated((0.2 * math.cos(t), -0.32 + 0.14 * math.sin(t), 0)))
     elif mouth == "wow":
-        m.merge(disc(0.1, 10, ink, 0.03).translated((0, -0.2, 0)))
+        m.merge(disc(0.12, 10, ink, z).translated((0, -0.2, 0)))
     elif mouth == "meh":
-        m.merge(plane(0.28, 0.05, ink, 0.03).translated((0, -0.18, 0)))
+        m.merge(plane(0.32, 0.06, ink, z).translated((0, -0.18, 0)))
     elif mouth == "grin":
-        m.merge(box(0.38, 0.12, 0.05, ink, (0, -0.18, 0.03)))
-        m.merge(box(0.32, 0.05, 0.04, (0.95, 0.95, 0.92), (0, -0.16, 0.05)))
+        m.merge(box(0.42, 0.14, 0.05, ink, (0, -0.18, 0.04)))
+        m.merge(box(0.34, 0.05, 0.04, (0.95, 0.95, 0.92), (0, -0.16, 0.06)))
     return m
 
 
@@ -541,8 +559,8 @@ def arrow3d() -> Mesh:
 # GLB writer
 # ---------------------------------------------------------------------------
 
-def write_glb(mesh: Mesh, path: str, name: str, color=(0.8, 0.8, 0.8), double_sided=True) -> None:
-    mesh = mesh.finish()
+def write_glb(mesh: Mesh, path: str, name: str, color=(0.8, 0.8, 0.8), double_sided=True, prefer="outward") -> None:
+    mesh = mesh.finish(prefer)
     nvert = len(mesh.v)
     nidx = len(mesh.i)
     # pack tightly: positions, normals, colors, indices (aligned)
@@ -621,10 +639,12 @@ def write_glb(mesh: Mesh, path: str, name: str, color=(0.8, 0.8, 0.8), double_si
         f.write(header + jchunk + bchunk)
 
 
-def winding_ok(mesh: Mesh) -> bool:
-    mesh = Mesh(v=[p[:] for p in mesh.v], n=[n[:] for n in mesh.n], c=[c[:] for c in mesh.c], i=list(mesh.i)).finish()
+def winding_ok(mesh: Mesh, prefer: str = "outward") -> bool:
+    mesh = Mesh(v=[p[:] for p in mesh.v], n=[n[:] for n in mesh.n], c=[c[:] for c in mesh.c], i=list(mesh.i)).finish(prefer)
     if not mesh.v:
         return False
+    if prefer == "+z":
+        return sum(n[2] for n in mesh.n) > 0
     cx = sum(p[0] for p in mesh.v) / len(mesh.v)
     cy = sum(p[1] for p in mesh.v) / len(mesh.v)
     cz = sum(p[2] for p in mesh.v) / len(mesh.v)
@@ -734,10 +754,11 @@ def main() -> None:
             os.remove(os.path.join(OUT, fn))
     failed = []
     for group, dim, name, color, mesh in ITEMS:
-        if not winding_ok(mesh):
+        prefer = "+z" if dim == "2d" else "outward"
+        if not winding_ok(mesh, prefer):
             failed.append(name)
         dest = os.path.join(OUT, f"{name}.glb")
-        write_glb(mesh, dest, name, color, double_sided=(dim == "2d"))
+        write_glb(mesh, dest, name, color, double_sided=(dim == "2d"), prefer=prefer)
         print(f"  {group:6} {dim}  {name:12}  {os.path.getsize(dest):5d} B")
     write_manifest(os.path.join(os.path.dirname(OUT), "manifest.json"))
     if failed:
