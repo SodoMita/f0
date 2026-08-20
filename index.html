@@ -37,6 +37,11 @@
       <button id="btn-shuffle" class="hbtn" title="shuffle" aria-label="shuffle">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5h3.6c1.4 0 2.2.7 3 1.8l4.8 7c.8 1.1 1.6 1.8 3 1.8H21"/><path d="M3 17.5h3.6c1.4 0 2.2-.7 3-1.8l1.3-1.9"/><path d="M13.6 8.4l.8-1.1c.8-1.1 1.6-1.8 3-1.8H21"/><path d="M18.4 3.4L21 5.5l-2.6 2.1"/><path d="M18.4 15L21 17.1l-2.6 2.1"/></svg>
       </button>
+      <!-- 3D toggle: show every post as its real 3D model on the board and
+           in the thread map (no poster snapshot / render-to-texture). -->
+      <button id="btn-3d" class="hbtn" title="3D models — show posts as real 3D models" aria-label="toggle 3D models">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l8.2 4.7v9.4L12 21.4l-8.2-4.7V7.3L12 2.6z"/><path d="M12 2.6v9.4"/><path d="M20.2 7.3L12 12M3.8 7.3L12 12"/></svg>
+      </button>
       <button id="btn-add" class="hbtn primary" title="create" aria-label="create">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
       </button>
@@ -357,6 +362,7 @@
           <div class="legend-row"><span class="legend-glyph"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg></span><span>create — import a GLB model and post it.</span></div>
           <div class="legend-row"><span class="legend-glyph"><span class="net-dot legend-dot"></span></span><span>relays — grey none, amber partial, green all connected. Tap for the network panel.</span></div>
           <div class="legend-row"><span class="legend-glyph"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.5"/><path d="M14.8 14.8 20 20"/></svg></span><span>search — type a name or content to filter the board.</span></div>
+          <div class="legend-row"><span class="legend-glyph"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l8.2 4.7v9.4L12 21.4l-8.2-4.7V7.3L12 2.6z"/><path d="M12 2.6v9.4"/><path d="M20.2 7.3L12 12M3.8 7.3L12 12"/></svg></span><span>3D — show each post as its real 3D model on the board and in threads (heavier on the GPU).</span></div>
           <div class="legend-row"><span class="legend-glyph"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v10m0 0 4.5-4.5M12 14l-4.5-4.5"/><path d="M5 19h14"/></svg></span><span>save — download the original GLB bytes of the open model.</span></div>
         </div>
         <button id="btn-legend-ok" class="legend-ok">OK</button>

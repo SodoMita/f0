@@ -144,6 +144,7 @@ async function boot(): Promise<void> {
   let publishAbort: AbortController | null = null
   const netDot = $('net-dot')
   let relaysOnline = 0
+  const btn3d = $('btn-3d') as HTMLButtonElement
   const btnPlay = $('btn-play') as HTMLButtonElement
   const camDots = $('cam-dots')
   const metaText = $('meta-text')
@@ -327,6 +328,14 @@ async function boot(): Promise<void> {
     if (e.key === 'Enter') { searchInput.blur() }
   })
   $('btn-shuffle').addEventListener('click', () => { board.shuffle(orderedRoots()); engine.kick() })
+
+  // ---------- 3D models toggle ----------
+  // The topbar cube button flips the same setting that lives in the settings
+  // panel (Interface → "Show posts as 3D models"), so the two stay in sync
+  // and the choice persists. applySettings drives board/thread re-render.
+  btn3d.addEventListener('click', () => {
+    settings.set({ direct3D: !settings.bool('direct3D') })
+  })
 
   // ---------- studio (import + publish) ----------
   function setStudioStatus(text: string, cls = ''): void {
@@ -1168,9 +1177,11 @@ async function boot(): Promise<void> {
 
   settings.subscribe((values, changed) => {
     applySettings(wiring, values, changed)
+    btn3d.classList.toggle('active', settings.bool('direct3D'))
     settingsPanel.refresh()
   })
   applySettings(wiring, settings.all, null)
+  btn3d.classList.toggle('active', settings.bool('direct3D'))
 
   mixer.onDevices = () => {
     settingsPanel.setOptions('audioOutput', [

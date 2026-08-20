@@ -18,6 +18,7 @@ import type { FormEngine } from '../core/engine'
 import type { ThreadMeta } from '../protocol/thread-index'
 import type { AssetCache } from '../core/assets'
 import { PreviewPool } from './previewPool'
+import { Direct3DPool, type Place3D } from './modelCard3d'
 import {
   makeCardMaterial, setCardTexture, setCardTexture2, setCardTint, setCardTint2, setCardWhite,
   setCardFlip, setCardOpacity, setCardBlend, type CardTextureKind,
@@ -139,6 +140,9 @@ export class Board {
   private cb: BoardCallbacks
   private rows: Row[] = []
   readonly previewPool: PreviewPool
+  /** Direct-3D models rendered in the visible scene (no render-to-texture). */
+  readonly pool3d: Direct3DPool
+  private threeD = false
   private assets: AssetCache | null = null
   private halfH = 20
   private aspect = 1.6
@@ -280,6 +284,43 @@ export class Board {
     this.previewPool.onLoadDone = () => {
       this.refreshVisibility()
     }
+
+    // Direct-3D pool: the same GLB bytes, but the meshes are rendered in the
+    // visible board scene instead of an offscreen render target. Only active
+    // while the 3D toggle is on.
+    this.pool3d = new Direct3DPool(
+      this.scene,
+      (postId) => this.assets?.getModelBytesByPostId(postId) ?? Promise.resolve(undefined),
+      { maxSlots: isMobile ? 6 : 10 },
+    )
+    this.pool3d.onPlaced = (postId) => {
+      const slot = this.cards.find((c) => c.meta?.eventId === postId)
+      if (!slot) return
+      slot.spinner.setEnabled(false)
+      // A real model stands on the card: a default contact shadow (the poster
+      // footprint is 2D-only and never computed in 3D mode).
+      slot.footprint = { cx: 0.5, bottom: 0.1, w: 0.66 }
+      slot.shadow.setEnabled(this.contactStrength > 0)
+      this.positionExtras(slot)
+      this.invalidate(2)
+    }
+    this.pool3d.onFailed = (postId) => {
+      const slot = this.cards.find((c) => c.meta?.eventId === postId)
+      if (!slot || slot.meta?.eventId !== postId) return
+      // Direct 3D failed (over-cap model / bad bytes): fall back to the
+      // poster pipeline so the card still shows something.
+      slot.spinner.setEnabled(false)
+      slot.failed = true
+      this.drive2D(slot)
+    }
+    this.pool3d.onReleased = (postId) => {
+      const slot = this.cards.find((c) => c.meta?.eventId === postId)
+      if (!slot) return
+      slot.footprint = null
+      slot.shadow.setEnabled(false)
+    }
+    this.pool3d.onLoadDone = () => this.refreshVisibility()
+
     this.scene.onBeforeRenderObservable.add(() => this.tick())
 
     this.buildPool()
@@ -316,6 +357,7 @@ export class Board {
     // A live card only needs a board redraw when its render target is due for
     // a refresh — otherwise the whole board redrew 60x/s to show a 20 fps
     // preview.
+    if (this.threeD && this.pool3d.hasWork(this.visiblePosts)) return true
     return this.previewPool.hasWork(this.visiblePosts)
   }
 
@@ -428,6 +470,19 @@ export class Board {
   setAutoplay(on: boolean): void {
     if (this.autoplay === on) return
     this.autoplay = on
+    if (this.threeD) {
+      // Direct-3D models follow the same preference: ON resumes auto-paused
+      // models (except ones the user paused by hand), OFF freezes them.
+      for (const slot of this.cards) {
+        const id = slot.meta?.eventId
+        if (!id || !this.pool3d.isLive(id) || !this.pool3d.hasAnims(id)) continue
+        if (on && !this.pausedByUser.has(id) && !this.pool3d.isPlaying(id)) this.pool3d.play(id)
+        else if (!on && !this.manualPlay.has(id) && this.pool3d.isPlaying(id)) this.pool3d.pause(id)
+      }
+      for (const slot of this.cards) if (slot.meta) this.positionExtras(slot)
+      this.invalidate(2)
+      return
+    }
     if (on) {
       // resume auto-paused slots (except the ones the user paused by hand)
       for (const slot of this.cards) {
@@ -445,6 +500,31 @@ export class Board {
     // ⏸↔▶ icons follow the pause/resume above
     for (const slot of this.cards) if (slot.meta) this.positionExtras(slot)
     this.invalidate(2)
+  }
+
+  /**
+   * Toggle "3D models" (the topbar button / settings → Interface). ON swaps
+   * the board from poster + offscreen preview RTTs to real GLB meshes
+   * rendered directly in the board scene; OFF restores the poster pipeline.
+   */
+  setDirect3D(on: boolean): void {
+    if (this.threeD === on) return
+    const was = this.threeD
+    this.threeD = on
+    // Free the pipeline we are leaving (never both resident at once).
+    if (was) this.pool3d.releaseAll()
+    else this.previewPool.releaseAll()
+    for (const slot of this.cards) {
+      if (!slot.meta || !slot.row) continue
+      if (was) { slot.poster = null; slot.live = null }
+      this.bind(slot, slot.row) // bind() is 3D-aware
+      slot.requested = false
+      slot.failed = false
+      slot.spinSince = 0
+    }
+    this.lastSyncScroll = Number.NEGATIVE_INFINITY
+    this.refreshVisibility()
+    this.invalidate(3)
   }
 
   shuffle(items: ThreadMeta[]): void {
@@ -773,6 +853,21 @@ export class Board {
     slot.h = size.h
     slot.mesh.scaling.set(size.w / 4, size.h / 4, 1)
 
+    if (this.threeD) {
+      // Direct-3D mode: the card quad is an invisible tap target; the real
+      // model is loaded into the scene by drive3D() once the feed settles.
+      slot.poster = null
+      slot.live = null
+      slot.footprint = null
+      setCardTexture(slot.mat, null)
+      setCardTint(slot.mat, row.meta.tint || theme.panel)
+      this.setOpacityNow(slot, 0)
+      setCardFlip(slot.mat, 'raw')
+      slot.shadow.setEnabled(false)
+      this.drawBadge(slot)
+      return
+    }
+
     // Fast path: poster texture still on the GPU -> rebind synchronously.
     const cached = this.assets?.peekPoster(row.meta)
     if (cached) {
@@ -802,6 +897,7 @@ export class Board {
       const row = slot.row
       if (!slot.meta || !row) continue
       slot.mesh.position.set(this.colX(row.col), this.worldY(row), 0)
+      if (this.threeD) this.pool3d.place(slot.meta.eventId, this.placeFor(slot))
       this.positionExtras(slot)
     }
   }
@@ -837,7 +933,12 @@ export class Board {
       // loading ring: only inside the prefetch window, only while there is
       // genuinely something to wait for, and never for longer than SPIN_MAX_MS
       const inRange = Math.abs(y) < near
-      let ring = inRange && !slot.poster && !slot.live && !slot.failed
+      const id = row.meta.eventId
+      const in3D = this.threeD
+      const modelLive = in3D && this.pool3d.isLive(id)
+      let ring = in3D
+        ? inRange && !slot.failed && !modelLive
+        : inRange && !slot.poster && !slot.live && !slot.failed
       if (ring) {
         if (!slot.spinner.isEnabled() && slot.spinSince === 0) slot.spinSince = now
         if (slot.spinSince && now - slot.spinSince > SPIN_MAX_MS) ring = false
@@ -848,15 +949,25 @@ export class Board {
 
       if (settled && inRange) {
         if (!slot.requested) { slot.requested = true; this.drive(slot) }
-        // Live slots are for what the user can SEE. Requesting for every
-        // prefetched (offscreen) card made the pool evict one offscreen slot
-        // for another in an endless loop — the evicted card re-requested on
-        // the next pass and evicted its evictor (thousands of churned GLB
-        // loads per scroll). Offscreen cards keep their posters; the moment
-        // they scroll into view the request below fires.
-        if (slot.poster && !slot.live && this.visiblePosts.has(row.meta.eventId)) {
+        if (in3D) {
+          // Autoplay / play gating for the direct model — same semantics as
+          // the RTT live previews: silent auto-start as cards arrive, a
+          // user-started post keeps its sound, a user-paused post stays
+          // paused until ▶ is pressed again.
+          if (modelLive && this.pool3d.hasAnims(id)) {
+            const manual = this.manualPlay.has(id)
+            const auto = this.autoplay && !this.pausedByUser.has(id)
+            if ((auto || manual) && !this.pool3d.isPlaying(id)) this.pool3d.play(id, manual)
+            else if (!(auto || manual) && this.pool3d.isPlaying(id)) this.pool3d.pause(id)
+          }
+        } else if (slot.poster && !slot.live && this.visiblePosts.has(id)) {
+          // Live slots are for what the user can SEE. Requesting for every
+          // prefetched (offscreen) card made the pool evict one offscreen slot
+          // for another in an endless loop — the evicted card re-requested on
+          // the next pass and evicted its evictor (thousands of churned GLB
+          // loads per scroll). Offscreen cards keep their posters; the moment
+          // they scroll into view the request below fires.
           // same gate as drive() — hints or poster-render knowledge
-          const id = row.meta.eventId
           const animated = this.assets?.isAnimated(row.meta)
           if ((animated ?? (row.meta.animHint || row.meta.cameraCount > 0)) && !this.previewPool.isRejected(id)) {
             // AMENDMENT 69: autoplay starts slots silently as cards arrive
@@ -868,10 +979,14 @@ export class Board {
             if (auto || manual) this.previewPool.request(id, this.visiblePosts, manual)
           }
         }
-      } else if (slot.live && Math.abs(y) >= near) {
-        this.previewPool.release(row.meta.eventId)
-        slot.live = null
-        this.showPoster(slot)
+      } else if (Math.abs(y) >= near) {
+        if (in3D) {
+          if (modelLive) this.pool3d.release(id)
+        } else if (slot.live) {
+          this.previewPool.release(id)
+          slot.live = null
+          this.showPoster(slot)
+        }
       }
     }
   }
@@ -886,7 +1001,12 @@ export class Board {
    */
   private playButtonVisible(slot: CardSlot): boolean {
     const meta = slot.meta
-    if (!meta || !slot.poster) return false
+    if (!meta) return false
+    if (this.threeD) {
+      // Only animated direct models can play (static ones just show).
+      return this.pool3d.isLive(meta.eventId) && this.pool3d.hasAnims(meta.eventId)
+    }
+    if (!slot.poster) return false
     if (this.previewPool.isRejected(meta.eventId)) return false
     if (this.previewPool.opts.maxSlots <= 0) return false
     const animated = this.assets?.isAnimated(meta)
@@ -907,7 +1027,9 @@ export class Board {
     slot.play.position.z = -0.06
     slot.play.setEnabled(showPlay && slot.mesh.isEnabled())
     if (slot.meta) {
-      const playing = !!slot.live && this.previewPool.isPlaying(slot.meta.eventId)
+      const playing = this.threeD
+        ? this.pool3d.isPlaying(slot.meta.eventId)
+        : !!slot.live && this.previewPool.isPlaying(slot.meta.eventId)
       this.setPlayState(slot, playing)
     }
 
@@ -1137,6 +1259,20 @@ export class Board {
     const meta = slot.meta
     if (!meta) return
     const id = meta.eventId
+    if (this.threeD) {
+      if (this.pool3d.isPlaying(id)) {
+        this.pool3d.pause(id)
+        this.pausedByUser.add(id)
+        this.manualPlay.delete(id)
+      } else {
+        this.pausedByUser.delete(id)
+        this.manualPlay.add(id)
+        this.pool3d.play(id, true)
+      }
+      this.positionExtras(slot)
+      this.invalidate(2)
+      return
+    }
     if (slot.live && this.previewPool.isPlaying(id)) {
       this.previewPool.pause(id)
       this.pausedByUser.add(id)
@@ -1152,6 +1288,42 @@ export class Board {
   }
 
   private drive(slot: CardSlot): void {
+    if (this.threeD) { this.drive3D(slot); return }
+    this.drive2D(slot)
+  }
+
+  /** The card cell for a slot's model, in board-scene world units. */
+  private placeFor(slot: CardSlot): Place3D {
+    const row = slot.row
+    return {
+      x: this.colX(row?.col ?? 0),
+      y: row ? this.worldY(row) : 0,
+      z: 0.25,
+      w: slot.w,
+      h: slot.h,
+      depth: Math.min(slot.w, slot.h) * 0.6,
+    }
+  }
+
+  /** 3D mode: load the REAL model into the board scene (no poster, no RTT). */
+  private drive3D(slot: CardSlot): void {
+    const meta = slot.meta
+    const assets = this.assets
+    if (!meta || !assets) return
+    if (meta.hashFailed || assets.isHashFailed(meta.eventId)) return
+    // Hide the placeholder plate; the model renders in its place.
+    this.setOpacityNow(slot, 0)
+    const ok = this.pool3d.request(meta.eventId, this.placeFor(slot))
+    if (!ok) {
+      // Pool refused (rejected / over capacity with nothing evictable):
+      // fall back to the poster so the card still shows something.
+      slot.failed = true
+      this.drive2D(slot)
+    }
+  }
+
+  /** 2D mode: the existing poster + live-preview pipeline. */
+  private drive2D(slot: CardSlot): void {
     const meta = slot.meta
     const assets = this.assets
     if (!meta || !assets) return
@@ -1187,8 +1359,10 @@ export class Board {
       // Animated? v3 hints else preflight (SPEC FEED). Locally rendered
       // posters already parsed the GLB, so isAnimated is known; thumb-tagged
       // posts carry anim/cameras hints. The pool itself rejects STATIC.
+      // (Skipped in 3D mode — a poster shown as a 3D fallback must not also
+      // spin up an offscreen live preview.)
       const animated = assets.isAnimated(meta)
-      if ((animated ?? (meta.animHint || meta.cameraCount > 0)) && !this.previewPool.isRejected(meta.eventId) && this.visiblePosts.has(meta.eventId)) {
+      if (!this.threeD && (animated ?? (meta.animHint || meta.cameraCount > 0)) && !this.previewPool.isRejected(meta.eventId) && this.visiblePosts.has(meta.eventId)) {
         // autoplay gate (AMENDMENT 69): silent auto-start, or a user-started
         // post with its sound; never re-start a post the user paused.
         const manual = this.manualPlay.has(meta.eventId)
@@ -1265,6 +1439,7 @@ export class Board {
 
   /** Show the card's poster texture (fallback after a live preview is released). */
   private showPoster(slot: CardSlot): void {
+    if (this.threeD) { this.setOpacityNow(slot, 0); return }
     if (slot.poster) {
       this.crossfadeTo(slot, slot.poster, '#FFFFFF', 'rtt')
     } else {
@@ -1277,9 +1452,12 @@ export class Board {
 
   private release(slot: CardSlot): void {
     if (slot.meta) {
-      this.previewPool.release(slot.meta.eventId)
-      // if its poster never started, drop it from the queue
-      if (!slot.poster) this.assets?.cancelPoster(slot.meta.eventId)
+      if (this.threeD) this.pool3d.release(slot.meta.eventId)
+      else {
+        this.previewPool.release(slot.meta.eventId)
+        // if its poster never started, drop it from the queue
+        if (!slot.poster) this.assets?.cancelPoster(slot.meta.eventId)
+      }
     }
     if (slot.live) {
       slot.live = null
@@ -1310,6 +1488,7 @@ export class Board {
     for (const l of this.seps) l.dispose()
     this.seps = []
     this.previewPool.dispose()
+    this.pool3d.dispose()
     this.scene.dispose()
   }
 }
