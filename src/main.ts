@@ -945,7 +945,6 @@ async function boot(): Promise<void> {
     studio.kick(200)
   }
   foldBtn?.addEventListener('click', toggleFold)
-  $('studio-fold-handle')?.addEventListener('click', toggleFold)
 
   // Interactive vertical resizing of studio inspector in portrait/mobile
   let isResizing = false

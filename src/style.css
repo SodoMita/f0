@@ -50,12 +50,10 @@ body[data-theme="light"] button.net-dot::before { box-shadow: 0 0 0 3px rgba(0, 
    dark-on-light equivalent so var(--ink) (dark) stays legible. */
 body[data-theme="light"] #studio-bar { background: rgba(255,255,255,0.78); border-color: rgba(0,0,0,0.10); }
 body[data-theme="light"] .studio-editor { background: rgba(252,252,254,0.96); border-color: rgba(0,0,0,0.10); }
-body[data-theme="light"] .studio-inspector { background: rgba(252,252,254,0.96); border-color: rgba(0,0,0,0.10); }
+body[data-theme="light"] .studio-inspector { background: rgba(252,252,254,.62); border-color: rgba(0,0,0,0.10); }
 body[data-theme="light"] .studio-rail { background: rgba(252,252,254,0.96); border-color: rgba(0,0,0,0.10); }
 body[data-theme="light"] .studio-tools { background: rgba(0,0,0,0.04); border-color: rgba(0,0,0,0.10); }
 body[data-theme="light"] .tool-btn:hover { background: rgba(0,0,0,0.06); }
-body[data-theme="light"] .fold-handle { background: rgba(0,0,0,0.14); }
-body[data-theme="light"] .fold-handle:hover { background: rgba(0,0,0,0.26); }
 body[data-theme="light"] .inspector-foot { background: rgba(0,0,0,0.03); border-color: rgba(0,0,0,0.08); }
 body[data-theme="light"] .inspector-scroll::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.14); }
 body[data-theme="light"] .cam-row { background: rgba(0,0,0,0.04); border-color: rgba(0,0,0,0.10); }
@@ -1048,26 +1046,14 @@ body[data-theme="light"] .mi-meter { background: rgba(0, 0, 0, 0.10); }
   pointer-events: none;
 }
 .stage-top .spacer { flex: 1; }
-.fold-handle {
-  position: absolute;
-  left: 50%; bottom: -1px;
-  transform: translateX(-50%);
-  width: 56px; height: 6px; border-radius: 999px;
-  border: 0; cursor: pointer;
-  background: rgba(255,255,255,0.18);
-  display: none;
-  pointer-events: auto;
-}
-.fold-handle:hover { background: rgba(255,255,255,0.32); }
-
 .studio-inspector {
   display: flex; flex-direction: column;
   gap: 0;
   padding: 0;
   border-radius: 18px;
-  background: rgba(18,18,19,.84);
+  background: rgba(18,18,19,.62);
   border: 1px solid var(--line);
-  backdrop-filter: blur(14px);
+  backdrop-filter: blur(10px);
   overflow: hidden;
   max-height: 100%;
 }
@@ -1271,7 +1257,6 @@ body[data-theme="light"] .mi-meter { background: rgba(0, 0, 0, 0.10); }
     grid-row: 1; 
     min-height: 120px;
   }
-  .fold-handle { display: block; }
   .inspector-scroll { padding: 6px 10px 10px; gap: 10px; }
   .num-grid { grid-template-columns: repeat(2,1fr); }
   .cam-grid { grid-template-columns: repeat(2, 1fr); }
