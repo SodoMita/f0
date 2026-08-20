@@ -68,6 +68,7 @@ export class Studio {
   readonly scene: Scene
   private camera: ArcRotateCamera
   private container: AssetContainer | null = null
+  private extras: AssetContainer[] = []
   private imported: ImportedModel | null = null
   private tint: string = theme.accent
   private textMesh: TextMeshResult | null = null
@@ -286,8 +287,9 @@ export class Studio {
 
   hasModel(): boolean { return this.imported !== null }
   hasContent(): boolean {
-    return this.imported !== null || this.textValue.trim().length > 0 || this.paint.count > 0
+    return this.imported !== null || this.textValue.trim().length > 0 || this.paint.count > 0 || this.extras.length > 0
   }
+  get libraryCount(): number { return this.extras.length }
 
   /** Clear the current preview so a new import does not stack meshes. */
   clearModel(): void {
@@ -304,9 +306,43 @@ export class Studio {
       this.textMesh = null
     }
     this.clearCameras()
+    this.clearExtras()
     this.imported = null
     this.paint.clear()
     this.contentDirty = false
+  }
+
+  private clearExtras(): void {
+    for (const extra of this.extras) {
+      extra.removeAllFromScene()
+      extra.dispose()
+    }
+    this.extras = []
+  }
+
+  /**
+   * Drop a studio-library GLB into the scene WITHOUT clearing existing
+   * content. Used by the symbols tab (emotions / reactions / primitives).
+   */
+  async addLibraryItem(bytes: Uint8Array, filename: string): Promise<void> {
+    if (this.frozen) throw new Error('publish in progress')
+    const report = validateGLB(bytes)
+    if (!report.ok) throw new Error(report.reason)
+    const container = await LoadAssetContainerAsync(bytes, this.scene, { pluginExtension: '.glb' })
+    const n = this.extras.length
+    for (const root of container.rootNodes) {
+      const anyRoot = root as { position?: { x: number; z: number } }
+      if (!anyRoot.position) continue
+      anyRoot.position.x += (n % 6) * 1.2
+      anyRoot.position.z += Math.floor(n / 6) * 1.2
+    }
+    container.addAllToScene()
+    this.extras.push(container)
+    this.markDirty()
+    const first = container.meshes.find((m) => m.name !== '__root__' && m.getTotalVertices() > 0) ?? null
+    if (first) this.select(first)
+    this.form.kick(800)
+    void filename
   }
 
   // ---- typed text tool (SPEC TEXT+ANIM: flat low-poly geometry) ----
@@ -471,7 +507,12 @@ export class Studio {
       }
       return out
     }
-    if (this.container) return this.container.meshes.filter((m) => m.name !== '__root__')
+    const extras: AbstractMesh[] = []
+    for (const extra of this.extras) {
+      for (const m of extra.meshes) if (m.name !== '__root__') extras.push(m)
+    }
+    if (this.container) return this.container.meshes.filter((m) => m.name !== '__root__').concat(extras)
+    if (extras.length) return extras
     if (this.textMesh) return [this.textMesh.mesh]
     if (this.paint.count > 0) return this.paint.sourceMeshes().filter((m) => m.thinInstanceCount > 0)
     return []
@@ -750,6 +791,12 @@ export class Studio {
         exportableMeshes.add(m)
       }
     }
+    for (const extra of this.extras) {
+      for (const m of extra.meshes) {
+        if (m.name === '__root__') continue
+        exportableMeshes.add(m)
+      }
+    }
     // Thin-instance sources must not export (unit mesh at origin). Bake first.
     const baked = hasPaint ? this.paint.bake() : []
     for (const m of baked) exportableMeshes.add(m)
@@ -764,6 +811,7 @@ export class Studio {
       if (exportableCams.has(n)) return true
       // also keep transform nodes that are parents of exportable meshes/cameras
       if (this.container && (this.container as any).transformNodes?.includes(n)) return true
+      if (this.extras.some((extra) => extra.transformNodes.includes(n) || extra.meshes.includes(n))) return true
       if (this.textMesh && n === this.textMesh.mesh.parent) return true
       return false
     }

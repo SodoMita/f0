@@ -5,6 +5,13 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 
+- [x] **Studio symbol library — 2D + 3D GLBs** (agent arena, 2026-08-20,
+      SPEC AMENDMENT 66): 54 self-contained low-poly pieces (faces /
+      reactions / statuses / primitives / objects) in
+      `src/studio/library/glb/`. Symbols tab enabled; click adds a mesh
+      without clearing the scene. Outward CCW faces. Guard:
+      `bun scripts/library-unit.mjs`.
+
 - [x] **Posters render to a transparent RTT, never a PNG** (agent arena, 2026-08-19,
       SPEC AMENDMENT 65): each post gets its own transparent RenderTargetTexture
       (detached after capture). No PNG, no pixel cache, no blank-check retry —

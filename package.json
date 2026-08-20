@@ -21,7 +21,8 @@
     "check:network-panel": "node scripts/network-panel.mjs",
     "check:paint": "bun scripts/paint-unit.mjs",
     "check:publish": "node --experimental-strip-types scripts/publish-unit.mjs",
-    "check:hash": "bun scripts/hash-unit.mjs"
+    "check:hash": "bun scripts/hash-unit.mjs",
+    "check:library": "node scripts/library-unit.mjs"
   },
   "dependencies": {
     "@babylonjs/core": "8.10.1",

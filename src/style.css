@@ -1058,8 +1058,26 @@ body[data-theme="light"] .sheet-card { background: rgba(253, 246, 245, 0.97); bo
 .field input:focus { outline: none; border-color: var(--accent); }
 #studio-color { width: 40px; height: 32px; padding: 0; border: 1px solid var(--line); border-radius: 8px; background: transparent; }
 .hint { margin: 0; font: 11px/1.5 ui-monospace, monospace; color: var(--muted); }
-.symbol-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 6px; }
-.symbol-grid button { aspect-ratio: 1; border-radius: 9px; background: #0b0b0c; border: 1px solid var(--line); color: var(--ink); cursor: pointer; font: 16px ui-monospace, monospace; }
+.symbol-grid { display: flex; flex-direction: column; gap: 8px; }
+.symbol-filters { display: flex; flex-wrap: wrap; gap: 4px; }
+.symbol-filter {
+  height: 26px; padding: 0 8px; border-radius: 8px;
+  background: transparent; border: 1px solid var(--line);
+  color: var(--muted); font: 10px ui-monospace, monospace; cursor: pointer;
+}
+.symbol-filter.active { border-color: var(--accent); color: var(--accent); }
+.symbol-cells { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.symbol-cells button {
+  aspect-ratio: 1;
+  border-radius: 9px;
+  background: var(--surface-2, #0b0b0c);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  cursor: pointer;
+  padding: 6px;
+}
+.symbol-cells button:hover { border-color: var(--accent); }
+.symbol-cells button svg { width: 100%; height: 100%; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 .cam-advanced { border-top: 1px solid var(--line); padding-top: 8px; }
 .cam-advanced > summary { cursor: pointer; font: 11px ui-monospace,monospace; color: var(--muted); margin-bottom: 8px; }
 .num-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 6px; margin-bottom: 8px; }

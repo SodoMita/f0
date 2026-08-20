@@ -767,3 +767,11 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     (`snapshot()`). Opaque materials write alpha=1; the card shader treats
     non-black RGB as coverage. IDB keeps anim/footprint flags only (p7).
     Guard: offline-verify + verify-publish sample a one-shot snapshot.
+
+66. STUDIO SYMBOL LIBRARY (2026-08-20): the symbols tab is a drop-in set of
+    low-poly 2D plates and 3D primitives (emotions, reactions, statuses,
+    shapes, objects) shipped as self-contained GLBs under
+    `src/studio/library/glb/`. Clicking a cell ADDS the mesh to the studio
+    scene (it does not clear an imported model). Faces are authored CCW /
+    outward so lighting cannot invert. No cameras/textures/skins — posters
+    auto-fit; the author can still +cam. Guard: `bun scripts/library-unit.mjs`.
