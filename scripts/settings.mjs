@@ -129,6 +129,20 @@ const slots = await page.evaluate(() => window.__form0.board.previewPool.opts.ma
 check('live preview slots are applied', slots === 0, String(slots))
 await set({ livePreviews: 5 })
 
+// ---------------------------------------------------------- interface
+await set({ autoplayAnimations: false })
+const autoplay = await page.evaluate(() => ({
+  board: window.__form0.board.autoplay,
+  thread: window.__form0.threadView.autoplay,
+}))
+check('autoplay setting reaches board and thread', autoplay.board === false && autoplay.thread === false, JSON.stringify(autoplay))
+await set({ autoplayAnimations: true })
+const autoplayOn = await page.evaluate(() => ({
+  board: window.__form0.board.autoplay,
+  thread: window.__form0.threadView.autoplay,
+}))
+check('autoplay setting can be re-enabled', autoplayOn.board === true && autoplayOn.thread === true, JSON.stringify(autoplayOn))
+
 await set({ contactShadowStrength: 0, shadows: 'off' })
 const shadowOff = await page.evaluate(() =>
   window.__form0.board.cards.filter((c) => c.shadow.isEnabled()).length)

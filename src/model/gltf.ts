@@ -48,3 +48,8 @@ import '@babylonjs/loaders/glTF/2.0/Extensions/KHR_animation_pointer'
 import '@babylonjs/loaders/glTF/2.0/Extensions/MSFT_lod'
 import '@babylonjs/loaders/glTF/2.0/Extensions/MSFT_minecraftMesh'
 import '@babylonjs/loaders/glTF/2.0/Extensions/MSFT_sRGBFactors'
+
+// audio playback landed (AMENDMENT 69): posts with embedded audio
+// (MSFT_audio_emitter) create Babylon Sounds on load; the board/thread play
+// button starts them through the app mixer.
+import '@babylonjs/loaders/glTF/2.0/Extensions/MSFT_audio_emitter'

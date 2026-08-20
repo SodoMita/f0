@@ -123,6 +123,12 @@ export function applySettings(w: Wiring, v: SettingsValues, changed: string[] | 
   // ------------------------------------------------------- interface
   if (touched('background')) w.applyBackground(String(v.background ?? '#0B0B0C'))
   if (touched('inertia')) w.board.setInertia(Number(v.inertia ?? 70) / 100)
+  if (touched('autoplayAnimations')) {
+    // One preference, two viewports: board cards and thread nodes both start
+    // paused when autoplay is off (user-started plays keep playing).
+    w.board.setAutoplay(!!v.autoplayAnimations)
+    w.threadView.setAutoplay(!!v.autoplayAnimations)
+  }
   if (touched('reduceMotion')) {
     document.body.classList.toggle('reduce-motion', !!v.reduceMotion)
   }
