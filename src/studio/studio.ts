@@ -198,9 +198,17 @@ export class Studio {
     // having a selected mesh must not latch the demand loop on forever.
     if (this.paint.isStroking()) return true
     if (this.scene.activeCamera !== this.camera) return false
-    return Math.abs(this.camera.inertialAlphaOffset) > 1e-5
-      || Math.abs(this.camera.inertialBetaOffset) > 1e-5
-      || Math.abs(this.camera.inertialRadiusOffset) > 1e-4
+    // Inertia is only applied DURING a scene render. If the probe's threshold
+    // is tighter than one frame's worth of decay, the render-on-demand loop
+    // stalls with the offset stuck mid-glide and the camera "jumps" forward
+    // in visible chunks. The multiplicative decay (1-inertia)^N per frame
+    // means the offset shrinks fast but visibly — keep rendering while any
+    // offset is large enough to be seen (one tick ≈ 1 mrad of orbit or 1e-3
+    // of radius), and let Babylon's own zero-snap stop the glide cleanly.
+    const cam = this.camera
+    return Math.abs(cam.inertialAlphaOffset) > 1e-3
+      || Math.abs(cam.inertialBetaOffset) > 1e-3
+      || Math.abs(cam.inertialRadiusOffset) > 5e-3
   }
 
   /** Accent/tint applied to the published model's `color` tag. */

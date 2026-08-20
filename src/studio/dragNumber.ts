@@ -39,7 +39,14 @@ export function attachDragNumber(input: HTMLInputElement, opts: DragNumberOption
   const step = opts.step ?? (input.step ? parseFloat(input.step) : DEFAULT_STEP) ?? DEFAULT_STEP
   const min = opts.min ?? (input.min !== '' ? parseFloat(input.min) : undefined)
   const max = opts.max ?? (input.max !== '' ? parseFloat(input.max) : undefined)
-  const baseSensitivity = opts.sensitivity ?? (step !== 0 ? step : 0.01)
+  // Per-input override: `data-drag-sensitivity="X"` reads as "1 pixel of drag
+  // changes the value by X units". Camera/target/radius/fov controls set
+  // this explicitly so a 30 px drag changes the camera by a sensible amount
+  // instead of the raw `step` (which made yaw/pitch rotate 30° per drag).
+  const dataSensitivity = input.dataset.dragSensitivity
+  const baseSensitivity = opts.sensitivity
+    ?? (dataSensitivity !== undefined && dataSensitivity !== '' ? parseFloat(dataSensitivity) : undefined)
+    ?? (step !== 0 ? step : 0.01)
 
   let startX = 0
   let startVal = 0
