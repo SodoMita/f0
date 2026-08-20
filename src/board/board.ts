@@ -349,6 +349,8 @@ export class Board {
   }
 
   private audioPoseAt(x: number, y: number, z: number): SpatialAudioPose {
+    const forward = this.camera.target.subtract(this.camera.position).normalize()
+    const up = this.camera.upVector
     return {
       source: { x, y, z },
       listener: {
@@ -356,8 +358,8 @@ export class Board {
         y: this.camera.position.y,
         z: this.camera.position.z,
       },
-      forward: { x: 0, y: 0, z: 1 },
-      up: { x: 0, y: 1, z: 0 },
+      forward: { x: forward.x, y: forward.y, z: forward.z },
+      up: { x: up.x, y: up.y, z: up.z },
     }
   }
 

@@ -433,6 +433,8 @@ export class ThreadView {
   }
 
   private audioPose(node: TNode): SpatialAudioPose {
+    const forward = this.camera.target.subtract(this.camera.position).normalize()
+    const up = this.camera.upVector
     return {
       source: { x: node.x, y: node.y, z: node.mesh.position.z },
       listener: {
@@ -440,8 +442,8 @@ export class ThreadView {
         y: this.camera.position.y,
         z: this.camera.position.z,
       },
-      forward: { x: 0, y: 0, z: 1 },
-      up: { x: 0, y: 1, z: 0 },
+      forward: { x: forward.x, y: forward.y, z: forward.z },
+      up: { x: up.x, y: up.y, z: up.z },
     }
   }
 
