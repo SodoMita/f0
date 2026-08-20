@@ -872,5 +872,46 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
       ~4.4 MB; the wasm decoder path is used as before (no fallback JS
       decoder inlined as a new dependency).
     Guards: `node scripts/library-unit.mjs` (size + GLB invariants),
-    `npx tsc --noEmit`, and a browser round trip (place → tinted render →
-    per-item repaint → delete → publish carries the tint).
+    `npx tsc --noEmit`, and a browser round trip (place → per-item
+    repaint → delete → publish carries the tint).
+
+
+69. PER-CARD PLAY/PAUSE + AUTOPLAY SETTING; POST AUDIO PLAYBACK LANDS
+    (2026-08-20):
+    - Every board card and every thread node carries a ▶/⏸ button (Babylon
+      mesh, bottom-LEFT corner — the reply badge/pill owns bottom-right, so
+      the two never overlap). The button toggles the post's live preview:
+      ▶ starts the animation AND the model's embedded audio, ⏸ pauses both
+      in place (the frozen frame stays on the card; paused slots are not
+      render work, so the board still idles at ~0 fps). Icons are shared
+      vector-drawn textures (play triangle / two pause bars), never font
+      glyphs. The button is hidden for posts that cannot animate (poster-
+      render knowledge or v3 anim/camera hints, overridden by the pool's
+      STATIC/FAILED verdict) and when livePreviews = 0 — a control that can
+      never start a slot is a dead control.
+    - Settings → Interface gains "Autoplay animations" (`autoplayAnimations`,
+      default ON = the historical auto-animating feed; OFF = everything opens
+      on its poster, the ▶ button is the only way to start). Turning OFF
+      pauses auto-started slots in place (user-started plays keep running);
+      turning ON resumes them. A post the user paused is never auto-restarted
+      (pausedByUser latch), and a post the user started keeps playing with
+      sound even with autoplay off (manualPlay latch). Both latches survive
+      slot recycling and live as long as the post is in the feed / tree.
+    - SOUND ONLY STARTS FROM THE BUTTON TAP. Autoplay animation is always
+      silent — browsers block audio without a user gesture, the SPEC's audio
+      line says "no autoplay", and a scrolled feed of N live cards must not
+      play N sounds. The ▶ tap is the gesture that unlocks the AudioContext.
+    - POST AUDIO PDMENT 26's "when audio playback lands"
+      is now): the curated loader registers MSFT_audio_emitter, so GLBs with
+      embedded audio create Babylon Sounds on load. Babylon builds every
+      Sound on a page-wide AudioEngine singleton; boot now points that
+      singleton at the app mixer's AudioContext + master bus
+      (`AbstractEngine.audioEngine = new AudioEngine(null, ctx, masterGain)`),
+      so post sound obeys master volume and mute-on-blur. PreviewPool claims
+      each container's Sounds (by node attachment, plus a bounded delta for
+      scene-level emitters — a claimedSounds set makes one owner per sound
+      under concurrent loads), plays them on ▶ (with a bounded decode-retry
+      for clips still loading), pauses/stops them with the animation, and
+      disposes them on slot release / viewer handoff (the viewer itself never
+      plays audio — its A key remains animation-only).
+

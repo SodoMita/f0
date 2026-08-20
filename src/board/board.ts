@@ -68,6 +68,11 @@ interface CardSlot {
   replyCount: number
   /** last count painted into badgeTex (avoids needless canvas + upload) */
   badgeDrawn: number
+  // ▶/⏸ play button (Babylon, bottom-left corner, mirroring the reply
+  // badge): toggles the live preview animation AND its embedded sound.
+  // Hidden for posts that cannot animate (see positionExtras).
+  play: Mesh
+  playMat: ShaderMaterial
   // 120ms two-texture crossfade between card states (plate -> poster ->
   // live, SPEC CARD "Crossfade 120ms"): the card shader mixes tex/tex2 by
   // `blend`, so the transition is a real crossfade in one quad, not a hard
@@ -118,6 +123,10 @@ const SCROLL_SETTLE_MS = 150
 const SPIN_MAX_MS = 25_000
 const BADGE_W = 3.4
 const BADGE_H = 1.25
+// play button (world units) — same visual language as the reply badge,
+// pinned to the card's bottom-LEFT corner so the two never overlap.
+const BTN_W = 2.6
+const BTN_H = 2.6
 // Pixels of pointer travel before a press becomes a scroll. Below this we
 // treat the gesture as a tap on the card that was under the POINTERDOWN.
 const TAP_SLOP = 8
@@ -141,6 +150,11 @@ export class Board {
   private backdropTex: DynamicTexture
   private shadowTex: DynamicTexture
   private spinnerTex: DynamicTexture
+  // two shared button textures (▶ when paused / ⏸ while playing); every
+  // card's playMat samples one of these, so toggling is a texture swap, not
+  // a canvas repaint per card
+  private playTexOff: DynamicTexture
+  private playTexOn: DynamicTexture
   private seps: LinesMesh[] = []
   private sepTops: number[] = []
   private background: string = theme.background
@@ -165,6 +179,17 @@ export class Board {
   private rowIds = ''
   private prefetchScreens = 1
   private contactStrength = 0.55
+  /**
+   * Autoplay (settings → Interface → "Autoplay animations"): when ON, live
+   * previews start as cards come into view (the historical feed behaviour);
+   * when OFF everything opens on its poster and the ▶ button is the only way
+   * to start. Sound NEVER auto-plays — it starts only from the button tap.
+   */
+  autoplay = true
+  /** posts the user started with the ▶ button (kept playing, even w/ autoplay off) */
+  private manualPlay = new Set<string>()
+  /** posts the user explicitly paused (autoplay must not re-start them) */
+  private pausedByUser = new Set<string>()
 
   constructor(engine: FormEngine, cb: BoardCallbacks) {
     const isMobile = /Mobi|Android/i.test(navigator.userAgent)
@@ -195,6 +220,11 @@ export class Board {
 
     this.shadowTex = makeContactShadow(this.scene, 'card-shadow-tex')
     this.spinnerTex = makeSpinnerTexture(this.scene, 'card-spinner-tex')
+    this.playTexOff = new DynamicTexture('card-play-off', { width: 128, height: 128 }, this.scene, false, Texture.BILINEAR_SAMPLINGMODE)
+    this.playTexOff.hasAlpha = true
+    this.playTexOn = new DynamicTexture('card-play-on', { width: 128, height: 128 }, this.scene, false, Texture.BILINEAR_SAMPLINGMODE)
+    this.playTexOn.hasAlpha = true
+    this.paintPlayTextures()
 
     this.cb = cb
     this.previewPool = new PreviewPool(
@@ -215,6 +245,8 @@ export class Board {
       slot.spinner.setEnabled(false)
       this.invalidate()
       this.crossfadeTo(slot, rtt, '#FFFFFF', 'rtt')
+      // the ▶ button flips to ⏸ once the model is actually animating
+      this.positionExtras(slot)
     }
     // The pool evicts a live slot when a newer visible card needs it: the
     // evicted card must fall back to its poster instead of sampling a
@@ -225,6 +257,7 @@ export class Board {
       slot.live = null
       this.showPoster(slot)
       this.invalidate()
+      this.positionExtras(slot)
     }
     // The pool rebuilt its RTTs (settings → Textures → "Card / preview width").
     // The card material was still sampling the disposed handle, so we swap
@@ -294,6 +327,9 @@ export class Board {
     this.isDark = luminance(hex) < 0.5
     this.scene.clearColor = Color4.FromHexString(hex + 'FF')
     paintBackdrop(this.backdropTex, hex)
+    // the shared button textures carry the theme's pill colours — repaint
+    // them, then every card picks up the new look on its next position pass
+    this.paintPlayTextures()
     for (const slot of this.cards) {
       setCardTint(slot.shadowMat, this.isDark ? '#000000' : '#1b1b22')
       setCardOpacity(slot.shadowMat, this.contactStrength * (this.isDark ? 1 : 0.4))
@@ -323,6 +359,11 @@ export class Board {
       col: 0,
       visible: false,
     }))
+    // Drop play-intent bookkeeping for posts that left the feed (a slot
+    // recycle never clears it — the user's choice should survive scrolling).
+    const live = new Set(this.rows.map((r) => r.meta.eventId))
+    for (const id of [...this.manualPlay]) if (!live.has(id)) this.manualPlay.delete(id)
+    for (const id of [...this.pausedByUser]) if (!live.has(id)) this.pausedByUser.delete(id)
     this.layout()
   }
 
@@ -376,6 +417,34 @@ export class Board {
 
   setInertia(v: number): void {
     this.inertia = Math.max(0, Math.min(1, v))
+  }
+
+  /**
+   * Settings → Interface → "Autoplay animations". Turning autoplay OFF pauses
+   * every auto-started (non-manual) live slot in place — the feed freezes on
+   * its current frame, matching "everything opens paused". User-started plays
+   * keep running; the user's explicit pause choice is always respected.
+   */
+  setAutoplay(on: boolean): void {
+    if (this.autoplay === on) return
+    this.autoplay = on
+    if (on) {
+      // resume auto-paused slots (except the ones the user paused by hand)
+      for (const slot of this.cards) {
+        const id = slot.meta?.eventId
+        if (!id || !slot.live || this.pausedByUser.has(id)) continue
+        if (!this.previewPool.isPlaying(id)) this.previewPool.resume(id)
+      }
+    } else {
+      for (const slot of this.cards) {
+        const id = slot.meta?.eventId
+        if (!id || !slot.live || this.manualPlay.has(id)) continue
+        if (this.previewPool.isPlaying(id)) this.previewPool.pause(id)
+      }
+    }
+    // ⏸↔▶ icons follow the pause/resume above
+    for (const slot of this.cards) if (slot.meta) this.positionExtras(slot)
+    this.invalidate(2)
   }
 
   shuffle(items: ThreadMeta[]): void {
@@ -452,16 +521,32 @@ export class Board {
       setCardWhite(badgeMat)
       setCardFlip(badgeMat, 'dyn')
 
+      // ▶/⏸ play button (bottom-left; the badge owns bottom-right). Vector
+      // strokes, never font glyphs (same rule as the badge arrow — "⏸"/"▶"
+      // fall back to a blurry substitute face). Both textures are shared
+      // across all cards; toggling swaps the handle, not a repaint.
+      const play = MeshBuilder.CreatePlane(`play-${i}`, { width: 4, height: 4 }, this.scene)
+      play.setEnabled(false)
+      play.isPickable = true
+      play.position.z = -0.06
+      const playMat = makeCardMaterial(this.scene)
+      play.material = playMat
+      setCardTexture(playMat, this.playTexOff)
+      setCardWhite(playMat)
+      setCardFlip(playMat, 'dyn')
+
       const slot: CardSlot = {
         mesh, mat, w: CARD_W, h: CARD_H_REF, poster: null, live: null, requested: false, row: null, failed: false, spinSince: 0,
         shadow, shadowMat, spinner, spinnerMat,
         badge, badgeMat, badgeTex, replyCount: 0, badgeDrawn: -1, footprint: null,
+        play, playMat,
         opacity: 0, fadeFrom: 0, fadeTo: 0, fadeStart: 0,
         blend: 0, fadeFromBlend: 0, fadeToBlend: 1, fadeTex2: null, fadeTint2Hex: '#FFFFFF', fadeFlip: 'raw',
       }
       this.cards.push(slot)
       mesh.metadata = { card: slot }
       badge.metadata = { card: slot, badge: true }
+      play.metadata = { card: slot, play: true }
     }
   }
 
@@ -521,6 +606,61 @@ export class Board {
     slot.badgeTex.update()
     slot.badge.setEnabled(true)
     this.invalidate()
+  }
+
+  /**
+   * Paint BOTH shared button textures: a translucent pill like the reply
+   * badge, with the icon drawn as vector strokes (play = triangle, pause =
+   * two rounded bars — never font glyphs, rule 9c).
+   */
+  private paintPlayTextures(): void {
+    const paint = (tex: DynamicTexture, playing: boolean): void => {
+      const { width: w, height: h } = tex.getSize()
+      const ctx = tex.getContext() as CanvasRenderingContext2D
+      ctx.clearRect(0, 0, w, h)
+      const dark = this.isDark
+      const pad = Math.round(h * 0.07)
+      const bw = w - pad * 2
+      const bh = h - pad * 2
+      ctx.fillStyle = dark ? 'rgba(12,12,14,0.62)' : 'rgba(250,250,252,0.72)'
+      ctx.strokeStyle = dark ? 'rgba(255,255,255,0.30)' : 'rgba(0,0,0,0.28)'
+      ctx.lineWidth = Math.max(2, h * 0.03)
+      roundRect(ctx, pad, pad, bw, bh, bh * 0.28)
+      ctx.fill()
+      ctx.stroke()
+
+      const ink = dark ? theme.ink : '#101014'
+      const cx = w / 2
+      const cy = h / 2
+      const s = h * 0.24
+      if (playing) {
+        // pause: two rounded bars
+        const barW = s * 0.34
+        const gap = s * 0.24
+        ctx.fillStyle = ink
+        roundRect(ctx, cx - gap / 2 - barW, cy - s, barW, s * 2, barW * 0.45)
+        ctx.fill()
+        roundRect(ctx, cx + gap / 2, cy - s, barW, s * 2, barW * 0.45)
+        ctx.fill()
+      } else {
+        // play: triangle, optically centred a touch right
+        ctx.fillStyle = ink
+        ctx.beginPath()
+        ctx.moveTo(cx - s * 0.5, cy - s)
+        ctx.lineTo(cx - s * 0.5, cy + s)
+        ctx.lineTo(cx + s * 0.92, cy)
+        ctx.closePath()
+        ctx.fill()
+      }
+      tex.update()
+    }
+    paint(this.playTexOff, false)
+    paint(this.playTexOn, true)
+  }
+
+  /** Point a card's button at the right shared texture (▶ or ⏸). */
+  private setPlayState(slot: CardSlot, playing: boolean): void {
+    setCardTexture(slot.playMat, playing ? this.playTexOn : this.playTexOff)
   }
 
   private layout(): void {
@@ -620,6 +760,8 @@ export class Board {
     slot.replyCount = this.replyCounts.get(row.meta.eventId) ?? 0
     slot.failed = false
     slot.spinSince = 0
+    slot.play.setEnabled(false)
+    this.setPlayState(slot, false) // every recycled card starts as ▶
     // the ring is switched on by refreshVisibility, and ONLY for slots inside
     // the prefetch window — a resident-but-offscreen card that keeps spinning
     // also keeps the whole board rendering
@@ -714,9 +856,16 @@ export class Board {
         // they scroll into view the request below fires.
         if (slot.poster && !slot.live && this.visiblePosts.has(row.meta.eventId)) {
           // same gate as drive() — hints or poster-render knowledge
+          const id = row.meta.eventId
           const animated = this.assets?.isAnimated(row.meta)
-          if ((animated ?? (row.meta.animHint || row.meta.cameraCount > 0)) && !this.previewPool.isRejected(row.meta.eventId)) {
-            this.previewPool.request(row.meta.eventId, this.visiblePosts)
+          if ((animated ?? (row.meta.animHint || row.meta.cameraCount > 0)) && !this.previewPool.isRejected(id)) {
+            // AMENDMENT 69: autoplay starts slots silently as cards arrive
+            // (the historical behaviour); a post the user started with the ▶
+            // button keeps playing with its sound, and a post the user
+            // paused stays paused until they press ▶ again.
+            const manual = this.manualPlay.has(id)
+            const auto = this.autoplay && !this.pausedByUser.has(id)
+            if (auto || manual) this.previewPool.request(id, this.visiblePosts, manual)
           }
         }
       } else if (slot.live && Math.abs(y) >= near) {
@@ -728,12 +877,39 @@ export class Board {
   }
 
 
+  /**
+   * Should this card's ▶/⏸ button be visible? Only for posts that can
+   * animate, once that is known: the poster render records isAnimated (v4),
+   * v3 posts fall back to their anim/camera tags, and the pool's own verdict
+   * (STATIC/FAILED) always wins. Hidden when livePreviews=0 — a button that
+   * can never start a slot is a dead control.
+   */
+  private playButtonVisible(slot: CardSlot): boolean {
+    const meta = slot.meta
+    if (!meta || !slot.poster) return false
+    if (this.previewPool.isRejected(meta.eventId)) return false
+    if (this.previewPool.opts.maxSlots <= 0) return false
+    const animated = this.assets?.isAnimated(meta)
+    return animated === true || (animated === undefined && (meta.animHint || meta.cameraCount > 0))
+  }
+
   private positionExtras(slot: CardSlot): void {
     slot.badge.scaling.set(BADGE_W / 4, BADGE_H / 4, 1)
     slot.badge.position.x = slot.mesh.position.x + slot.w / 2 - BADGE_W / 2 - 0.5
     slot.badge.position.y = slot.mesh.position.y - slot.h / 2 + BADGE_H / 2 + 0.5
     slot.badge.position.z = -0.05
     slot.badge.setEnabled(slot.replyCount > 0 && slot.mesh.isEnabled())
+
+    const showPlay = this.playButtonVisible(slot)
+    slot.play.scaling.set(BTN_W / 4, BTN_H / 4, 1)
+    slot.play.position.x = slot.mesh.position.x - slot.w / 2 + BTN_W / 2 + 0.5
+    slot.play.position.y = slot.mesh.position.y + slot.h / 2 - BTN_H / 2 - 0.5
+    slot.play.position.z = -0.06
+    slot.play.setEnabled(showPlay && slot.mesh.isEnabled())
+    if (slot.meta) {
+      const playing = !!slot.live && this.previewPool.isPlaying(slot.meta.eventId)
+      this.setPlayState(slot, playing)
+    }
 
     const ring = Math.min(slot.h * 0.38, slot.w * 0.18)
     slot.spinner.scaling.set(ring / 4, ring / 4, 1)
@@ -916,7 +1092,7 @@ export class Board {
     const wx = (x - cssW / 2) / this.pxPerUnit
     const wy = this.halfH - (y / cssH) * (2 * this.halfH)
 
-    let best: { slot: CardSlot; d: number; badge: boolean } | null = null
+    let best: { slot: CardSlot; d: number; action: 'thread' | 'play' | 'open' } | null = null
     for (const slot of this.cards) {
       const row = slot.row
       if (!slot.meta || !row || !slot.mesh.isEnabled()) continue
@@ -927,18 +1103,52 @@ export class Board {
         const by = slot.badge.position.y
         if (Math.abs(wx - bx) <= BADGE_W / 2 && Math.abs(wy - by) <= BADGE_H / 2) {
           const d = (wx - bx) ** 2 + (wy - by) ** 2
-          if (!best || d < best.d) best = { slot, d, badge: true }
+          if (!best || d < best.d) best = { slot, d, action: 'thread' }
+          continue
+        }
+      }
+      if (slot.play.isEnabled()) {
+        const px = slot.play.position.x
+        const py = slot.play.position.y
+        if (Math.abs(wx - px) <= BTN_W / 2 && Math.abs(wy - py) <= BTN_H / 2) {
+          const d = (wx - px) ** 2 + (wy - py) ** 2
+          if (!best || d < best.d) best = { slot, d, action: 'play' }
           continue
         }
       }
       if (Math.abs(wx - cx) <= slot.w / 2 && Math.abs(wy - cy) <= slot.h / 2) {
         const d = (wx - cx) ** 2 + (wy - cy) ** 2
-        if (!best || d < best.d) best = { slot, d, badge: false }
+        if (!best || d < best.d) best = { slot, d, action: 'open' }
       }
     }
     if (!best?.slot.meta) return
-    if (best.badge) this.cb.onOpenThread(best.slot.meta)
+    if (best.action === 'thread') this.cb.onOpenThread(best.slot.meta)
+    else if (best.action === 'play') this.togglePlay(best.slot)
     else this.cb.onOpenModel(best.slot.meta)
+  }
+
+  /**
+   * The ▶/⏸ button: toggle the post's live preview. Start = animation AND
+   * the model's embedded sound (a user gesture, so audio may start); the
+   * user's choice is remembered per post (manualPlay / pausedByUser) so
+   * scrolling away and back keeps their intent.
+   */
+  private togglePlay(slot: CardSlot): void {
+    const meta = slot.meta
+    if (!meta) return
+    const id = meta.eventId
+    if (slot.live && this.previewPool.isPlaying(id)) {
+      this.previewPool.pause(id)
+      this.pausedByUser.add(id)
+      this.manualPlay.delete(id)
+    } else {
+      this.pausedByUser.delete(id)
+      this.manualPlay.add(id)
+      if (slot.live) this.previewPool.resume(id, true)
+      else this.previewPool.request(id, this.visiblePosts, true)
+    }
+    this.positionExtras(slot)
+    this.invalidate(2)
   }
 
   private drive(slot: CardSlot): void {
@@ -979,7 +1189,11 @@ export class Board {
       // posts carry anim/cameras hints. The pool itself rejects STATIC.
       const animated = assets.isAnimated(meta)
       if ((animated ?? (meta.animHint || meta.cameraCount > 0)) && !this.previewPool.isRejected(meta.eventId) && this.visiblePosts.has(meta.eventId)) {
-        this.previewPool.request(meta.eventId, this.visiblePosts)
+        // autoplay gate (AMENDMENT 69): silent auto-start, or a user-started
+        // post with its sound; never re-start a post the user paused.
+        const manual = this.manualPlay.has(meta.eventId)
+        const auto = this.autoplay && !this.pausedByUser.has(meta.eventId)
+        if (auto || manual) this.previewPool.request(meta.eventId, this.visiblePosts, manual)
       }
     })
   }

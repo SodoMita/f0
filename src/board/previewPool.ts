@@ -13,6 +13,11 @@ import { Vector3 } from '@babylonjs/core/Maths/math.vector'
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color'
 import type { AssetContainer } from '@babylonjs/core/assetContainer'
 import type { AnimationGroup } from '@babylonjs/core/Animations/animationGroup'
+import type { Mesh } from '@babylonjs/core/Meshes/mesh'
+import type { Sound } from '@babylonjs/core/Audio/sound'
+// Registers the scene's mainSoundTrack/sounds (Babylon sounds land there);
+// also brings the Scene type augmentation for mainSoundTrack.
+import '@babylonjs/core/Audio/audioSceneComponent'
 import '../model/gltf'
 import { configureDraco } from '../model/draco'
 import { dominantFacing, worldBox, frameDistance } from '../model/facing'
@@ -32,6 +37,12 @@ interface Slot {
   camera: FreeCamera
   container: AssetContainer | null
   anims: AnimationGroup[]
+  /** MSFT_audio_emitter sounds owned by this slot's model (via mixer bus). */
+  sounds: Sound[]
+  /** bounded retry timer for sounds that were still decoding at play time */
+  soundTimer: number | null
+  /** animation + audio currently running (paused slots render nothing) */
+  playing: boolean
   postId: string | null
   /** stage root TransformNode holding the slot's model (offset per slot) */
   root: TransformNode | null
@@ -78,6 +89,13 @@ export class PreviewPool {
   private loading = new Set<string>()
   /** Posts whose in-flight load was cancelled (card scrolled away mid-parse). */
   private cancelled = new Set<string>()
+  /**
+   * Sounds already owned by a slot. MSFT_audio_emitter registers every Sound
+   * on the stage scene's mainSoundTrack, so slots find theirs by container
+   * attachment; this set stops one sound from being claimed twice (which
+   * would double-dispose it when two concurrent loads race).
+   */
+  private claimedSounds = new Set<Sound>()
   opts: PreviewPoolOptions
   onLive: ((postId: string, rtt: RenderTargetTexture) => void) | null = null
   /** A live slot was evicted (or scrolled away) — drop the card back to its poster. */
@@ -169,17 +187,57 @@ export class PreviewPool {
    * Is any VISIBLE live slot due for a refresh right now? The board uses this
    * as its render-on-demand probe, so one animated card makes the board draw
    * at the preview refresh rate (targetFps) instead of at display rate.
+   * Paused slots are not work: their frame is frozen, so they must not keep
+   * the whole board drawing at preview rate.
    */
   hasWork(visible?: ReadonlySet<string>): boolean {
     if (this.byPost.size === 0) return false
     const now = performance.now()
     const minGap = 1000 / Math.max(1, this.opts.targetFps)
     for (const slot of this.slots) {
-      if (!slot.postId) continue
+      if (!slot.postId || !slot.playing) continue
       if (visible && !visible.has(slot.postId)) continue
       if (now - slot.lastRenderAt >= minGap) return true
     }
     return false
+  }
+
+  /** True while a post's animation (+ sound) is actually running. */
+  isPlaying(postId: string): boolean {
+    return this.byPost.get(postId)?.playing ?? false
+  }
+
+  /**
+   * Pause a live post in place: the animation freezes on its current frame
+   * (AnimationGroup.pause) and its sound pauses with it (AMENDMENT 69 — the
+   * per-card ⏸ button). The slot and its RTT stay bound, so resuming is
+   * instant and the frozen frame keeps showing.
+   */
+  pause(postId: string): void {
+    const slot = this.byPost.get(postId)
+    if (!slot) return
+    if (slot.soundTimer !== null) {
+      clearInterval(slot.soundTimer)
+      slot.soundTimer = null
+    }
+    for (const a of slot.anims) a.pause()
+    for (const s of slot.sounds) if (s.isPlaying) s.pause()
+    slot.playing = false
+  }
+
+  /**
+   * Resume a paused live post. `sound` is true only from the ▶ button tap (a
+   * user gesture) — turning autoplay back on must NOT start audio, so that
+   * path resumes animation only.
+   */
+  resume(postId: string, sound = false): void {
+    const slot = this.byPost.get(postId)
+    if (!slot) return
+    // play() restarts paused animatables from their pause point instead of
+    // resetting to frame 0 (AnimationGroup.start would).
+    for (const a of slot.anims) a.play(true)
+    if (sound) this.playSounds(slot)
+    slot.playing = true
   }
 
   /** Free every live slot (used when the board/thread goes off screen). */
@@ -206,7 +264,12 @@ export class PreviewPool {
   rejectReason(postId: string): 'STATIC' | 'FAILED' | undefined { return this.rejected.get(postId) }
   retry(postId: string): void { this.rejected.delete(postId) }
 
-  request(postId: string, visible?: ReadonlySet<string>): boolean {
+  /**
+   * Load a post into a live slot and start it. `sound` is true ONLY when the
+   * user pressed a card's ▶ button — autoplay animation stays silent (the
+   * browser's autoplay policy AND the SPEC "no autoplay" audio line).
+   */
+  request(postId: string, visible?: ReadonlySet<string>, sound = false): boolean {
     if (this.byPost.has(postId) || this.loading.has(postId) || this.cancelled.has(postId)) return true
     if (this.rejected.has(postId)) return false
     // Reuse a released slot first — the old code counted spent slots against
@@ -223,7 +286,7 @@ export class PreviewPool {
     if (slot.postId) this.release(slot.postId)
     slot.pending = true
     this.loading.add(postId)
-    void this.load(slot, postId)
+    void this.load(slot, postId, sound)
     return true
   }
 
@@ -242,13 +305,24 @@ export class PreviewPool {
   }
 
   /**
-   * Free everything a slot holds: anims, container (un-reparented first so
-   * the container hierarchy stays valid for removeAllFromScene) and the
-   * stage root TransformNode. The slot is then reusable by request().
+   * Free everything a slot holds: anims, sounds, container (un-reparented
+   * first so the container hierarchy stays valid for removeAllFromScene) and
+   * the stage root TransformNode. The slot is then reusable by request().
    */
   private clearSlotModel(slot: Slot): void {
+    if (slot.soundTimer !== null) {
+      clearInterval(slot.soundTimer)
+      slot.soundTimer = null
+    }
     for (const a of slot.anims) a.stop()
     slot.anims = []
+    for (const s of slot.sounds) {
+      this.claimedSounds.delete(s)
+      s.stop()
+      s.dispose()
+    }
+    slot.sounds = []
+    slot.playing = false
     if (slot.container) {
       // rootNodes were reparented under the stage root, which is NOT part
       // of the container — detach them again or removeAllFromScene warns
@@ -292,6 +366,9 @@ export class PreviewPool {
     const offset = slot.root ? slot.root.position.clone() : new Vector3(0, 0, 0)
     const anims = slot.anims.slice()
     for (const a of slot.anims) a.stop()
+    // Pause the model's sound with the animation (it belongs to the stage
+    // scene; the viewer adopts no audio, so commit() just releases it).
+    for (const s of slot.sounds) if (s.isPlaying) s.pause()
     // Detach rootNodes from slot.root so handoffContainer's
     // instantiateModelsToScene finds them at the root level and the move
     // does not warn about the soon-to-be-disposed offset root.
@@ -311,6 +388,15 @@ export class PreviewPool {
         slot.root = null
         slot.container = null
         slot.anims = []
+        // The stage no longer owns the model: release its sounds so they
+        // cannot keep registered (and sounding) in the hidden stage scene.
+        for (const s of slot.sounds) {
+          self.claimedSounds.delete(s)
+          s.stop()
+          s.dispose()
+        }
+        slot.sounds = []
+        slot.playing = false
         slot.postId = null
         slot.visible = false
         // Tell the board/thread this post is no longer live - their cards
@@ -326,6 +412,8 @@ export class PreviewPool {
         // above). The slot stays in byPost, so tick() will re-render it
         // once the anims spin back up.
         for (const a of anims) a.start(true)
+        self.playSounds(slot)
+        slot.playing = true
       },
     }
     return reservation
@@ -351,6 +439,8 @@ export class PreviewPool {
       slot.visible = !visible || visible.has(slot.postId)
       // offscreen cards keep their model but stop drawing
       if (!slot.visible) continue
+      // paused slots render a frozen frame — no refresh needed
+      if (!slot.playing) continue
       if (now - slot.lastRenderAt < minGap) continue
       this.renderSlot(slot)
       slot.lastRenderAt = now
@@ -406,13 +496,74 @@ export class PreviewPool {
     rtt.clearColor = new Color4(0, 0, 0, 0)
     const camera = new FreeCamera(`slot-cam-${index}`, Vector3.Zero(), this.stage)
     const slot: Slot = {
-      index, rtt, camera, container: null, root: null, anims: [], postId: null, pending: false, visible: false,
+      index, rtt, camera, container: null, root: null, anims: [], sounds: [], soundTimer: null, playing: false,
+      postId: null, pending: false, visible: false,
       facing: new Vector3(0, 0, 1), lastRenderAt: 0,
     }
     return slot
   }
 
-  private async load(slot: Slot, postId: string): Promise<void> {
+  /**
+   * Find the MSFT_audio_emitter Sounds this container's load created. The
+   * extension registers every Sound on the stage scene's mainSoundTrack
+   * (not on the container), so ownership is inferred two ways:
+   *   1. the sound's private `_connectedTransformNode` is one of the
+   *      container's meshes (node-attached emitters — the common case), or
+   *   2. it was created after this load started and has NO attached node
+   *      (scene-level emitters), a bounded delta.
+   * `claimedSounds` guarantees one owner per sound even when two loads race.
+   */
+  private claimSounds(container: AssetContainer, baseline: number): Sound[] {
+    const all = this.stage.mainSoundTrack.soundCollection
+    const meshes = new Set(container.meshes)
+    const owned: Sound[] = []
+    const attachedOf = (s: Sound): TransformNode | null =>
+      (s as unknown as { _connectedTransformNode?: TransformNode })._connectedTransformNode ?? null
+    for (const s of all) {
+      if (this.claimedSounds.has(s)) continue
+      const node = attachedOf(s)
+      if (node && meshes.has(node as Mesh)) {
+        this.claimedSounds.add(s)
+        owned.push(s)
+      }
+    }
+    for (const s of all.slice(baseline)) {
+      if (this.claimedSounds.has(s) || owned.includes(s)) continue
+      if (!attachedOf(s)) {
+        this.claimedSounds.add(s)
+        owned.push(s)
+      }
+    }
+    return owned
+  }
+
+  /**
+   * Start a slot's sounds. A clip may still be decoding when the ▶ button is
+   * pressed (the emitter fetches audio during parse); retry briefly instead
+   * of dropping the sound forever. The retry dies with the slot (pause /
+   * release / dispose all clear slot.soundTimer).
+   */
+  private playSounds(slot: Slot): void {
+    if (slot.soundTimer !== null) {
+      clearInterval(slot.soundTimer)
+      slot.soundTimer = null
+    }
+    const pending = slot.sounds.filter((s) => !s.isReady())
+    for (const s of slot.sounds) if (s.isReady()) s.play()
+    if (!pending.length) return
+    let tries = 0
+    slot.soundTimer = window.setInterval(() => {
+      if (slot.soundTimer === null) return // released mid-retry
+      tries++
+      for (const s of pending) if (s.isReady()) s.play()
+      if (pending.every((s) => s.isReady()) || tries >= 15) {
+        clearInterval(slot.soundTimer)
+        slot.soundTimer = null
+      }
+    }, 200)
+  }
+
+  private async load(slot: Slot, postId: string, sound: boolean): Promise<void> {
     let container: AssetContainer | null = null
     // setMaxSlots() may dispose this slot while the download/parse is in
     // flight — bail out before touching its dead rtt/camera.
@@ -424,6 +575,9 @@ export class PreviewPool {
       const report = validateGLBCached(model.bytes, model.sha256)
       if (!report.ok) throw new Error(report.reason)
 
+      // Sounds register on the stage's mainSoundTrack during the parse; the
+      // baseline lets claimSounds() pick up scene-level (unattached) ones.
+      const soundBaseline = this.stage.mainSoundTrack.soundCollection.length
       container = await LoadAssetContainerAsync(model.bytes, this.stage, { pluginExtension: '.glb' })
       if (!alive()) { container.dispose(); throw new Error('slot recycled') }
       if (this.cancelled.has(postId)) { container.dispose(); throw new Error('cancelled while loading') }
@@ -499,8 +653,11 @@ export class PreviewPool {
 
       slot.container = container
       slot.anims = container.animationGroups.filter((g) => g.targetedAnimations.length > 0)
+      // Claim the model's sounds even for STATIC posts so clearSlotModel can
+      // dispose them — otherwise they stay registered (and silent) in the
+      // stage scene's mainSoundTrack for the whole session.
+      slot.sounds = this.claimSounds(container, soundBaseline)
       slot.postId = postId
-      for (const a of slot.anims) a.start(true)
 
       // Render the first frame through the scene path (compiles shaders).
       this.renderSlot(slot)
@@ -514,6 +671,11 @@ export class PreviewPool {
         this.rejected.set(postId, 'STATIC')
         return
       }
+      slot.playing = true
+      for (const a of slot.anims) a.start(true)
+      // Sound only ever starts from the per-card ▶ button (a user gesture):
+      // autoplay animation stays silent (SPEC: audio "no autoplay").
+      if (sound) this.playSounds(slot)
       this.byPost.set(postId, slot)
       this.onLive?.(postId, slot.rtt)
     } catch {

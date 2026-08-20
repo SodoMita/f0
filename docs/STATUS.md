@@ -582,6 +582,19 @@ move it to **Done** with a commit reference. One agent per area.
   pushes to `main`.
 ## In progress
 
+- [ ] **Per-card play/pause (animation + sound) + autoplay setting** — claimed by
+      agent arena, 2026-08-20. SPEC AMENDMENT 69. Board cards and thread nodes
+      get a ▶/⏸ button (Babylon mesh, bottom-left corner, opposite the reply
+      badge) that toggles the live preview animation AND its embedded
+      MSFT_audio_emitter sound. New settings entry `autoplayAnimations`
+      (default ON = today's auto-animate feed; OFF = everything opens paused,
+      the button is the only way to start). Model audio now actually plays:
+      the curated loader registers MSFT_audio_emitter and Babylon's AudioEngine
+      singleton is wired to the app mixer's context + master bus so post sound
+      obeys master volume / mute-on-blur. Audio only ever starts from the
+      per-card button (a user gesture) — autoplay stays silent, matching the
+      browser autoplay policy and the SPEC "no autoplay" audio line.
+
 - [ ] **Paint editor (hand-writing ink)** — claimed by agent arena, 2026-08-19.
       Rebased onto main (PR #12: preview width / viewer hand-off / zoom
       RTTs / typing guard). SPEC AMENDMENT 54.

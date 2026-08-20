@@ -415,6 +415,10 @@ export const SETTINGS: SettingDef[] = [
   // ---------------------------------------------------------- interface
   { id: 'background', label: 'Background', group: 'interface', kind: 'swatches', default: '#0B0B0C' },
   { id: 'inertia', label: 'Scroll inertia', group: 'interface', kind: 'slider', default: 70, ...pct },
+  {
+    id: 'autoplayAnimations', label: 'Autoplay animations', group: 'interface', kind: 'toggle', default: true,
+    hint: 'Cards and thread nodes start animating when they come into view. Off = everything opens paused; the ▶ button on a card is the only way to start. Sound always needs that button tap (browsers block audio without a gesture).',
+  },
   { id: 'reduceMotion', label: 'Reduce motion', group: 'interface', kind: 'toggle', default: false },
   { id: 'showFps', label: 'Show performance overlay', group: 'interface', kind: 'toggle', default: false },
 ]

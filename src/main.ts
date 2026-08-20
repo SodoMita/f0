@@ -1,4 +1,6 @@
 import './style.css'
+import { AbstractEngine } from '@babylonjs/core/Engines/abstractEngine'
+import { AudioEngine } from '@babylonjs/core/Audio/audioEngine'
 import { FormEngine } from './core/engine'
 import { Router, type Route } from './core/router'
 import { RelayPool } from './protocol/nostr'
@@ -50,6 +52,24 @@ async function boot(): Promise<void> {
   // option, so boot is the only place it can take effect (settings: deferred).
   const settings = new SettingsStore()
   await settings.load()
+
+  // Route post audio (MSFT_audio_emitter Sounds created by the GLB loader)
+  // through the app mixer: Babylon builds every Sound on a page-wide
+  // AudioEngine singleton — point it at OUR AudioContext + master bus so
+  // master volume and mute-on-blur apply to model sound too. Must exist
+  // BEFORE the first GLB with audio is parsed, or decode is skipped.
+  try {
+    const ctx = mixer.ensureContext()
+    if (ctx) {
+      // AudioEngine's `audioDestination` is only ever used as a connect()
+      // target (masterGain.connect(dest)), so our master GainNode works at
+      // runtime despite the narrower .d.ts type.
+      const dest = mixer.masterOutput() as AudioDestinationNode | null
+      AbstractEngine.audioEngine = new AudioEngine(null, ctx, dest)
+    }
+  } catch {
+    // audio unavailable — posts stay silent, nothing else breaks
+  }
 
   const canvas = $('engine') as HTMLCanvasElement
   let engine: FormEngine

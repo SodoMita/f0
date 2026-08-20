@@ -61,6 +61,19 @@ export class AudioMixer {
 
   get context(): AudioContext | null { return this.ctx }
 
+  /** Create the AudioContext if it does not exist yet (still lazy: an
+   *  AudioContext before a user gesture starts suspended). */
+  ensureContext(): AudioContext | null { return this.ensure() }
+
+  /**
+   * The master bus gain node. External sound stacks (Babylon's Sound engine
+   * for MSFT_audio_emitter post audio) connect HERE so they obey master
+   * volume and mute-on-blur like everything else.
+   */
+  masterOutput(): GainNode | null {
+    return this.ensure() ? (this.gains.get('master') ?? null) : null
+  }
+
   /** Node to feed a source into, e.g. `source.connect(mixer.busInput('sfx'))`. */
   busInput(bus: Exclude<Bus, 'master'>): AudioNode | null {
     const ctx = this.ensure()

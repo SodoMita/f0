@@ -33,6 +33,10 @@ interface TNode {
   // reply button (bottom-right pill): tap -> studio compose for THIS node
   reply: Mesh
   replyMat: ShaderMaterial
+  // ▶/⏸ play button (bottom-left pill): toggles this node's live preview
+  // animation AND its embedded sound (AMENDMENT 69)
+  play: Mesh
+  playMat: ShaderMaterial
   // poster texture (reapplied when the live preview is released)
   poster: TextureT | null
   // live animated preview (same pipeline as the board's cards)
@@ -79,6 +83,9 @@ const ZOOM_MAX = 6
 // reply pill (world units) — same visual language as the board badge
 const REPLY_W = 2.3
 const REPLY_H = 1.15
+// play button (world units) — bottom-left, mirroring the reply pill
+const PLAY_W = 2.2
+const PLAY_H = 2.2
 
 /**
  * Thread view: a 2D map of the reply tree.
@@ -111,6 +118,9 @@ export class ThreadView {
   private spinnerTex: DynamicTexture
   private rootFrameTex: DynamicTexture
   private replyTex!: DynamicTexture
+  // shared ▶/⏸ button textures (every node samples one of these)
+  private playTexOff: DynamicTexture
+  private playTexOn: DynamicTexture
   private onReply: ((m: ThreadMeta) => void) | null = null
   private background: string = theme.background
   private isDark = true
@@ -128,6 +138,12 @@ export class ThreadView {
   private attached = false
   private form: FormEngine
   readonly previewPool: PreviewPool
+  /** Autoplay (settings → Interface): see Board.setAutoplay. */
+  autoplay = true
+  /** posts the user started with ▶ (kept playing even with autoplay off) */
+  private manualPlay = new Set<string>()
+  /** posts the user paused (autoplay must not re-start them) */
+  private pausedByUser = new Set<string>()
 
   constructor(engine: FormEngine) {
     this.form = engine
@@ -150,6 +166,7 @@ export class ThreadView {
       n.live = rtt
       n.spinner.setEnabled(false)
       this.crossfadeTo(n, rtt, '#FFFFFF', 'rtt')
+      this.positionPlayButton(n) // ▶ flips to ⏸
       this.form.kick()
     }
     this.previewPool.onRelease = (postId) => {
@@ -157,6 +174,7 @@ export class ThreadView {
       if (!n || !n.live) return
       n.live = null
       this.showNodePoster(n)
+      this.positionPlayButton(n) // ⏸ flips back to ▶
       this.form.kick()
     }
     // Pool rebuilt its RTTs (settings → Textures → "Card / preview width"):
@@ -193,6 +211,9 @@ export class ThreadView {
     this.replyTex = new DynamicTexture('thread-reply-tex', { width: 256, height: 128 }, this.scene, true)
     this.replyTex.hasAlpha = true
     this.paintReplyTexture()
+    this.playTexOff = new DynamicTexture('thread-play-off', { width: 128, height: 128 }, this.scene, true)
+    this.playTexOn = new DynamicTexture('thread-play-on', { width: 128, height: 128 }, this.scene, true)
+    this.paintPlayTextures()
 
     this.applyCamera()
 
@@ -294,6 +315,7 @@ export class ThreadView {
         this.previewPool.release(id)
         n.live = null
         this.showNodePoster(n)
+        this.positionPlayButton(n)
         continue
       }
       if (n.live || !n.poster) continue
@@ -301,7 +323,11 @@ export class ThreadView {
       // same gate as the board: poster-render knowledge or v3 hints
       const animated = this.assets.isAnimated(n.meta)
       if (!(animated ?? (n.meta.animHint || n.meta.cameraCount > 0))) continue
-      this.previewPool.request(id, visible)
+      // AMENDMENT 69: autoplay starts nodes silently; user-started nodes keep
+      // their sound; a user-paused node stays paused until ▶ is pressed.
+      const manual = this.manualPlay.has(id)
+      const auto = this.autoplay && !this.pausedByUser.has(id)
+      if (auto || manual) this.previewPool.request(id, visible, manual)
     }
   }
 
@@ -380,6 +406,7 @@ export class ThreadView {
     this.paintFrame(this.frameTex, false)
     this.paintFrame(this.rootFrameTex, true)
     this.paintReplyTexture()
+    this.paintPlayTextures()
     const edge = Color3.FromHexString(shade(hex, this.isDark ? 0.3 : -0.3))
     for (const l of this.lineMeshes) l.color = edge
   }
@@ -454,6 +481,98 @@ export class ThreadView {
     tex.update()
   }
 
+  /** Shared ▶/⏸ button textures (vector strokes, never font glyphs). */
+  private paintPlayTextures(): void {
+    const paint = (tex: DynamicTexture, playing: boolean): void => {
+      const { width: w, height: h } = tex.getSize()
+      const ctx = tex.getContext() as CanvasRenderingContext2D
+      ctx.clearRect(0, 0, w, h)
+      const dark = this.isDark
+      const pad = Math.round(h * 0.07)
+      const bw = w - pad * 2
+      const bh = h - pad * 2
+      ctx.fillStyle = dark ? 'rgba(12,12,14,0.62)' : 'rgba(250,250,252,0.72)'
+      ctx.strokeStyle = dark ? 'rgba(255,255,255,0.30)' : 'rgba(0,0,0,0.28)'
+      ctx.lineWidth = Math.max(2, h * 0.03)
+      roundRect(ctx, pad, pad, bw, bh, bh * 0.28)
+      ctx.fill()
+      ctx.stroke()
+      const ink = dark ? theme.ink : '#101014'
+      const cx = w / 2
+      const cy = h / 2
+      const s = h * 0.24
+      if (playing) {
+        const barW = s * 0.34
+        const gap = s * 0.24
+        ctx.fillStyle = ink
+        roundRect(ctx, cx - gap / 2 - barW, cy - s, barW, s * 2, barW * 0.45)
+        ctx.fill()
+        roundRect(ctx, cx + gap / 2, cy - s, barW, s * 2, barW * 0.45)
+        ctx.fill()
+      } else {
+        ctx.fillStyle = ink
+        ctx.beginPath()
+        ctx.moveTo(cx - s * 0.5, cy - s)
+        ctx.lineTo(cx - s * 0.5, cy + s)
+        ctx.lineTo(cx + s * 0.92, cy)
+        ctx.closePath()
+        ctx.fill()
+      }
+      tex.update()
+    }
+    paint(this.playTexOff, false)
+    paint(this.playTexOn, true)
+  }
+
+  /** Point a node's button at the right shared texture (▶ or ⏸). */
+  private setPlayState(n: TNode, playing: boolean): void {
+    setCardTexture(n.playMat, playing ? this.playTexOn : this.playTexOff)
+  }
+
+  /**
+   * Should this node's ▶ button be visible? Only for posts that can animate
+   * (poster-render knowledge or v3 hints), never for pool-rejected/static
+   * posts, and never when livePreviews = 0 (a dead control).
+   */
+  private playButtonVisible(n: TNode): boolean {
+    if (!n.poster) return false
+    if (this.previewPool.isRejected(n.meta.eventId)) return false
+    if (this.previewPool.opts.maxSlots <= 0) return false
+    const animated = this.assets?.isAnimated(n.meta)
+    return animated === true || (animated === undefined && (n.meta.animHint || n.meta.cameraCount > 0))
+  }
+
+  /**
+   * Settings → Interface → "Autoplay animations" (same semantics as the
+   * board): OFF freezes auto-started nodes, ON resumes them; user-started
+   * plays and explicit pauses are always respected.
+   */
+  setAutoplay(on: boolean): void {
+    if (this.autoplay === on) return
+    this.autoplay = on
+    for (const n of this.nodes.values()) {
+      const id = n.meta.eventId
+      if (!n.live) continue
+      if (on && !this.pausedByUser.has(id) && !this.previewPool.isPlaying(id)) {
+        this.previewPool.resume(id) // silent: autoplay never starts sound
+      } else if (!on && !this.manualPlay.has(id) && this.previewPool.isPlaying(id)) {
+        this.previewPool.pause(id)
+      }
+    }
+    for (const n of this.nodes.values()) this.positionPlayButton(n)
+    this.form.kick()
+  }
+
+  /** Position + visibility + icon of a node's play button. */
+  private positionPlayButton(n: TNode): void {
+    const show = this.playButtonVisible(n) && !n.mesh.isDisposed()
+    n.play.scaling.set(PLAY_W / 4, PLAY_H / 4, 1)
+    n.play.position.set(n.x - n.w / 2 + PLAY_W / 2 + 0.35, n.y + n.h / 2 - PLAY_H / 2 - 0.28, -0.12)
+    n.play.setEnabled(show)
+    if (n.live) this.setPlayState(n, this.previewPool.isPlaying(n.meta.eventId))
+    else this.setPlayState(n, false)
+  }
+
   private paintFrame(tex: DynamicTexture, root: boolean): void {
     const { width: w, height: h } = tex.getSize()
     const ctx = tex.getContext() as CanvasRenderingContext2D
@@ -497,6 +616,11 @@ export class ThreadView {
     if (!this.assets || !this.index) return
     const metas = this.index.flatten(rootId).filter((m) => !m.hashFailed && !m.tombstoned)
     if (metas.length === 0) return
+    // play-intent bookkeeping belongs to this tree: drop entries for posts
+    // that are no longer part of it (the map rebuilt)
+    const inTree = new Set(metas.map((m) => m.eventId))
+    for (const id of [...this.manualPlay]) if (!inTree.has(id)) this.manualPlay.delete(id)
+    for (const id of [...this.pausedByUser]) if (!inTree.has(id)) this.pausedByUser.delete(id)
 
     const pos = this.layout(metas, rootId)
 
@@ -552,14 +676,27 @@ export class ThreadView {
       reply.isPickable = true
       reply.metadata = { treply: meta }
 
+      // ▶/⏸ play button, bottom-left (mirrors the reply pill); toggles this
+      // node's animation + embedded sound. Picked in tapAt before the node.
+      const play = MeshBuilder.CreatePlane(`tplay-${meta.eventId.slice(0, 8)}`, { width: 4, height: 4 }, this.scene)
+      const playMat = makeCardMaterial(this.scene)
+      play.material = playMat
+      setCardTexture(playMat, this.playTexOff)
+      setCardWhite(playMat)
+      setCardFlip(playMat, 'dyn')
+      play.isPickable = true
+      play.metadata = { tplay: meta }
+
       setCardTint(mat, meta.tint || theme.panel)
       const node: TNode = {
         meta, mesh, mat, frame, frameMat, spinner, spinnerMat, reply, replyMat,
+        play, playMat,
         poster: null, live: null, x: p.x, y: p.y, w, h, depth: p.depth,
         opacity: 0.16, fadeFrom: 0.16, fadeTo: 0.16, fadeStart: 0,
         blend: 0, fadeFromBlend: 0, fadeToBlend: 1, fadeTex2: null, fadeTint2Hex: '#FFFFFF', fadeFlip: 'raw',
       }
       this.setNodeOpacityNow(node, 0.16)
+      this.positionPlayButton(node)
       const gen = this.generation
       void this.assets.getPoster(meta).then((tex) => {
         // the map may have been cleared/reopened while the poster rendered
@@ -567,6 +704,7 @@ export class ThreadView {
         node.poster = tex
         this.crossfadeTo(node, tex, '#FFFFFF', 'rtt')
         spinner.setEnabled(false)
+        this.positionPlayButton(node) // animatable posts reveal their ▶ now
         this.syncPreviews()
         this.form.kick()
       })
@@ -865,10 +1003,39 @@ export class ThreadView {
       this.onReply?.(reply.pickedMesh.metadata.treply as ThreadMeta)
       return
     }
+    // play button second — bottom-left corner, inside the node quad
+    const play = this.scene.pick(x, y, (m) => Boolean(m.metadata?.tplay))
+    if (play?.hit && play.pickedMesh?.metadata?.tplay) {
+      this.togglePlay(play.pickedMesh.metadata.tplay as ThreadMeta)
+      return
+    }
     const pick = this.scene.pick(x, y, (m) => Boolean(m.metadata?.tnode))
     if (!pick?.hit || !pick.pickedMesh?.metadata?.tnode) return
     const meta = pick.pickedMesh.metadata.tnode as ThreadMeta
     this.onOpenModel?.(meta)
+  }
+
+  /**
+   * The ▶/⏸ button on a node: toggle its live preview — animation AND the
+   * model's embedded sound (a user gesture, so audio may start). Intent is
+   * remembered per post so panning away and back keeps the choice.
+   */
+  private togglePlay(meta: ThreadMeta): void {
+    const n = this.nodes.get(meta.eventId)
+    if (!n) return
+    const id = meta.eventId
+    if (n.live && this.previewPool.isPlaying(id)) {
+      this.previewPool.pause(id)
+      this.pausedByUser.add(id)
+      this.manualPlay.delete(id)
+    } else {
+      this.pausedByUser.delete(id)
+      this.manualPlay.add(id)
+      if (n.live) this.previewPool.resume(id, true)
+      else this.previewPool.request(id, this.visibleNodeIds(), true)
+    }
+    this.positionPlayButton(n)
+    this.form.kick()
   }
 
   resize(): void {
@@ -890,6 +1057,7 @@ export class ThreadView {
     n.mesh.dispose(); n.mat.dispose(); n.frame.dispose(); n.frameMat.dispose()
     n.spinner.dispose(); n.spinnerMat.dispose()
     n.reply.dispose(); n.replyMat.dispose()
+    n.play.dispose(); n.playMat.dispose()
     this.nodes.delete(eventId)
     this.edges = this.edges.filter((e) => e.parent !== eventId && e.child !== eventId)
     for (const l of this.lineMeshes) l.dispose()
@@ -905,6 +1073,7 @@ export class ThreadView {
       n.mesh.dispose(); n.mat.dispose(); n.frame.dispose(); n.frameMat.dispose()
       n.spinner.dispose(); n.spinnerMat.dispose()
       n.reply.dispose(); n.replyMat.dispose()
+      n.play.dispose(); n.playMat.dispose()
     }
     this.nodes.clear()
     for (const l of this.lineMeshes) l.dispose()
