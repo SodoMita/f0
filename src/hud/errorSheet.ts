@@ -13,6 +13,31 @@ export interface SheetError {
   onAction: () => void
 }
 
+/** Bind a copy-error button: copies `getText()`, flashes `.copied` for 1.8s. */
+export function bindCopyButton(btn: HTMLElement | null, getText: () => string): void {
+  if (!btn) return
+  let resetTimer = 0
+  const reset = () => {
+    btn.classList.remove('copied')
+    btn.title = 'copy error'
+    btn.setAttribute('aria-label', 'copy error')
+  }
+  btn.addEventListener('click', (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const text = getText().trim()
+    if (!text) return
+    void copyToClipboard(text).then((ok) => {
+      if (!ok) return
+      btn.classList.add('copied')
+      btn.title = 'copied!'
+      btn.setAttribute('aria-label', 'copied!')
+      clearTimeout(resetTimer)
+      resetTimer = window.setTimeout(reset, 1800)
+    })
+  })
+}
+
 /** Copy text to clipboard using the Async Clipboard API with execCommand fallback. */
 export async function copyToClipboard(text: string): Promise<boolean> {
   if (typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
