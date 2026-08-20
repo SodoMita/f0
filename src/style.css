@@ -452,6 +452,13 @@ body[data-theme="light"] .loading-bar { background: rgba(0, 0, 0, 0.12); }
 #bg-custom::-webkit-color-swatch-wrapper { padding: 2px; }
 #bg-custom::-webkit-color-swatch { border: none; border-radius: 4px; }
 body[data-theme="light"] #bg-custom { border-color: rgba(0, 0, 0, 0.4); }
+.setting-control > input[type=color] {
+  width: 40px; height: 24px; flex: none; padding: 0; background: none; cursor: pointer;
+  border: 1px dashed rgba(255, 255, 255, 0.45); border-radius: 7px;
+}
+.setting-control > input[type=color]::-webkit-color-swatch-wrapper { padding: 2px; }
+.setting-control > input[type=color]::-webkit-color-swatch { border: none; border-radius: 4px; }
+body[data-theme="light"] .setting-control > input[type=color] { border-color: rgba(0, 0, 0, 0.4); }
 
 /* switch */
 .setting-control input.sw { position: absolute; opacity: 0; pointer-events: none; }

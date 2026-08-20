@@ -104,6 +104,16 @@ export const SETTINGS: SettingDef[] = [
     unavailable: (c) => (c.fullscreen ? null : 'This browser blocks the Fullscreen API here.'),
   },
   {
+    id: 'powerPreference', label: 'GPU power preference', group: 'display', kind: 'select', default: 'high-performance',
+    options: [
+      { value: 'default', label: 'Default (browser decides)' },
+      { value: 'high-performance', label: 'High performance' },
+      { value: 'low-power', label: 'Low power' },
+    ],
+    hint: 'A context-creation hint: on dual-GPU laptops it picks integrated vs. discrete. Takes effect on the next launch.',
+    deferred: true,
+  },
+  {
     id: 'hdr', label: 'HDR output', group: 'display', kind: 'info',
     unavailable: () => UNAVAILABLE.hdrOutput,
     hint: 'Detected display range is reported below.',
@@ -116,7 +126,13 @@ export const SETTINGS: SettingDef[] = [
       { value: 'none', label: 'Off' },
       { value: 'standard', label: 'Standard' },
       { value: 'aces', label: 'ACES filmic' },
+      { value: 'pbrNeutral', label: 'Khronos PBR Neutral' },
     ],
+    hint: 'Khronos PBR Neutral is the glTF reference curve: mid-tones stay colour-accurate while highlights roll off gently.',
+  },
+  {
+    id: 'dithering', label: 'Dithering', group: 'display', kind: 'toggle', default: false,
+    hint: 'Adds a fine noise grain to the final colour, hiding banding in smooth gradients.',
   },
   { id: 'calibration', label: 'Show calibration pattern', group: 'display', kind: 'action', hint: 'Greyscale ramp + clipping bars. Raise brightness until the darkest bar is just visible.' },
 
@@ -221,6 +237,7 @@ export const SETTINGS: SettingDef[] = [
       { value: 'off', label: 'Off' },
       { value: 'contact', label: 'Contact shadows only' },
       { value: 'dynamic', label: 'Dynamic (self-shadowing)' },
+      { value: 'cascaded', label: 'Cascaded (large scenes)' },
     ],
   },
   {
@@ -229,9 +246,30 @@ export const SETTINGS: SettingDef[] = [
       { value: '512', label: '512' }, { value: '1024', label: '1024' },
       { value: '2048', label: '2048' }, { value: '4096', label: '4096' },
     ],
-    showIf: (v) => v.shadows === 'dynamic',
+    showIf: (v) => v.shadows === 'dynamic' || v.shadows === 'cascaded',
   },
   { id: 'shadowSoftness', label: 'Shadow softness', group: 'lighting', kind: 'slider', default: 40, ...pct, showIf: (v) => v.shadows === 'dynamic' },
+  {
+    id: 'shadowFilter', label: 'Shadow filtering', group: 'lighting', kind: 'select', default: 'blurESM',
+    options: [
+      { value: 'blurESM', label: 'Blur exponential (smooth)' },
+      { value: 'esm', label: 'Exponential (sharpest)' },
+      { value: 'pcf', label: 'PCF (percentage closer)' },
+      { value: 'pcss', label: 'PCSS (contact hardening)' },
+    ],
+    showIf: (v) => v.shadows === 'dynamic',
+    hint: 'PCSS softens shadows the further they land from the caster. Cascaded mode filters itself (PCF + cascade blend).',
+  },
+  {
+    id: 'shadowBias', label: 'Shadow bias', group: 'lighting', kind: 'slider', default: 5, min: 0, max: 100, step: 1,
+    showIf: (v) => v.shadows === 'dynamic' || v.shadows === 'cascaded',
+    hint: 'Depth offset against shadow acne stripes. Raise only until the artefacts vanish — too much detaches shadows.',
+  },
+  {
+    id: 'shadowNormalBias', label: 'Shadow normal bias', group: 'lighting', kind: 'slider', default: 10, min: 0, max: 100, step: 1,
+    showIf: (v) => v.shadows === 'dynamic' || v.shadows === 'cascaded',
+    hint: 'Offset along the surface normal; helps on curved or thin geometry.',
+  },
   { id: 'contactShadowStrength', label: 'Contact shadow strength', group: 'lighting', kind: 'slider', default: 55, ...pct, showIf: (v) => v.shadows !== 'off' },
   {
     id: 'ao', label: 'Ambient occlusion', group: 'lighting', kind: 'select', default: 'off',
@@ -251,6 +289,20 @@ export const SETTINGS: SettingDef[] = [
   },
   { id: 'rayTracing', label: 'Hardware ray tracing', group: 'lighting', kind: 'info', unavailable: () => UNAVAILABLE.rayTracing },
   { id: 'lightIntensity', label: 'Light rig intensity', group: 'lighting', kind: 'slider', default: 100, min: 20, max: 200, step: 1, unit: '%' },
+  {
+    id: 'fog', label: 'Fog', group: 'lighting', kind: 'select', default: 'off',
+    options: [
+      { value: 'off', label: 'Off' },
+      { value: 'linear', label: 'Linear' },
+      { value: 'exp', label: 'Exponential' },
+      { value: 'exp2', label: 'Exponential squared' },
+    ],
+    hint: 'Camera-distance atmosphere in the viewer and studio.',
+  },
+  { id: 'fogDensity', label: 'Fog density', group: 'lighting', kind: 'slider', default: 40, min: 1, max: 200, step: 1, showIf: (v) => v.fog === 'exp' || v.fog === 'exp2' },
+  { id: 'fogStart', label: 'Fog start', group: 'lighting', kind: 'slider', default: 2, min: 0, max: 200, step: 0.5, showIf: (v) => v.fog === 'linear' },
+  { id: 'fogEnd', label: 'Fog end', group: 'lighting', kind: 'slider', default: 40, min: 1, max: 2000, step: 1, showIf: (v) => v.fog === 'linear' },
+  { id: 'fogColor', label: 'Fog colour', group: 'lighting', kind: 'color', default: '#0B0B0C', showIf: (v) => v.fog !== 'off' },
 
   // --------------------------------------------------------------- post
   { id: 'bloom', label: 'Bloom', group: 'post', kind: 'toggle', default: false },
@@ -267,6 +319,53 @@ export const SETTINGS: SettingDef[] = [
   { id: 'vignette', label: 'Vignette', group: 'post', kind: 'toggle', default: false },
   { id: 'grain', label: 'Film grain', group: 'post', kind: 'toggle', default: false },
   { id: 'grainIntensity', label: 'Grain intensity', group: 'post', kind: 'slider', default: 15, ...pct, showIf: (v) => !!v.grain },
+  {
+    id: 'dof', label: 'Depth of field', group: 'post', kind: 'toggle', default: false,
+    hint: 'Lens-style blur by distance from the focus plane. Viewer & studio only.',
+    unavailable: (c) => (c.webgl2 ? null : 'Depth of field needs WebGL2 (depth textures).'),
+  },
+  {
+    id: 'dofFStop', label: 'Aperture (f-stop)', group: 'post', kind: 'slider', default: 1.4, min: 0.8, max: 22, step: 0.1, unit: 'ƒ/',
+    hint: 'Lower f-stop = shallower depth of field = stronger background blur.',
+    showIf: (v) => !!v.dof,
+  },
+  { id: 'dofFocus', label: 'Focus distance', group: 'post', kind: 'slider', default: 2000, min: 100, max: 20000, step: 50, unit: 'mm', showIf: (v) => !!v.dof },
+  {
+    id: 'dofQuality', label: 'Blur quality', group: 'post', kind: 'select', default: 'medium',
+    options: [
+      { value: 'low', label: 'Low (subtle)' },
+      { value: 'medium', label: 'Medium (standard)' },
+      { value: 'high', label: 'High (fine)' },
+    ],
+    showIf: (v) => !!v.dof,
+  },
+  {
+    id: 'chromaticAberration', label: 'Chromatic aberration', group: 'post', kind: 'toggle', default: false,
+    hint: 'Colour fringing toward the frame edges, like a cheap lens.',
+  },
+  { id: 'caAmount', label: 'Aberration amount', group: 'post', kind: 'slider', default: 30, min: 0, max: 100, step: 1, showIf: (v) => !!v.chromaticAberration },
+  {
+    id: 'glow', label: 'Glow (emissive)', group: 'post', kind: 'toggle', default: false,
+    hint: 'Emissive surfaces bleed light. Unlike bloom this is per-material, not a whole-screen threshold.',
+  },
+  { id: 'glowIntensity', label: 'Glow intensity', group: 'post', kind: 'slider', default: 60, min: 0, max: 200, step: 1, unit: '%', showIf: (v) => !!v.glow },
+  {
+    id: 'motionBlur', label: 'Motion blur', group: 'post', kind: 'toggle', default: false,
+    hint: 'Velocity-based blur while geometry or the camera moves. Render-on-demand stills come out clean.',
+    unavailable: (c) => (c.webgl2 ? null : 'Motion blur needs WebGL2 (velocity render targets).'),
+  },
+  { id: 'motionBlurStrength', label: 'Motion blur strength', group: 'post', kind: 'slider', default: 100, min: 0, max: 200, step: 1, unit: '%', showIf: (v) => !!v.motionBlur },
+  {
+    id: 'curvature', label: 'Surface curvature', group: 'post', kind: 'toggle', default: false,
+    hint: 'Tints ridges white and valleys black — the CAD inspection view for a model\'s surface.',
+    unavailable: (c) => (c.webgl2 ? null : 'Surface curvature needs WebGL2 (normal buffer render targets).'),
+  },
+  { id: 'curvatureStrength', label: 'Curvature strength', group: 'post', kind: 'slider', default: 100, min: 0, max: 200, step: 1, unit: '%', showIf: (v) => !!v.curvature },
+  {
+    id: 'highlight', label: 'Model outline', group: 'post', kind: 'toggle', default: false,
+    hint: 'Draws a rim outline around the open model in the viewer.',
+  },
+  { id: 'highlightColor', label: 'Outline colour', group: 'post', kind: 'color', default: '#FF5C35', showIf: (v) => !!v.highlight },
 
   // ------------------------------------------------------------- camera
   { id: 'fov', label: 'Field of view', group: 'camera', kind: 'slider', default: 46, min: 20, max: 120, step: 1, unit: '°' },
@@ -380,17 +479,28 @@ export function sanitizeSettingsRecord(saved: unknown): SettingsValues {
     out.nearClip = BY_ID.nearClip.default as number
     out.farClip = BY_ID.farClip.default as number
   }
+  // Same story for the linear fog range: start < end or the fog ramp inverts.
+  if (Number(out.fogStart) >= Number(out.fogEnd)) {
+    out.fogStart = BY_ID.fogStart.default as number
+    out.fogEnd = BY_ID.fogEnd.default as number
+  }
   return out
 }
 
 /** Quality presets — only the graphics keys; interface/audio are never touched. */
 export const PRESETS: Record<string, SettingsValues> = {
+  // Low = NO post-processing pipeline at all: no AA of any kind, no upscaler,
+  // no sharpen, no bloom/grain/vignette, nothing. The work goes into a low
+  // render scale instead — the cheapest thing a weak GPU can be given. All
+  // pipeline-owning keys are listed explicitly so switching DOWN to Low also
+  // turns off post effects the user may have switched on before.
   low: {
     resolutionMode: 'scale', renderScale: 65, renderScalePow2: false, adaptiveResolution: true,
-    msaa: '1', fxaa: true, taa: false, upscaler: 'spatial', upscalerMode: 'performance', sharpen: true, sharpness: 45,
+    msaa: '1', fxaa: false, taa: false, upscaler: 'off', sharpen: false, sharpness: 30,
     pbr: false, pbrSpecular: false, pbrReflections: false, textureQuality: '1024', anisotropy: '1', mipmaps: true,
     previewWidth: 224, shadows: 'off', ao: 'off', ssr: false,
     bloom: false, vignette: false, grain: false,
+    dof: false, chromaticAberration: false, glow: false, motionBlur: false, curvature: false, highlight: false,
     modelRamBudget: 16, textureBudget: 12, livePreviews: 1, prefetch: 50,
   },
   medium: {
@@ -399,6 +509,7 @@ export const PRESETS: Record<string, SettingsValues> = {
     pbr: true, pbrSpecular: true, pbrReflections: false, textureQuality: '0', anisotropy: '4', mipmaps: true,
     previewWidth: 320, shadows: 'contact', contactShadowStrength: 45, ao: 'off', ssr: false,
     bloom: false, vignette: false, grain: false,
+    dof: false, chromaticAberration: false, glow: false, motionBlur: false, curvature: false, highlight: false,
     modelRamBudget: 32, textureBudget: 24, livePreviews: 3, prefetch: 100,
   },
   high: {
@@ -407,6 +518,7 @@ export const PRESETS: Record<string, SettingsValues> = {
     pbr: true, pbrSpecular: true, pbrReflections: true, textureQuality: '0', anisotropy: '8', mipmaps: true,
     previewWidth: 448, shadows: 'contact', contactShadowStrength: 55, ao: 'ssao2', aoStrength: 90, aoSamples: 8, ssr: false,
     bloom: true, bloomStrength: 30, bloomQuality: 'medium', bloomThreshold: 85, vignette: false, grain: false,
+    dof: false, chromaticAberration: false, glow: false, motionBlur: false, curvature: false, highlight: false,
     modelRamBudget: 48, textureBudget: 32, livePreviews: 5, prefetch: 100,
   },
   ultra: {
@@ -416,6 +528,7 @@ export const PRESETS: Record<string, SettingsValues> = {
     previewWidth: 640, shadows: 'dynamic', shadowQuality: '2048', shadowSoftness: 45,
     contactShadowStrength: 60, ao: 'ssao2', aoStrength: 110, aoSamples: 16, ssr: true,
     bloom: true, bloomStrength: 45, bloomQuality: 'ultra', bloomThreshold: 78, vignette: true, grain: false,
+    dof: false, chromaticAberration: false, glow: false, motionBlur: false, curvature: false, highlight: false,
     modelRamBudget: 128, textureBudget: 64, livePreviews: 8, prefetch: 200,
   },
 }

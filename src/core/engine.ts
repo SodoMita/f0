@@ -34,6 +34,12 @@ const SLOW_MS = 45 // degrade when EMA exceeds this
 const FAST_MS = 18 // restore when EMA stays below this
 const RESTORE_FRAMES = 150
 
+/** One-time context-creation options (settings with a `deferred` flag). */
+export interface FormEngineOptions {
+  /** WebGL power hint read from settings BEFORE the engine is created. */
+  powerPreference?: 'default' | 'high-performance' | 'low-power'
+}
+
 /** Where the drawing-buffer size comes from (settings: Display & resolution). */
 export interface ResolutionPolicy {
   mode: 'auto' | 'scale' | 'manual'
@@ -119,7 +125,14 @@ export class FormEngine {
     document.addEventListener('visibilitychange', kick)
   }
 
-  static create(canvas: HTMLCanvasElement): FormEngine {
+  static create(canvas: HTMLCanvasElement, opts: FormEngineOptions = {}): FormEngine {
+    // 'default' maps to undefined = let the browser pick (the honest WebGL
+    // reading of that preference); an omitted option keeps the historic
+    // 'high-performance' boot behaviour.
+    const powerPreference: GPUPowerPreference | undefined =
+      opts.powerPreference === 'default' ? undefined
+        : opts.powerPreference === 'low-power' ? 'low-power'
+          : 'high-performance'
     const engine = new Engine(
       canvas, true,
       {
@@ -129,7 +142,7 @@ export class FormEngine {
         alpha: false,
         premultipliedAlpha: false,
         preserveDrawingBuffer: false,
-        powerPreference: 'high-performance',
+        powerPreference,
         audioEngine: false,
         doNotHandleContextLost: false,
       },

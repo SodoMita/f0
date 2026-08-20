@@ -10,6 +10,8 @@ export interface PanelHooks {
   runtimeError?: (id: string) => string | null
 }
 
+const HEX_SAFE = /^#[0-9a-f]{6}$/i
+
 const SWATCHES = [
   { hex: '#0B0B0C', title: 'dark' },
   { hex: '#1d1d22', title: 'graphite' },
@@ -251,8 +253,15 @@ export class SettingsPanel {
         control.append(span('—', 'info-value'))
         break
       }
-      case 'color':
+      case 'color': {
+        const input = document.createElement('input')
+        input.type = 'color'
+        input.id = `set-${def.id}`
+        input.value = HEX_SAFE.test(this.store.str(def.id)) ? this.store.str(def.id) : String(def.default ?? '#000000')
+        input.addEventListener('input', () => commit(input.value))
+        control.append(input)
         break
+      }
     }
 
     if (def.hint) {
@@ -300,6 +309,10 @@ export class SettingsPanel {
       if (num && value !== undefined) num.value = String(value)
       const color = row.querySelector<HTMLInputElement>('#bg-custom')
       if (color && typeof value === 'string') color.value = value
+      if (def.kind === 'color') {
+        const picker = row.querySelector<HTMLInputElement>('input[type=color]')
+        if (picker && typeof value === 'string' && HEX_SAFE.test(value)) picker.value = value
+      }
       for (const sw of row.querySelectorAll<HTMLElement>('.swatch')) {
         sw.classList.toggle('active', sw.dataset.bg === value)
       }
