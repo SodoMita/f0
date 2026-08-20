@@ -46,26 +46,12 @@ def spin(axis: str = "y", period: float = 2.4) -> dict[str, Any]:
     return {"name": "spin", "channels": [_chan("rotation", times, vals)]}
 
 
-def bob(amp: float = 0.07, period: float = 1.4) -> dict[str, Any]:
-    return {"name": "bob", "channels": [
-        _chan("translation", [0.0, period * 0.5, period], [0, 0, 0, 0, amp, 0, 0, 0, 0]),
-    ]}
-
-
 def sway(axis: str = "z", deg: float = 12.0, period: float = 1.8) -> dict[str, Any]:
     times = [0.0, period * 0.25, period * 0.5, period * 0.75, period]
     vals: list[float] = []
     for d in (0.0, deg, 0.0, -deg, 0.0):
         vals.extend(q_axis(axis, d))
     return {"name": "sway", "channels": [_chan("rotation", times, vals)]}
-
-
-def shake(period: float = 0.9, deg: float = 9.0) -> dict[str, Any]:
-    times = [0.0, period * 0.2, period * 0.4, period * 0.6, period]
-    vals: list[float] = []
-    for d in (0.0, deg, -deg, deg * 0.4, 0.0):
-        vals.extend(q_axis("z", d))
-    return {"name": "shake", "channels": [_chan("rotation", times, vals)]}
 
 
 def blink(period: float = 2.6) -> dict[str, Any]:
@@ -75,67 +61,17 @@ def blink(period: float = 2.6) -> dict[str, Any]:
     ]}
 
 
-def combine(name: str, *anims: dict[str, Any]) -> dict[str, Any]:
-    ch: list[dict[str, Any]] = []
-    for a in anims:
-        ch.extend(a["channels"])
-    return {"name": name, "channels": ch}
+# Allowlist for a later pass. Empty on purpose: name-based TRS loops
+# (pulse a heart, spin a coin) shipped as "animation" and were not.
+ANIMATED: dict[str, Any] = {}
 
 
-def library_anim(name: str, dim: str) -> dict[str, Any]:
-    """Looping clip for an existing library piece. Never extrudes a plate."""
-    faces = {"smile", "grin", "sad", "angry", "wow", "wink", "meh", "love", "dead", "cool"}
-    if name in faces:
-        return combine("idle", pulse(1.6, 1.06), bob(0.03, 1.6))
-    table = {
-        "heart": pulse(0.9, 1.18),
-        "star": combine("twinkle", spin("z", 3.2), pulse(1.6, 1.08)),
-        "plus": pulse(1.1, 1.14),
-        "minus": pulse(1.3, 1.08),
-        "check": pulse(1.0, 1.12),
-        "xmark": pulse(1.0, 1.12),
-        "question": bob(0.08, 1.1),
-        "bang": bob(0.1, 0.85),
-        "thumbup": bob(0.06, 1.2),
-        "thumbdown": bob(0.06, 1.2),
-        "spark": spin("z", 1.6),
-        "fire": pulse(0.45, 1.2),
-        "arrow": bob(0.1, 0.9),
-        "sun": spin("z", 6.0),
-        "moon": pulse(2.2, 1.07),
-        "speech": bob(0.05, 1.5),
-        "eye": blink(2.4),
-        "plane": pulse(2.0, 1.04),
-        "lock": shake(1.1, 8.0),
-        "unlock": sway("z", 10.0, 1.4),
-        "ok": pulse(1.4, 1.1),
-        "wait": combine("wait", pulse(1.0, 1.08), spin("y", 2.8)),
-        "off": pulse(1.8, 1.06),
-        "pin": bob(0.09, 1.1),
-        "flag": sway("z", 16.0, 1.5),
-        "bell": sway("x", 14.0, 1.1),
-        "cube": spin("y", 3.2),
-        "sphere": bob(0.08, 1.3),
-        "cylinder": spin("y", 3.6),
-        "cone": spin("y", 3.2),
-        "tetra": spin("y", 2.8),
-        "pyramid": spin("y", 3.4),
-        "torus": spin("x", 2.6),
-        "capsule": bob(0.07, 1.4),
-        "hexprism": spin("y", 3.0),
-        "wedge": spin("y", 3.5),
-        "octa": spin("y", 2.4),
-        "house": bob(0.03, 2.0),
-        "tree": sway("z", 8.0, 2.2),
-        "person": bob(0.04, 1.3),
-        "crate": pulse(2.4, 1.04),
-        "coin": spin("y", 1.6),
-        "key": spin("y", 2.8),
-        "arrow3d": bob(0.1, 0.95),
-    }
-    if name in table:
-        return table[name]
-    return pulse(1.5, 1.08) if dim == "2d" else spin("y", 3.0)
+def library_anim(name: str, dim: str) -> dict[str, Any] | None:
+    """No shipped clips. Helpers above stay for a later author."""
+    void = name, dim
+    del void
+    fn = ANIMATED.get(name)
+    return fn() if callable(fn) else None
 
 
 def _u8(v: float) -> int:
@@ -160,14 +96,15 @@ def write_glb(mesh, path: str, name: str, color=(0.8, 0.8, 0.8), double_sided=Tr
     idx = struct.pack("<" + "H" * nidx, *mesh.i)
 
     blobs: list[bytes] = [pos, nrm, col, idx]
-    anim = animation or library_anim(name, "2d" if prefer == "+z" else "3d")
-    anim_meta: list[tuple[str, int, int, int, int]] = []
-    for ch in anim["channels"]:
-        tblob = struct.pack("<" + "f" * len(ch["times"]), *ch["times"])
-        vblob = struct.pack("<" + "f" * len(ch["values"]), *ch["values"])
-        anim_meta.append((ch["path"], len(ch["times"]), len(blobs), len(blobs) + 1, len(ch["values"])))
-        blobs.append(tblob)
-        blobs.append(vblob)
+    anim = animation
+    anim_meta: list[tuple[str, int, int, int]] = []
+    if anim and anim.get("channels"):
+        for ch in anim["channels"]:
+            tblob = struct.pack("<" + "f" * len(ch["times"]), *ch["times"])
+            vblob = struct.pack("<" + "f" * len(ch["values"]), *ch["values"])
+            anim_meta.append((ch["path"], len(ch["times"]), len(blobs), len(blobs) + 1))
+            blobs.append(tblob)
+            blobs.append(vblob)
 
     views: list[tuple[int, int, int | None]] = []
     cursor = 0
@@ -189,18 +126,25 @@ def write_glb(mesh, path: str, name: str, color=(0.8, 0.8, 0.8), double_sided=Tr
         {"bufferView": 2, "componentType": 5121, "count": nvert, "type": "VEC4", "normalized": True},
         {"bufferView": 3, "componentType": 5123, "count": nidx, "type": "SCALAR"},
     ]
-    channels = []
-    samplers = []
-    for chan_path, count, t_i, v_i, _nval in anim_meta:
-        t_acc = len(accessors)
-        accessors.append({"bufferView": t_i, "componentType": 5126, "count": count, "type": "SCALAR",
-                          "min": [min(anim["channels"][len(samplers)]["times"])],
-                          "max": [max(anim["channels"][len(samplers)]["times"])]})
-        vtype = "VEC4" if chan_path == "rotation" else "VEC3"
-        accessors.append({"bufferView": v_i, "componentType": 5126, "count": count, "type": vtype})
-        interp = anim["channels"][len(samplers)].get("interpolation", "LINEAR")
-        samplers.append({"input": t_acc, "output": t_acc + 1, "interpolation": interp})
-        channels.append({"sampler": len(samplers) - 1, "target": {"node": 1, "path": chan_path}})
+    channels: list[dict[str, Any]] = []
+    samplers: list[dict[str, Any]] = []
+    if anim and anim_meta:
+        for chan_path, count, t_i, v_i in anim_meta:
+            t_acc = len(accessors)
+            accessors.append({"bufferView": t_i, "componentType": 5126, "count": count, "type": "SCALAR",
+                              "min": [min(anim["channels"][len(samplers)]["times"])],
+                              "max": [max(anim["channels"][len(samplers)]["times"])]})
+            vtype = "VEC4" if chan_path == "rotation" else "VEC3"
+            accessors.append({"bufferView": v_i, "componentType": 5126, "count": count, "type": vtype})
+            interp = anim["channels"][len(samplers)].get("interpolation", "LINEAR")
+            samplers.append({"input": t_acc, "output": t_acc + 1, "interpolation": interp})
+            channels.append({"sampler": len(samplers) - 1, "target": {"node": 1, "path": chan_path}})
+
+    nodes: list[dict[str, Any]]
+    if anim_meta:
+        nodes = [{"name": name, "children": [1]}, {"name": name + "-mesh", "mesh": 0}]
+    else:
+        nodes = [{"name": name, "mesh": 0}]
 
     gltf: dict[str, Any] = {
         "asset": {"version": "2.0", "generator": "FORM/0 library"},
@@ -208,10 +152,7 @@ def write_glb(mesh, path: str, name: str, color=(0.8, 0.8, 0.8), double_sided=Tr
         "extensionsRequired": ["KHR_mesh_quantization"],
         "scene": 0,
         "scenes": [{"nodes": [0], "name": name}],
-        "nodes": [
-            {"name": name, "children": [1]},
-            {"name": name + "-mesh", "mesh": 0},
-        ],
+        "nodes": nodes,
         "meshes": [{
             "name": name,
             "primitives": [{
@@ -236,12 +177,13 @@ def write_glb(mesh, path: str, name: str, color=(0.8, 0.8, 0.8), double_sided=Tr
             for o, n, t in views
         ],
         "buffers": [{"byteLength": len(bin_body)}],
-        "animations": [{
-            "name": anim.get("name", "idle"),
+    }
+    if anim_meta:
+        gltf["animations"] = [{
+            "name": (anim or {}).get("name", "idle"),
             "channels": channels,
             "samplers": samplers,
-        }],
-    }
+        }]
 
     json_bytes = json.dumps(gltf, separators=(",", ":")).encode("utf-8")
     json_bytes += b" " * pad4(len(json_bytes))

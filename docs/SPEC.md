@@ -774,9 +774,10 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     `src/studio/library/glb/` (traced plates in `library/2d/`). Clicking a
     cell ADDS the mesh to the studio scene (it does not clear an imported
     model). Faces are authored CCW / outward so lighting cannot invert. No
-    cameras/textures/skins. Every piece carries a looping TRS clip (pulse /
-    spin / bob / sway) on a child node so studio lookAt cannot overwrite it;
-    2D plates stay flat — never extrude a plate into a 3D counterpart.
+    cameras/textures/skins. Library pieces ship still: the writer can attach
+    a TRS clip on a child node (`scripts/libglb.py`) but no name-based
+    pulse/spin is authored. 2D plates stay flat — never extrude a plate
+    into a 3D counterpart.
     Vertex colours/normals are quantized (`KHR_mesh_quantization`); Draco is
     applied only when it actually shrinks the file. Studio starts the clip
     on place and the demand loop stays awake while it plays. Posters

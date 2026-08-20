@@ -6,9 +6,9 @@ move it to **Done** with a commit reference. One agent per area.
 ## Done
 
 - [x] **Studio library clips + quantized GLBs** (agent arena, 2026-08-20):
-      every 2D plate and 3D primitive now ships a looping TRS animation
-      (pulse / spin / bob / sway / blink) on a *child* node so studio
-      `lookAt` cannot overwrite it. 2D stays flat — never extruded into 3D.
+      writer + Draco encode stay (`scripts/libglb.py`,
+      `scripts/encode-library.mjs`) but no name-based TRS clips ship — the
+      first pass was motion-by-label, not authored motion. 2D stays flat.
       Vertex colours are UNSIGNED_BYTE and normals BYTE via
       `KHR_mesh_quantization`; Draco is applied only when it shrinks the
       file (`scripts/encode-library.mjs`). Studio starts the clip on place

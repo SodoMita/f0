@@ -90,7 +90,7 @@ try {
     const next = new Uint8Array(readFileSync(dest))
     const prev = statSync(src).size
     const report = inspect(next)
-    if (!report.ok || report.animations < 1 || next.byteLength >= prev) {
+    if (!report.ok || next.byteLength >= prev) {
       skipped++
       continue
     }
