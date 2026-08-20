@@ -1115,3 +1115,26 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     headless probe renders a local GLB through Direct3DPool
     (request → onPlaced → isLive → release); the button toggle persists
     across reload with no page errors.
+
+76. OVERLAY DRAW ORDER — CARDS/NODES MUST NOT PAINT OVER THEIR BUTTONS
+    (2026-08-20):
+    A board card's reply badge and play button (and a thread node's reply
+    pill and play button) are corner-mounted planes that float in FRONT of
+    their card/node in z, yet the post could still paint over them — the
+    user saw "posts appear in front of their buttons". Babylon sorts
+    transparent meshes back-to-front by the distance from the camera to
+    each mesh's bounding-sphere CENTER (`RenderingGroup.defaultTransparent
+    SortCompare`). A corner button's center is several world units off its
+    card's center, so a card near screen-center sorted CLOSER than its own
+    buttons and drew on top of them wherever its opaque poster/live pixels
+    reached the corner (position- and content-dependent — hence
+    "sometimes"). Fix: the overlay meshes (badge + play on the board,
+    reply + play in the thread) render in `renderingGroupId = 1`, which
+    Babylon renders after group 0 (cards/nodes/backdrop), independent of
+    the distance sort — they are always on top. Depth convention is
+    unchanged (smaller z = closer; overlays at z ≈ -0.05…-0.12, cards 0).
+    Guard: `node scripts/overlay-order.mjs` (asserts overlays are group 1,
+    cards/nodes group 0, overlays geometrically in front, and that a
+    centered card's center sorts nearer than its own button).
+
+ (board+thread: overlays always render above their card/node (fix buttons hidden))
