@@ -318,7 +318,13 @@
       <span id="loading-bar" class="loading-bar" hidden><i></i></span>
     </div>
 
-    <div id="toast" class="hud" hidden></div>
+    <div id="toast" class="hud" hidden>
+      <span id="toast-text" class="toast-text"></span>
+      <button id="btn-toast-copy" class="hbtn small copy-err" title="copy error" aria-label="copy error">
+        <svg class="i-copy" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        <svg class="i-copied" viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 12.5l5 5 10-10"/></svg>
+      </button>
+    </div>
 
     <!-- First-run legend (spec 02 §1.1 — mandatory, reopenable, seen-flag in IDB).
          The app is wordless; this is the one place glyphs are explained. -->
@@ -382,7 +388,13 @@
       <div class="sheet-card">
         <div class="sheet-head">
           <span id="error-code" class="sheet-code">E000</span>
-          <button id="btn-error-close" class="hbtn small" title="dismiss" aria-label="dismiss"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12"/><path d="M18 6L6 18"/></svg></button>
+          <div class="sheet-head-actions">
+            <button id="btn-error-copy" class="hbtn small" title="copy error" aria-label="copy error">
+              <svg class="i-copy" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              <svg class="i-copied" viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 12.5l5 5 10-10"/></svg>
+            </button>
+            <button id="btn-error-close" class="hbtn small" title="dismiss" aria-label="dismiss"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12"/><path d="M18 6L6 18"/></svg></button>
+          </div>
         </div>
         <div id="error-cause" class="sheet-cause"></div>
         <div class="sheet-actions">

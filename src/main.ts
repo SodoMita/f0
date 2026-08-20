@@ -27,7 +27,7 @@ import { graphics } from './render/graphics'
 import { mixer } from './audio/mixer'
 import { Legend } from './hud/legend'
 import { NetworkPanel } from './hud/networkPanel'
-import { ErrorSheet, ERRORS } from './hud/errorSheet'
+import { ErrorSheet, ERRORS, bindCopyButton } from './hud/errorSheet'
 import { attachAllDragNumbers } from './studio/dragNumber'
 import { transfers, formatRate, formatBytes, formatDirStats, type TransferStats } from './core/transfer'
 import { handoffContainer } from './core/sceneTransfer'
@@ -202,9 +202,11 @@ async function boot(): Promise<void> {
   }
   transfers.subscribe(paintTransfers)
 
+  const toastText = $('toast-text')
+  bindCopyButton($('btn-toast-copy'), () => toastText.textContent ?? '')
   let toastTimer = 0
   function showToast(msg: string): void {
-    toast.textContent = msg
+    toastText.textContent = msg
     toast.hidden = false
     clearTimeout(toastTimer)
     toastTimer = window.setTimeout(() => { toast.hidden = true }, 3200)
@@ -395,7 +397,8 @@ async function boot(): Promise<void> {
         setStudioStatus(warnCount ? `${warnCount} warning${warnCount === 1 ? '' : 's'} · ${brief}` : brief, warnCount ? 'busy' : 'ok')
       } catch (err) {
         fillModelInfo(null)
-        setStudioStatus(err instanceof Error ? err.message : 'import failed', 'err')
+        setStudioStatus('')
+        errorSheet.show(ERRORS.STUDIO_IMPORT(err instanceof Error ? err.message : 'import failed'))
       }
     }, { once: true })
     fileInput.click()
@@ -444,8 +447,10 @@ async function boot(): Promise<void> {
         if (signal.aborted) return
         if (p.stage === 'blossom') setStudioStatus('upload…', 'busy')
         else if (p.stage === 'relay') setStudioStatus('nostr…', 'busy')
-        else if (p.stage === 'done') setStudioStatus(`done · ${p.ok ?? 0}/${(p.ok ?? 0) + (p.failed ?? 0)}`, p.failed ? 'err' : 'ok')
-        else if (p.stage === 'error') setStudioStatus(p.detail ?? 'failed', 'err')
+        // Partial relay failure is a warning (amber), not an error: the post
+        // still went out and we navigate to it right after.
+        else if (p.stage === 'done') setStudioStatus(`done · ${p.ok ?? 0}/${(p.ok ?? 0) + (p.failed ?? 0)}`, p.failed ? 'busy' : 'ok')
+        else if (p.stage === 'error') errorSheet.show(ERRORS.STUDIO_PUBLISH(p.detail ?? 'publish failed'))
       }
       const result = await publishModel(
         {
@@ -479,7 +484,10 @@ async function boot(): Promise<void> {
       studioReply = null
     } catch (err) {
       if (isAbortError(err)) setStudioStatus('cancelled')
-      else setStudioStatus(err instanceof Error ? err.message : 'publish failed', 'err')
+      else {
+        setStudioStatus('')
+        errorSheet.show(ERRORS.STUDIO_PUBLISH(err instanceof Error ? err.message : 'publish failed'))
+      }
     } finally {
       publishing = false
       publishAbort = null
@@ -506,7 +514,10 @@ async function boot(): Promise<void> {
       updateTextBudget()
       setStudioStatus('additions removed · original bytes')
       studio.kick(500)
-    }).catch((err) => setStudioStatus(err instanceof Error ? err.message : 'reset failed', 'err'))
+    }).catch((err) => {
+      setStudioStatus('')
+      errorSheet.show(ERRORS.STUDIO_IMPORT(err instanceof Error ? err.message : 'reset failed'))
+    })
   })
 
   // ---- Studio card preview (format v4) ----
