@@ -153,7 +153,7 @@ async function boot(): Promise<void> {
   const animFrame = $('anim-frame')
   const animDir = $('anim-dir') as HTMLButtonElement
   const animStepped = $('anim-stepped') as HTMLButtonElement
-  const animSpeed = $('anim-speed') as HTMLSelectElement
+  const animSpeed = $('anim-speed') as HTMLInputElement
   const metaText = $('meta-text')
   const toast = $('toast')
 
@@ -1057,7 +1057,7 @@ async function boot(): Promise<void> {
     engine.kick()
     syncAnimRail()
   })
-  animSpeed.addEventListener('change', () => {
+  animSpeed.addEventListener('input', () => {
     viewer.animator.setSpeed(parseFloat(animSpeed.value) || 1)
   })
   // Playback → HUD: the animator reports every cursor move (tick or seek);
@@ -1098,7 +1098,9 @@ async function boot(): Promise<void> {
     animDir.classList.toggle('reverse', !a.forward)
     animDir.title = a.forward ? 'direction: forward (click for reverse)' : 'direction: reverse (click for forward)'
     animStepped.classList.toggle('active', a.stepped)
-    animSpeed.value = String(a.speed)
+    // Don't overwrite the field while the user is editing it (number inputs
+    // can hold transient states like "1." mid-typing).
+    if (document.activeElement !== animSpeed) animSpeed.value = String(a.speed)
     syncPlay()
   }
   $('btn-thread').addEventListener('click', () => {
