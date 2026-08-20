@@ -50,6 +50,10 @@ export const LIMITS = {
   posterAspectMax: 2.0,
   boardRoots: 48,
   maxEventsPage: 200,
+  // Max chars of nostr event `content` we publish / accept as the model name
+  // (AMENDMENT 66). Older posts have empty content; anything longer is
+  // off-format and the event is skipped.
+  contentChars: 140,
 } as const
 
 /** Validated `dim` tag -> poster pixel size, or null when unusable. */

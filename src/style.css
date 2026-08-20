@@ -866,6 +866,31 @@ body[data-theme="light"] .sheet-card { background: rgba(253, 246, 245, 0.97); bo
   line-height: 1.45;
   max-width: min(56vw, 520px);
 }
+
+/* Imported-model info block (upload tab): stats from the safety scan, a
+   size meter that runs green -> red toward the 20 MiB hard limit, and the
+   big/near-limit warnings. No custom properties — the heat colour is set
+   inline from sizeHeatColor() so both themes share it. */
+.model-info {
+  margin-top: 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.03);
+}
+.mi-rows { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; }
+.mi-rows .mi-k { font: 10px/1.5 ui-monospace, monospace; color: var(--muted); }
+.mi-rows .mi-v { font: 11px/1.5 ui-monospace, monospace; color: var(--ink); text-align: right; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mi-meter { height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+.mi-meter i { display: block; height: 100%; width: 0; border-radius: 2px; }
+.mi-warnings { margin: 0; padding: 0 0 0 16px; display: flex; flex-direction: column; gap: 2px; }
+.mi-warnings li { font: 10.5px/1.45 ui-monospace, monospace; color: var(--warning); }
+.mi-reset { width: 100%; padding: 12px 14px; }
+body[data-theme="light"] .model-info { background: rgba(0, 0, 0, 0.03); }
+body[data-theme="light"] .mi-meter { background: rgba(0, 0, 0, 0.10); }
 #btn-studio-publish:disabled { opacity: 0.4; cursor: not-allowed; }
 #btn-studio-publish.danger {
   background: transparent;

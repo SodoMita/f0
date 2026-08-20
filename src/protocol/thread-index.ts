@@ -19,6 +19,8 @@ export type ThreadMeta = {
   cameraCount: number
   hasAudio: boolean
   filename?: string
+  /** Model name from event `content` (AMENDMENT 66); search + drawer. */
+  name?: string
   sourceFormat?: string
   previewCamera?: number
   previewAnimation?: number

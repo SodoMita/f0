@@ -21,6 +21,9 @@ export interface PublishInput {
   rootId?: string
   parentId?: string
   relayHint?: string
+  /** Model name → event `content` (AMENDMENT 66: was always ''). Lets relay
+   *  full-text search (NIP-50) find a post by name. Bounded, single line. */
+  name?: string
   previewCamera?: number
   previewAnimation?: number
   hasAudio?: boolean
@@ -118,7 +121,12 @@ export async function publishModel(
     }
 
     throwIfAborted(deps.signal)
-    const template: EventTemplate = { kind: MODEL_KIND, created_at: now, tags, content: '' }
+    const template: EventTemplate = {
+      kind: MODEL_KIND,
+      created_at: now,
+      tags,
+      content: (input.name ?? '').slice(0, LIMITS.contentChars),
+    }
 
     // Compute the event id now (RelayPool.publish re-finalizes the same
     // template+secret, so it yields the identical id).
