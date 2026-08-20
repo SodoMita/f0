@@ -531,6 +531,10 @@ move it to **Done** with a commit reference. One agent per area.
   pushes to `main`.
 ## In progress
 
+- [ ] **HRTF positional post audio** — claimed by agent arena, 2026-08-20.
+      Route verified media elements through per-post WebAudio PannerNodes and
+      add in-canvas sound buttons to audio posts on the gallery and thread map.
+
 - [ ] **Paint editor (hand-writing ink)** — claimed by agent arena, 2026-08-19.
       Rebased onto main (PR #12: preview width / viewer hand-off / zoom
       RTTs / typing guard). SPEC AMENDMENT 54.
