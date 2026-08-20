@@ -5,6 +5,22 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 
+- [x] **Direct-3D cards bugfix** (agent arena, 2026-08-20, SPEC AMENDMENT 76):
+      the AMENDMENT 75 toggle rendered real GLBs but shipped several bugs.
+      `release()` of a still-loading post now cancels (same as PreviewPool)
+      instead of dropping the id from `loading` — a parse can no longer land
+      on a recycled card; scroll-back un-cancels. A full pool is not a
+      failure: capacity misses retry every visibility pass instead of
+      latching `slot.failed` onto the poster forever. Eviction uses the
+      caller's fresh visible set (board now ticks the pool). Thread 3D loads
+      only near the viewport. Imported GLB lights/cameras are disabled and
+      the leftover board dummy hemi is too (no double-lit PBR, no neighbour
+      lighting). Models sit behind the card plane; overlays render in group 1;
+      transparent cards disable depth write. FormEngine calls
+      `beginFrame()`/`endFrame()` so `getDeltaTime()` is real and
+      AnimationGroup.start() on 3D cards actually advances. Guard:
+      `bun scripts/direct3d-unit.mjs`; tsc + vite clean.
+
 - [x] **Viewer: multi-track animation rail** (agent arena, 2026-08-20):
       models with animations get a second rail above the toolbar — a track
       dropdown listing the GLB animation names (unnamed clips fall back to

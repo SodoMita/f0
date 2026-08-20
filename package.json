@@ -26,6 +26,7 @@
     "check:load": "bun scripts/load-unit.mjs",
     "bootstrap": "bash scripts/agent-bootstrap.sh",
     "check:anim": "bun scripts/anim-unit.mjs",
+    "check:direct3d": "bun scripts/direct3d-unit.mjs",
     "check:studio-error": "node scripts/studio-error-wrap.mjs",
     "check:overflow": "node scripts/overflow-scan.mjs",
     "check:library": "node scripts/library-unit.mjs",

@@ -26,10 +26,13 @@ export interface DirectModel {
 export interface Place3D {
   x: number
   y: number
+  /** FRONT of the model (smaller z = closer to the camera). The pool pushes
+   *  the centre back so the mesh extends away from the camera, never through
+   *  the reply/play overlays that sit at z ≈ −0.05. */
   z: number
   w: number
   h: number
-  /** depth allowance — how far the model may extend along ±Z. */
+  /** depth allowance — how far the model may extend BACK along +Z. */
   depth: number
 }
 
@@ -91,6 +94,12 @@ export class Direct3DPool {
   ) {
     this.maxSlots = opts?.maxSlots ?? 12
     configureDraco()
+    // The board scene ships a leftover dummy hemi for unlit card quads (which
+    // ignore lights). Stacking another hemi + 3 directionals on top of it
+    // double-lit every PBR model. Disable anything that isn't our rig.
+    for (const l of this.scene.lights) {
+      if (!l.name.startsWith('d3-')) l.setEnabled(false)
+    }
     // Light rig for the lit (PBR/Standard) materials of direct models. The
     // flat card quads use an unlit ShaderMaterial, so these lights only
     // illuminate the 3D models — nothing else changes. No IBL (AGENTS rule 5:
@@ -123,11 +132,19 @@ export class Direct3DPool {
   /**
    * Load a post's model directly into the scene. Returns false when the post
    * was already rejected (a failed load) or the pool is at capacity with
-   * nothing evictable — the caller falls back to the poster.
+   * nothing evictable — the caller MUST retry on the next visibility pass,
+   * not latch the card onto the poster path (that was the "only the first
+   * N cards ever go 3D" bug).
+   *
+   * `visible` is the caller's fresh on-screen set. Eviction uses it instead
+   * of `slot.visible`, which is only updated in tick() AFTER the request
+   * pass (the same deadlock AMENDMENT 48 documented for the preview pool).
    */
-  request(postId: string, place: Place3D): boolean {
+  request(postId: string, place: Place3D, visible?: ReadonlySet<string>): boolean {
     const live = this.byPost.get(postId)
     if (live) { this.place(postId, place); return true }
+    // Still parsing: un-cancel so a card that scrolled away and back keeps
+    // the in-flight result instead of discarding it and starting over.
     if (this.loading.has(postId)) { this.cancelled.delete(postId); return true }
     if (this.rejected.has(postId)) return false
 
@@ -136,7 +153,7 @@ export class Direct3DPool {
       slot = this.makeSlot()
       this.slots.push(slot)
     }
-    if (!slot) slot = this.pickEvictable()
+    if (!slot) slot = this.pickEvictable(visible)
     if (!slot) return false
     if (slot.postId) this.release(slot.postId)
     slot.pending = true
@@ -155,7 +172,11 @@ export class Direct3DPool {
   release(postId: string): void {
     const slot = this.byPost.get(postId)
     if (!slot) {
-      if (this.loading.has(postId)) this.loading.delete(postId)
+      // Still loading: mark cancelled so the parse discards its result
+      // instead of binding a model to a card nobody wants. Do NOT delete
+      // from `loading` — request() uses that to un-cancel a scroll-back.
+      // (Deleting it was the race: the parse landed on a recycled slot.)
+      if (this.loading.has(postId)) this.cancelled.add(postId)
       return
     }
     this.byPost.delete(postId)
@@ -224,8 +245,14 @@ export class Direct3DPool {
     }
   }
 
-  private pickEvictable(): Slot | undefined {
-    const offscreen = this.slots.filter((s) => s.postId && !s.pending && !s.visible)
+  private pickEvictable(visible?: ReadonlySet<string>): Slot | undefined {
+    // Only offscreen slots: evicting a VISIBLE card makes the caller
+    // re-request it immediately (poster↔3D ping-pong). The caller's fresh
+    // visible set wins over slot.visible, which tick() updates too late.
+    const offscreen = this.slots.filter((s) => {
+      if (!s.postId || s.pending) return false
+      return visible ? !visible.has(s.postId) : !s.visible
+    })
     if (!offscreen.length) return undefined
     offscreen.sort((a, b) => a.placedAt - b.placedAt)
     return offscreen[0]
@@ -282,7 +309,11 @@ export class Direct3DPool {
     const s = FILL * Math.min(w / slot.ext.x, h / slot.ext.y, Math.max(0.001, depth) / slot.ext.z)
     const clamp = Math.max(1e-4, Math.min(1000, s))
     slot.fit.scaling.setAll(clamp)
-    slot.root.position.set(place.x, place.y, place.z)
+    // place.z is the FRONT of the model (just behind the card plane at z=0).
+    // Push the centre back by half the scaled depth so the mesh extends AWAY
+    // from the camera, never in front of reply/play overlays (z ≈ −0.05…−0.12).
+    // Sitting the centre on place.z let deep models poke through the buttons.
+    slot.root.position.set(place.x, place.y, place.z + (slot.ext.z * clamp) / 2)
   }
 
   private async load(slot: Slot, postId: string, place: Place3D): Promise<void> {

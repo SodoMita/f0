@@ -154,6 +154,9 @@ export class ThreadView {
     this.scene = new Scene(engine.engine)
     this.scene.clearColor = Color4.FromHexString(this.background + 'FF')
     this.scene.skipPointerMovePicking = true
+    // Overlay group (reply pill / play / spinner) draws after nodes + 3D
+    // models so a post can never paint over its buttons. Don't clear.
+    this.scene.setRenderingAutoClearDepthStencil(1, false)
     this.camera = flatCamera(this.scene, 'thread-cam', 30)
 
     // Animated nodes get live previews, same bounded pool as the board.
@@ -629,13 +632,16 @@ export class ThreadView {
       if (on) {
         this.setNodeOpacityNow(n, 0)
         n.spinner.setEnabled(true)
-        this.request3D(n)
+        // Do NOT request every node here — that filled the 6-slot budget
+        // with offscreen models and visible ones fell back to posters.
+        // sync3D() below loads only what's near the viewport.
       } else {
         this.setNodeOpacityNow(n, 0.16)
         this.drivePoster2D(n)
       }
       this.positionPlayButton(n)
     }
+    if (on) this.sync3D()
     this.form.kick()
   }
 
@@ -662,18 +668,24 @@ export class ThreadView {
     const meta = n.meta
     if (meta.hashFailed || this.assets.isHashFailed(meta.eventId)) return
     n.spinner.setEnabled(true)
-    const ok = this.pool3d.request(meta.eventId, this.placeFor(n))
+    const ok = this.pool3d.request(meta.eventId, this.placeFor(n), this.visibleNodeIds())
     if (!ok) {
-      // Pool refused (rejected / over capacity): fall back to the poster.
-      n.spinner.setEnabled(false)
-      this.drivePoster2D(n)
+      // Rejected (bad bytes): fall back to the poster. A capacity miss is
+      // transient — leave the spinner and let sync3D retry.
+      if (this.pool3d.isRejected(meta.eventId)) {
+        n.spinner.setEnabled(false)
+        this.drivePoster2D(n)
+      }
     }
   }
 
   /** The node cell for a model, in thread-scene world units. */
   private placeFor(n: TNode): Place3D {
     return {
-      x: n.x, y: n.y, z: 0.25,
+      x: n.x, y: n.y,
+      // FRONT of the model, just behind the node plane (z=0) so meshes
+      // cannot cover the reply/play overlays at z ≈ −0.1.
+      z: 0.08,
       w: n.w, h: n.h,
       depth: Math.min(n.w, n.h) * 0.6,
     }
@@ -819,6 +831,7 @@ export class ThreadView {
       spinner.scaling.set(ring / 4, ring / 4, 1)
       spinner.position.set(p.x, p.y, -0.05)
       spinner.isPickable = false
+      spinner.renderingGroupId = 1
 
       // reply pill, bottom-right, floating half out of the card like the
       // board badge; pickable and routed to the studio compose flow
@@ -831,6 +844,7 @@ export class ThreadView {
       reply.scaling.set(REPLY_W / 4, REPLY_H / 4, 1)
       reply.position.set(p.x + w / 2 - REPLY_W / 2 + 0.35, p.y - h / 2 + REPLY_H * 0.28, -0.1)
       reply.isPickable = true
+      reply.renderingGroupId = 1
       reply.metadata = { treply: meta }
 
       // ▶/⏸ play button, bottom-left (mirrors the reply pill); toggles this
@@ -855,8 +869,8 @@ export class ThreadView {
       this.setNodeOpacityNow(node, this.threeD ? 0 : 0.16)
       this.positionPlayButton(node)
       if (this.threeD) {
-        node.spinner.setEnabled(true)
-        this.request3D(node)
+        // Viewport-gated: fit() → applyCamera → sync3D loads near-camera
+        // nodes (and request3D turns their spinner on).
       } else {
         this.drivePoster2D(node)
       }

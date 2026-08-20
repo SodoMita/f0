@@ -325,7 +325,13 @@ export class FormEngine {
       // 150 ms, so the adaptive controller could never trigger.
       const gap = now - this.lastRenderAt
       this.lastRenderAt = now
+      // beginFrame/_measureFps is what fills engine.getDeltaTime(). We do NOT
+      // use engine.runRenderLoop (demand-driven RAF instead), so without this
+      // call deltaTime stayed 0 and AnimationGroup.start() on direct-3D cards
+      // never advanced — frozen models even while the loop kept drawing.
+      this.engine.beginFrame()
       this.active.render()
+      this.engine.endFrame()
       const submitMs = performance.now() - now
       this.lastMs = submitMs
       if (gap < 250) this.emaMs = this.emaMs * 0.9 + Math.min(gap, submitMs > gap ? submitMs : gap) * 0.1

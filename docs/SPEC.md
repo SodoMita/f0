@@ -1115,3 +1115,32 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     headless probe renders a local GLB through Direct3DPool
     (request → onPlaced → isLive → release); the button toggle persists
     across reload with no page errors.
+
+76. DIRECT-3D CARDS BUGFIX (2026-08-20): the AMENDMENT 75 toggle shipped several
+    real bugs. Fix:
+    - `release()` of a still-loading post must CANCEL (same as PreviewPool),
+      not drop the id from `loading`. Dropping it let the parse land on a
+      recycled card (two models, or the wrong model). Scroll-back un-cancels.
+    - A full pool is not a failure. Capacity misses used to set `slot.failed`
+      and fall back to the poster forever; only the first N cards ever went
+      3D. Retry every visibility pass; fall back to the poster only when the
+      pool actually rejected the post (bad bytes / over-cap).
+    - Eviction uses the caller's fresh visible set, not stale `slot.visible`
+      (the same deadlock AMENDMENT 48 documented for the preview pool). The
+      board now calls `pool3d.tick()`.
+    - Thread 3D loads only near the viewport. Toggling 3D / opening a tree
+      used to request EVERY node and fill the 6-slot budget with offscreen
+      models (and leave every spinner running, so the thread never idled).
+    - Imported GLB lights and cameras are disabled — they lit neighbouring
+      cards. The pool's own rig is the only light; leftover board dummy hemi
+      is disabled so PBR is not double-lit.
+    - Models sit BEHIND the card plane (front at z≈0.08, depth extends +Z)
+      and overlays (badge / play / spinner / reply) render in group 1 so a
+      post cannot paint over its buttons. Transparent card materials disable
+      depth write (an opacity-0 tap target must not occlude the model).
+    - FormEngine calls `engine.beginFrame()`/`endFrame()` so
+      `getDeltaTime()` is real. Without that, AnimationGroup.start() on
+      direct-3D cards never advanced (demand-driven RAF is not
+      `runRenderLoop`). The viewer's TrackAnimator is unchanged (it pauses
+      the group and drives `goToFrame` itself).
+    Guard: `bun scripts/direct3d-unit.mjs`.

@@ -204,6 +204,10 @@ export class Board {
     this.scene.skipPointerMovePicking = true
     // nothing here casts shadows / needs collision or offline caching
     this.scene.blockMaterialDirtyMechanism = true
+    // Overlay group (badge / play / spinner): rendered AFTER group 0
+    // (cards + 3D models) so a post can never paint over its buttons.
+    // Don't clear color/depth or group 1 would wipe the board.
+    this.scene.setRenderingAutoClearDepthStencil(1, false)
 
     // Ortho camera parked at -Z (see core/gfx.flatCamera): world +X is screen
     // right and card planes are seen from the front, so nothing is mirrored.
@@ -580,6 +584,7 @@ export class Board {
       spinner.setEnabled(false)
       spinner.isPickable = false
       spinner.position.z = -0.02
+      spinner.renderingGroupId = 1
       const spinnerMat = makeCardMaterial(this.scene)
       spinner.material = spinnerMat
       setCardTexture(spinnerMat, this.spinnerTex)
@@ -591,6 +596,7 @@ export class Board {
       badge.setEnabled(false)
       badge.isPickable = false
       badge.position.z = -0.05
+      badge.renderingGroupId = 1
       const badgeMat = makeCardMaterial(this.scene)
       badge.material = badgeMat
       // No mipmaps: a badge is drawn at ~1:1 and every repaint would
@@ -609,6 +615,7 @@ export class Board {
       play.setEnabled(false)
       play.isPickable = true
       play.position.z = -0.06
+      play.renderingGroupId = 1
       const playMat = makeCardMaterial(this.scene)
       play.material = playMat
       setCardTexture(playMat, this.playTexOff)
@@ -948,8 +955,13 @@ export class Board {
       if (slot.spinner.isEnabled() !== ring) { slot.spinner.setEnabled(ring); this.invalidate(2) }
 
       if (settled && inRange) {
-        if (!slot.requested) { slot.requested = true; this.drive(slot) }
         if (in3D) {
+          // Keep asking: a full pool used to mark the card `failed` on the
+          // first refusal and never retry, so only the first N cards ever
+          // went 3D. Capacity misses are transient — retry until live.
+          if (!modelLive && !this.pool3d.isLoading(id) && !this.pool3d.isRejected(id)) {
+            this.drive3D(slot)
+          }
           // Autoplay / play gating for the direct model — same semantics as
           // the RTT live previews: silent auto-start as cards arrive, a
           // user-started post keeps its sound, a user-paused post stays
@@ -960,6 +972,9 @@ export class Board {
             if ((auto || manual) && !this.pool3d.isPlaying(id)) this.pool3d.play(id, manual)
             else if (!(auto || manual) && this.pool3d.isPlaying(id)) this.pool3d.pause(id)
           }
+        } else if (!slot.requested) {
+          slot.requested = true
+          this.drive2D(slot)
         } else if (slot.poster && !slot.live && this.visiblePosts.has(id)) {
           // Live slots are for what the user can SEE. Requesting for every
           // prefetched (offscreen) card made the pool evict one offscreen slot
@@ -1153,6 +1168,7 @@ export class Board {
       this.invalidate(2)
     }
     this.previewPool.tick(this.visiblePosts)
+    this.pool3d.tick(this.visiblePosts)
     // Drive the 120ms card crossfades (SPEC CARD "Crossfade 120ms"): the
     // same clock ramps the plate opacity AND the tex->tex2 blend; when the
     // ramp completes the card adopts tex2 as its texture and resets.
@@ -1298,7 +1314,9 @@ export class Board {
     return {
       x: this.colX(row?.col ?? 0),
       y: row ? this.worldY(row) : 0,
-      z: 0.25,
+      // FRONT of the model, just behind the card plane (z=0) and well behind
+      // the overlays at z ≈ −0.05. The pool pushes the centre back from here.
+      z: 0.08,
       w: slot.w,
       h: slot.h,
       depth: Math.min(slot.w, slot.h) * 0.6,
@@ -1313,12 +1331,15 @@ export class Board {
     if (meta.hashFailed || assets.isHashFailed(meta.eventId)) return
     // Hide the placeholder plate; the model renders in its place.
     this.setOpacityNow(slot, 0)
-    const ok = this.pool3d.request(meta.eventId, this.placeFor(slot))
+    const ok = this.pool3d.request(meta.eventId, this.placeFor(slot), this.visiblePosts)
     if (!ok) {
-      // Pool refused (rejected / over capacity with nothing evictable):
-      // fall back to the poster so the card still shows something.
-      slot.failed = true
-      this.drive2D(slot)
+      // Rejected (bad bytes / over-cap): fall back to the poster. A capacity
+      // miss is NOT a rejection — request() returns false and we retry next
+      // visibility pass. Don't latch `failed` or the card is stuck on 2D.
+      if (this.pool3d.isRejected(meta.eventId)) {
+        slot.failed = true
+        this.drive2D(slot)
+      }
     }
   }
 
