@@ -73,6 +73,10 @@ export class Studio {
   private extras: AssetContainer[] = []
   private imported: ImportedModel | null = null
   private tint: string = theme.accent
+  /** Per-symbol color override, keyed by AssetContainer. Empty string means use global tint. */
+  private extraColors: Map<AssetContainer, string> = new Map()
+  /** Color for text, separate from the global tint / symbol colors. */
+  private textColor: string = theme.accent
   private textMesh: TextMeshResult | null = null
   private textBuildToken = 0
   private textValue = '/0'
@@ -165,13 +169,52 @@ export class Studio {
   get tintColor(): string { return this.tint }
 
   /**
-   * Change the accent tint. Text rebuilds on its own (textTool reads this.tint
-   * at build time); library symbols re-tint live, the same way the text tool
-   * re-renders when the color input changes (AMENDMENT 68).
+   * Change the accent tint (the color the NEXT placed symbol takes when no
+   * item is selected, and the event `color` tag fallback). Existing symbols
+   * keep their per-item colors; text has its own textColor (AMENDMENT 68
+   * corrected 2026-08-21).
    */
   setTintColor(hex: string): void {
     this.tint = hex
-    this.retintLibrary()
+    this.notifyEdit()
+    this.form.kick(300)
+  }
+
+  /**
+   * Return the color of the selected item (symbol or text), or null when the
+   * selection is something we do not colour (an imported model mesh).
+   */
+  getSelectedColor(): string | null {
+    if (this.textMesh && this.selection === this.textMesh.mesh) return this.textColor
+    if (this.selection) {
+      const extra = this.extras.find((c) => c.meshes.includes(this.selection!) || c.rootNodes.includes(this.selection!))
+      if (extra) return this.extraColors.get(extra) ?? this.tint
+    }
+    return null
+  }
+
+  /** Set the color of the selected item (symbol or text) without affecting others. */
+  setSelectedColor(hex: string): void {
+    if (this.frozen) return
+    if (this.textMesh && this.selection === this.textMesh.mesh) {
+      this.textColor = hex
+      void this.rebuildText() // text color is baked into the mesh at build time
+      this.notifyEdit()
+      return
+    }
+    if (this.selection) {
+      const extra = this.extras.find((c) => c.meshes.includes(this.selection!) || c.rootNodes.includes(this.selection!))
+      if (extra) {
+        this.extraColors.set(extra, hex)
+        const seen = new Set<Material>()
+        for (const mesh of extra.meshes) this.tintMesh(mesh, seen, hex)
+        this.form.kick(300)
+        this.notifyEdit()
+        return
+      }
+    }
+    // No selection or not an item we own — set the global fallback.
+    this.tint = hex
     this.notifyEdit()
     this.form.kick(300)
   }
@@ -256,11 +299,15 @@ export class Studio {
     return true
   }
 
+  /** Fired whenever the selection changes (the HUD color picker follows it). */
+  onSelect: ((mesh: AbstractMesh | null) => void) | null = null
+
   select(mesh: AbstractMesh | null): void {
     if (this.frozen && mesh) return
     this.selection = mesh
     this.gizmos.attachToMesh(mesh)
     this.kick(2000)
+    try { this.onSelect?.(mesh) } catch { /* HUD only */ }
   }
   get selected(): AbstractMesh | null { return this.selection }
 
@@ -290,6 +337,7 @@ export class Studio {
       extra.removeAllFromScene()
       extra.dispose()
       this.extras = this.extras.filter((c) => c !== extra)
+      this.extraColors.delete(extra)
     } else {
       m.dispose(false, true)
     }
@@ -384,13 +432,15 @@ export class Studio {
       extra.dispose()
     }
     this.extras = []
+    this.extraColors.clear()
   }
 
   /**
    * Drop a studio-library GLB into the scene WITHOUT clearing existing
    * content. Used by the symbols tab (emotions / reactions / primitives).
+   * @param color Optional per-item color hex; defaults to global tint.
    */
-  async addLibraryItem(bytes: Uint8Array, opts?: { faceCamera?: boolean }): Promise<void> {
+  async addLibraryItem(bytes: Uint8Array, opts?: { faceCamera?: boolean; color?: string }): Promise<void> {
     if (this.frozen) throw new Error('publish in progress')
     const report = validateGLB(bytes)
     if (!report.ok) throw new Error(report.reason)
@@ -408,8 +458,17 @@ export class Studio {
         anyRoot.lookAt(cam.globalPosition ?? cam.position)
       }
     }
+    const color = opts?.color ?? ''
+    if (color) {
+      this.extraColors.set(container, color)
+      // The event `color` tag is a single value per post; let it follow the
+      // most recently placed symbol so a symbol-heavy post carries a
+      // representative tint (AMENDMENT 68 corrected 2026-08-21).
+      this.tint = color
+    }
+    const tint = color || this.tint
     const seen = new Set<Material>()
-    for (const mesh of container.meshes) this.tintMesh(mesh, seen)
+    for (const mesh of container.meshes) this.tintMesh(mesh, seen, tint)
     container.addAllToScene()
     this.extras.push(container)
     this.markDirty()
@@ -420,33 +479,27 @@ export class Studio {
   }
 
   /**
-   * Colour a library mesh from the studio tint exactly like the text tool
-   * (emissive tint over a black base). The library GLBs carry quantized
-   * per-vertex COLOR_0 (VEC4), which the glTF loader maps to
-   * `useVertexColors` + `hasVertexAlpha`; the alpha flag pushed the PBR
-   * shader onto a vertexColor × baseColor path that rendered BLACK, so both
-   * flags are cleared here and the tint drives the colour (AMENDMENT 68).
+   * Colour a library mesh by modulating the vertex colours with the studio
+   * tint. The GLBs carry per-vertex COLOR_0 (VEC4), which the glTF loader
+   * maps to `useVertexColors` + `hasVertexAlpha`; the old code cleared both
+   * flags and used emissive = tint, which entirely replaced the model's
+   * colours. Now vertex colors STAY ON and the tint multiplies through
+   * albedo, so the original vertex colours remain visible — a neutral grey
+   * tint (50%) leaves them largely intact, and a coloured tint shifts the
+   * hue without losing the shape's shading (AMENDMENT 68, corrected
+   * 2026-08-20).
    */
-  private tintMesh(mesh: AbstractMesh, seen: Set<Material>): void {
-    mesh.useVertexColors = false
+  private tintMesh(mesh: AbstractMesh, seen: Set<Material>, color: string): void {
+    mesh.useVertexColors = true
     mesh.hasVertexAlpha = false
     const mat = mesh.material
     if (!mat || seen.has(mat)) return
     seen.add(mat)
     const pbr = mat as PBRMaterial
-    pbr.albedoColor = Color3.Black()
-    pbr.emissiveColor = Color3.FromHexString(this.tint)
+    pbr.albedoColor = Color3.FromHexString(color)
+    pbr.emissiveColor = Color3.Black()
     pbr.metallic = 0
     pbr.backFaceCulling = false
-  }
-
-  /** Re-apply the tint to every placed library symbol (live color change). */
-  private retintLibrary(): void {
-    if (!this.extras.length) return
-    const seen = new Set<Material>()
-    for (const extra of this.extras) {
-      for (const mesh of extra.meshes) this.tintMesh(mesh, seen)
-    }
   }
 
   // ---- typed text tool (SPEC TEXT+ANIM: flat low-poly geometry) ----
@@ -460,9 +513,11 @@ export class Studio {
     this.form?.kick()
   }
   setTextColor(hex: string): void {
-    // The text tool reads this.tint at build time; symbols re-tint live
-    // inside setTintColor (AMENDMENT 68).
-    this.setTintColor(hex)
+    // Text has its own per-item color (AMENDMENT 68 corrected 2026-08-21);
+    // this does NOT touch the global tint or placed symbols.
+    this.textColor = hex
+    if (this.textMesh) void this.rebuildText()
+    this.form?.kick()
   }
   setTextAlign(align: 'left' | 'center' | 'right'): void {
     this.textAlign = align
@@ -481,7 +536,7 @@ export class Studio {
       lineSpacing: this.textLineSpacing,
       depth: this.textDepth,
       align: this.textAlign,
-      color: this.tint,
+      color: this.textColor,
     }
   }
 
@@ -501,7 +556,7 @@ export class Studio {
     }
     if (!wantsText) return
     const result = await buildTextMesh(this.scene, this.textValue, {
-      color: this.tint,
+      color: this.textColor,
       align: this.textAlign,
       scale: this.textScale,
       letterSpacing: this.textLetterSpacing,

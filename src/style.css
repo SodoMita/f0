@@ -156,6 +156,8 @@ body[data-theme="light"] #thread-zoom .hbtn:hover { background: rgba(0, 0, 0, 0.
   padding: 0;
   cursor: pointer;
   display: grid; place-items: center;
+  user-select: none;
+  -webkit-user-select: none;
   backdrop-filter: blur(14px) saturate(120%);
   -webkit-backdrop-filter: blur(14px) saturate(120%);
   transition: background 0.13s ease, border-color 0.13s ease, transform 0.13s ease, color 0.13s ease;
@@ -352,14 +354,33 @@ body[data-theme="light"] .loading-bar { background: rgba(0, 0, 0, 0.12); }
   max-width: 80vw;
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
+  display: flex; align-items: flex-start; gap: 8px;
+  pointer-events: auto;
+  user-select: text; -webkit-user-select: text;
+}
+.toast-text {
+  flex: 1; min-width: 0;
+  user-select: text; -webkit-user-select: text; cursor: text;
+  overflow-wrap: anywhere;
 }
 
 /* ---------- fatal ---------- */
 #fatal { position: fixed; inset: 0; display: grid; place-items: center; background: var(--bg); z-index: 50; }
-.fatal-card { text-align: center; padding: 32px; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); }
+.fatal-card {
+  text-align: center; padding: 32px; border: 1px solid var(--line);
+  border-radius: 16px; background: var(--panel);
+  user-select: text; -webkit-user-select: text;
+}
 .fatal-mark { width: 56px; height: 56px; margin: 0 auto 16px; border: 2px solid #FF674B; color: #FF674B; border-radius: 50%; display: grid; place-items: center; font-size: 32px; font-weight: bold; }
-.fatal-text { max-width: 44ch; margin: 0 auto; line-height: 1.5; }
-#fatal-reload { margin-top: 16px; padding: 10px 20px; background: var(--accent); color: #180a06; border: 0; border-radius: 8px; font: inherit; cursor: pointer; }
+.fatal-text {
+  max-width: 44ch; margin: 0 auto; line-height: 1.5;
+  user-select: text; -webkit-user-select: text; cursor: text;
+}
+#fatal-reload {
+  margin-top: 16px; padding: 10px 20px; background: var(--accent);
+  color: #180a06; border: 0; border-radius: 8px; font: inherit; cursor: pointer;
+  user-select: none; -webkit-user-select: none;
+}
 
 /* ---------- settings drawer ---------- */
 .settings-drawer {
@@ -411,7 +432,7 @@ body[data-theme="light"] .loading-bar { background: rgba(0, 0, 0, 0.12); }
 .setting-hint, .setting-why {
   grid-column: 1 / -1; margin: -2px 0 0; font-size: 10.5px; line-height: 1.45; color: var(--muted);
 }
-.setting-why { color: #d69a70; }
+.setting-why { color: #d69a70; user-select: text; -webkit-user-select: text; }
 .setting.unavailable .setting-name { opacity: 0.45; }
 .setting.unavailable .setting-control { opacity: 0.35; pointer-events: none; }
 .setting.deferred .setting-name::after { content: ' ·'; color: var(--accent); }
@@ -740,6 +761,8 @@ body[data-theme="light"] button.net-dot:hover { background: rgba(0, 0, 0, 0.07);
   border-radius: 10px; padding: 8px 14px;
   font: inherit; font-size: 11px; color: var(--ink);
   cursor: pointer; letter-spacing: 0.05em;
+  user-select: none;
+  -webkit-user-select: none;
 }
 .net-btn:hover { background: rgba(255, 255, 255, 0.13); }
 .net-btn.danger { color: var(--danger); border-color: rgba(255, 103, 75, 0.35); }
@@ -805,6 +828,8 @@ body[data-theme="light"] .search-field:focus-within svg { stroke: var(--accent);
   padding-bottom: max(24px, env(safe-area-inset-bottom));
   pointer-events: auto;
   z-index: 35;
+  user-select: text;
+  -webkit-user-select: text;
 }
 .sheet-card {
   width: min(430px, calc(100vw - 32px));
@@ -816,20 +841,43 @@ body[data-theme="light"] .search-field:focus-within svg { stroke: var(--accent);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
   animation: sheetup 0.22s ease-out;
+  user-select: text;
+  -webkit-user-select: text;
 }
 @keyframes sheetup { from { transform: translateY(14px); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .sheet-card { animation: none; } }
 .sheet-head { display: flex; align-items: center; justify-content: space-between; }
+.sheet-head-actions { display: flex; align-items: center; gap: 6px; }
 .sheet-code {
   font-size: 11px; font-weight: 700; letter-spacing: 0.14em;
   color: var(--danger);
   background: rgba(255, 103, 75, 0.12);
   border: 1px solid rgba(255, 103, 75, 0.3);
   border-radius: 7px; padding: 3px 8px;
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
 }
-.sheet-cause { font-size: 12px; line-height: 1.5; color: var(--ink); opacity: 0.88; }
+.sheet-cause {
+  font-size: 12px; line-height: 1.5; color: var(--ink); opacity: 0.88;
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+}
 .sheet-actions { display: flex; justify-content: flex-end; }
+.sheet-card button { user-select: none; -webkit-user-select: none; }
+#btn-error-copy .i-copied { display: none; }
+#btn-error-copy.copied .i-copy { display: none; }
+#btn-error-copy.copied .i-copied { display: block; }
+#btn-error-copy.copied {
+  color: var(--success);
+  border-color: rgba(152, 202, 114, 0.4);
+}
 body[data-theme="light"] .sheet-card { background: rgba(253, 246, 245, 0.97); border-color: rgba(200, 60, 40, 0.35); }
+body[data-theme="light"] #btn-error-copy.copied {
+  color: var(--success);
+  border-color: rgba(46, 125, 50, 0.35);
+}
 
 #studio-bar {
   left: 50%;
@@ -856,15 +904,25 @@ body[data-theme="light"] .sheet-card { background: rgba(253, 246, 245, 0.97); bo
 .studio-status { font: 11px/1 ui-monospace, monospace; color: var(--muted); min-width: 96px; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .studio-status.ok { color: var(--success); }
 .studio-status.busy { color: var(--warning); }
-/* Error messages wrap to new lines so they stay inside the studio stage
-   boundary instead of spilling out of the bar on one unbroken line
-   (pre-line keeps any explicit \n breaks in the message, too). */
+/* Genuine studio errors never live here: they surface in the error sheet
+   (CODE + CAUSE + copy button) so there is one copyable error surface. */
 .studio-status.err {
   color: var(--danger);
   white-space: pre-line;
   overflow-wrap: anywhere;
   line-height: 1.45;
   max-width: min(56vw, 520px);
+}
+.copy-err .i-copied { display: none; }
+.copy-err.copied .i-copy { display: none; }
+.copy-err.copied .i-copied { display: block; }
+.copy-err.copied { color: var(--success); border-color: rgba(152, 202, 114, 0.4); }
+body[data-theme="light"] .copy-err.copied { color: var(--success); border-color: rgba(46, 125, 50, 0.35); }
+.mi-warnings {
+  user-select: text; -webkit-user-select: text; cursor: text;
+}
+.mi-warnings li {
+  user-select: text; -webkit-user-select: text; cursor: text;
 }
 
 /* Imported-model info block (upload tab): stats from the safety scan, a

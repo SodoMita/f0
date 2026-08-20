@@ -67,10 +67,10 @@ const cube = await page.evaluate(() => {
     backFaceCulling: m.backFaceCulling,
   }
 })
-ok('cube placed', cube?.count === 1 && !!cube?.emissive, JSON.stringify(cube))
-ok('cube vertex colors off', cube?.useVertexColors === false && cube?.hasVertexAlpha === false)
-ok('cube emissive = accent tint (not black)', isTint(cube?.emissive), JSON.stringify(cube?.emissive))
-ok('cube albedo black (text-like)', !!cube?.albedo && cube.albedo.slice(0, 3).every((v) => v < 0.02), JSON.stringify(cube?.albedo))
+ok('cube placed', cube?.count === 1 && !!cube?.albedo, JSON.stringify(cube))
+ok('cube vertex colors on (modulate, not replace)', cube?.useVertexColors === true && cube?.hasVertexAlpha === false)
+ok('cube albedo = accent tint', isTint(cube?.albedo), JSON.stringify(cube?.albedo))
+ok('cube emissive black (vertex colors drive)', !!cube?.emissive && cube.emissive.slice(0, 3).every((v) => v < 0.02), JSON.stringify(cube?.emissive))
 ok('cube double-sided', cube?.backFaceCulling === false)
 
 // live tint change
@@ -81,18 +81,45 @@ await page.evaluate((v) => {
   input.dispatchEvent(new Event('input'))
 }, newAccent)
 await page.waitForTimeout(800)
+// The cube is still selected after placement, so the picker change repaints
+// ONLY the cube (per-item colors, AMENDMENT 68 corrected 2026-08-21) via
+// albedo — emissive stays black.
 const retint = await page.evaluate(() => {
   const s = window.__form0.studio
   const mesh = s.scene.meshes.find((m) => m.name === 'cube')
-  return mesh?.material?.emissiveColor?.asArray?.() ?? null
+  return mesh?.material?.albedoColor?.asArray?.() ?? null
 })
-ok('tint change re-tints symbol live', isTint(retint, hex2rgb(newAccent).map((c) => c / 255)), JSON.stringify(retint))
+ok('color change re-tints selected symbol live', isTint(retint, hex2rgb(newAccent).map((c) => c / 255)), JSON.stringify(retint))
 
 // place smile too, then delete the cube
 await page.click('#symbol-grid button[data-symbol="smile"]')
 await page.waitForTimeout(2500)
 const two = await page.evaluate(() => window.__form0.studio.libraryCount)
 ok('smile placed (2 pieces)', two === 2, `count=${two}`)
+
+// Per-item colors: the smile is selected after placement, so the next picker
+// change repaints ONLY the smile; the cube keeps its own color (AMENDMENT 68
+// corrected 2026-08-21).
+const third = '#8866FF'
+await page.evaluate((v) => {
+  const input = document.getElementById('studio-color')
+  input.value = v
+  input.dispatchEvent(new Event('input'))
+}, third)
+await page.waitForTimeout(800)
+const perItem = await page.evaluate(() => {
+  const s = window.__form0.studio
+  const cube = s.scene.meshes.find((m) => m.name === 'cube')
+  const smile = s.scene.meshes.find((m) => m.name === 'smile')
+  return {
+    cube: cube?.material?.albedoColor?.asArray?.(),
+    smile: smile?.material?.albedoColor?.asArray?.(),
+  }
+})
+ok('per-item colors: smile repainted, cube keeps its own',
+  isTint(perItem.smile, hex2rgb(third).map((c) => c / 255)) &&
+  isTint(perItem.cube, hex2rgb(newAccent).map((c) => c / 255)),
+  JSON.stringify(perItem))
 
 await page.evaluate(() => {
   const s = window.__form0.studio
