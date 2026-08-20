@@ -31,6 +31,16 @@ export class PaintSession {
   readonly plane: PaintPlane
   onChange: (() => void) | null = null
 
+  /**
+   * Select-tool bridges to the studio's object selection. The paint select
+   * tool picks stamps; when the click misses every stamp it delegates to
+   * these hooks so symbols / text / imported meshes can be selected while
+   * the paint tab is active (AMENDMENT 69).
+   */
+  onSelectObject: ((clientX: number, clientY: number) => boolean) | null = null
+  onClearObjectSelection: (() => void) | null = null
+  onSelectStamp: ((shape: string | null) => void) | null = null
+
   private active = false
   private stroking = false
   private raw: InkPoint[] = []
@@ -43,6 +53,8 @@ export class PaintSession {
   private pointerId = -1
   private selectedId = -1
   private canvas: HTMLCanvasElement | null = null
+  /** Stamp count at the last GPU upload — drives the incremental append path. */
+  private lastFlushedStampCount = 0
   private readonly boundDown: (e: PointerEvent) => void
   private readonly boundMove: (e: PointerEvent) => void
   private readonly boundUp: (e: PointerEvent) => void
@@ -57,7 +69,23 @@ export class PaintSession {
     this.boundDown = (e) => this.onDown(e)
     this.boundMove = (e) => this.onMove(e)
     this.boundUp = (e) => this.onUp(e)
-    scene.onBeforeRenderObservable.add(() => this.instances.flush(this.store))
+    // During a stroke, append only the new stamps since last flush (O(Δ) per
+    // frame instead of O(N)).  Structural changes (erase/undo/redo/clear) go
+    // through `requestFullRebuild()` which sets `dirty=true` and resets the
+    // append cursor so the next render does a full rebuild.
+    scene.onBeforeRenderObservable.add(() => {
+      if (this.instances.isDirty) {
+        // Full rebuild requested (structural change): flush everything, then
+        // set flushed count so subsequent appendNew sees no new stamps.
+        this.instances.flush(this.store)
+        this.lastFlushedStampCount = this.store.count
+        return
+      }
+      if (this.store.count > this.lastFlushedStampCount) {
+        this.instances.appendNew(this.store, this.lastFlushedStampCount)
+        this.lastFlushedStampCount = this.store.count
+      }
+    })
   }
 
   get count(): number { return this.store.count }
@@ -112,18 +140,19 @@ export class PaintSession {
     this.selectedId = -1
     this.instances.markDirty()
     this.kick(200)
+    this.notifyStampSelection()
     this.onChange?.()
   }
 
   undo(): boolean {
     const ok = this.history.undo()
-    if (ok) { this.instances.markDirty(); this.kick(200); this.onChange?.() }
+    if (ok) { this.instances.markDirty(); this.kick(200); this.notifyStampSelection(); this.onChange?.() }
     return ok
   }
 
   redo(): boolean {
     const ok = this.history.redo()
-    if (ok) { this.instances.markDirty(); this.kick(200); this.onChange?.() }
+    if (ok) { this.instances.markDirty(); this.kick(200); this.notifyStampSelection(); this.onChange?.() }
     return ok
   }
 
@@ -136,8 +165,17 @@ export class PaintSession {
     this.pushInverse([s], [])
     this.instances.markDirty()
     this.kick(200)
+    this.notifyStampSelection()
     this.onChange?.()
     return true
+  }
+
+  /** Tell the studio which paint source mesh (if any) the user picked. */
+  private notifyStampSelection(): void {
+    if (!this.onSelectStamp) return
+    if (this.selectedId < 0) { this.onSelectStamp(null); return }
+    const s = this.store.get(this.selectedId)
+    this.onSelectStamp(s ? s.shape : null)
   }
 
   /** Headless / test path: world-space stroke, same machinery as the pen. */
@@ -189,7 +227,18 @@ export class PaintSession {
 
   selectAt(clientX: number, clientY: number): number {
     const hit = this.pickStamp(clientX, clientY)
-    this.selectedId = hit?.id ?? -1
+    if (hit) {
+      this.selectedId = hit.id
+      // A stamp won the pick — drop any studio object selection.
+      this.onClearObjectSelection?.()
+      this.notifyStampSelection()
+    } else {
+      this.selectedId = -1
+      // No stamp under the cursor: let the studio try its own objects.
+      // The hook handles both select and clear (no stamp highlight needed
+      // afterwards — the studio's pickObjectAt already updated the outline).
+      this.onSelectObject?.(clientX, clientY)
+    }
     this.kick(120)
     return this.selectedId
   }

@@ -20,6 +20,11 @@ const NAME = 'studio-paint-'
 export class PaintInstances {
   readonly meshes = new Map<ShapeKind, Mesh>()
   private dirty = true
+  /** Stamps per shape that have already been uploaded to the GPU. Used by
+   *  `appendNew` to flush only the delta during a stroke (old path rebuilt
+   *  the entire matrix+color buffer every frame, scaling O(N) per frame
+   *  — at a few hundred stamps the studio became unworkable). */
+  private flushedPerShape: Record<ShapeKind, number> = { cube: 0, sphere: 0, cylinder: 0, tetra: 0, quad: 0 }
   private readonly tmpS = new Vector3()
   private readonly tmpP = new Vector3()
   private readonly tmpQ = new Quaternion()
@@ -64,6 +69,64 @@ export class PaintInstances {
   sourceMeshes(): Mesh[] { return [...this.meshes.values()] }
 
   markDirty(): void { this.dirty = true }
+  /** Expose dirty flag so session's observer can route to incremental vs full. */
+  get isDirty(): boolean { return this.dirty }
+
+  /**
+   * Incremental GPU upload during a stroke. Walks only the new stamps
+   * added since `startStampCount`, writes them directly into the tail
+   * of the per-shape Float32Arrays, and pushes the changes to the GPU.
+   * O(Δ) per call instead of O(N) full rebuild.
+   *
+   * Called once per render frame by the session's onBeforeRender hook.
+   */
+  appendNew(store: StampStore, startStampCount: number): void {
+    if (startStampCount >= store.count) return
+    const touched = new Set<ShapeKind>()
+    for (let i = startStampCount; i < store.count; i++) {
+      const s = store.at(i)
+      const shape = s.shape
+      const prevN = this.flushedPerShape[shape]
+      const slot = prevN
+      let mats = this.matrices[shape]
+      let cols = this.colors[shape]
+      // Grow if needed. First-time use: capacity 64; thereafter double.
+      if (mats.length <= slot * 16) {
+        const newCap = slot === 0 ? 64 : Math.max(slot * 2, slot + 16)
+        const newMats = new Float32Array(newCap * 16)
+        if (mats.length > 0) newMats.set(mats.subarray(0, prevN * 16))
+        const newCols = new Float32Array(newCap * 4)
+        if (cols.length > 0) newCols.set(cols.subarray(0, prevN * 4))
+        this.matrices[shape] = newMats
+        this.colors[shape] = newCols
+        mats = newMats
+        cols = newCols
+        const mesh = this.meshes.get(shape)!
+        mesh.thinInstanceSetBuffer('matrix', mats, 16, false)
+        mesh.thinInstanceSetBuffer('color', cols, 4, false)
+      }
+      // Compose + write the new stamp directly.
+      this.tmpS.set(s.sx, s.sy, s.sz)
+      this.tmpQ.set(s.qx, s.qy, s.qz, s.qw)
+      this.tmpP.set(s.px, s.py, s.pz)
+      Matrix.ComposeToRef(this.tmpS, this.tmpQ, this.tmpP, this.tmpM)
+      mats.set(this.tmpM.m, slot * 16)
+      const o = slot * 4
+      cols[o] = s.r; cols[o + 1] = s.g; cols[o + 2] = s.b; cols[o + 3] = s.a
+      this.flushedPerShape[shape] = slot + 1
+      touched.add(shape)
+    }
+    // Push touched shapes to GPU — thinInstanceBufferUpdated calls
+    // buffer.updateDirectly on the updatable buffer, O(totalStampCount) bytes
+    // per upload but no JS-side rebuild.
+    for (const shape of touched) {
+      const mesh = this.meshes.get(shape)!
+      mesh.thinInstanceCount = this.flushedPerShape[shape]
+      mesh.isVisible = true
+      mesh.thinInstanceBufferUpdated('matrix')
+      mesh.thinInstanceBufferUpdated('color')
+    }
+  }
 
   flush(store: StampStore): void {
     if (!this.dirty) return
@@ -105,10 +168,11 @@ export class PaintInstances {
         const o = i * 4
         cols[o] = s.r; cols[o + 1] = s.g; cols[o + 2] = s.b; cols[o + 3] = s.a
       }
-      mesh.thinInstanceSetBuffer('matrix', mats, 16)
-      mesh.thinInstanceSetBuffer('color', cols, 4)
+      mesh.thinInstanceSetBuffer('matrix', mats, 16, false)
+      mesh.thinInstanceSetBuffer('color', cols, 4, false)
       mesh.thinInstanceCount = n
       mesh.thinInstanceRefreshBoundingInfo(false, false)
+      this.flushedPerShape[shape] = n
     }
   }
 
