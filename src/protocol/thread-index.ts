@@ -17,7 +17,9 @@ export type ThreadMeta = {
   refs: { rootId?: string; parentId?: string }
   animHint: boolean
   cameraCount: number
+  /** Event-tag hint until model bytes are inspected; then the verified value. */
   hasAudio: boolean
+  audioVerified?: boolean
   filename?: string
   sourceFormat?: string
   previewCamera?: number

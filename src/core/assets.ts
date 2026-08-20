@@ -5,6 +5,7 @@ import { BlossomClient } from '../protocol/blossom'
 import { blobMatchesHash, blobToBytes, isHashMismatch, isSha256Hex, sha256Hex } from '../protocol/hash'
 import type { ThreadMeta } from '../protocol/thread-index'
 import { PosterRenderer, POSTER_W, POSTER_H, type Footprint, type PosterResult } from '../model/poster'
+import { extractEmbeddedAudioBytes } from '../audio/embedded'
 
 // Metadata only (anim / footprint). The card texture is the live RTT —
 // we do not cache pixels (that was VRAM→RAM→VRAM).
@@ -28,6 +29,8 @@ export class AssetCache {
   private byPostId = new Map<string, ThreadMeta>()
   private animatedBySha = new Map<string, boolean>()
   private footprintBySha = new Map<string, Footprint | null>()
+  /** Verified embedded clips, bounded to 64 content hashes (max 16 MiB). */
+  private audioBySha = new Map<string, Blob | undefined>()
   private hashFailed = new Set<string>()
   /** Blob / byte-array objects already verified against a hex64 digest. */
   private verified = new WeakMap<object, string>()
@@ -87,6 +90,38 @@ export class AssetCache {
     return bytes ? { bytes, sha256: meta.sha256, cameraIndex: meta.previewCamera } : undefined
   }
 
+  /** The first verified embedded clip, if this model carries one. */
+  async getEmbeddedAudio(meta: ThreadMeta): Promise<Blob | undefined> {
+    const bytes = await this.getModelBytes(meta)
+    if (!bytes) return undefined
+    return this.audioBySha.get(meta.sha256)
+  }
+
+  peekEmbeddedAudio(meta: ThreadMeta): Blob | undefined {
+    return this.audioBySha.get(meta.sha256)
+  }
+
+  /** Tags are hints only. The badge/button arm after the actual GLB bytes
+   *  yield a supported, <=256 KiB clip. */
+  private inspectAudio(meta: ThreadMeta, bytes: Uint8Array): void {
+    let audio: Blob | undefined
+    if (this.audioBySha.has(meta.sha256)) {
+      audio = this.audioBySha.get(meta.sha256)
+      // Refresh insertion order (content-hash LRU).
+      this.audioBySha.delete(meta.sha256)
+    } else {
+      audio = extractEmbeddedAudioBytes(bytes)
+    }
+    this.audioBySha.set(meta.sha256, audio)
+    while (this.audioBySha.size > 64) {
+      const oldest = this.audioBySha.keys().next()
+      if (oldest.done) break
+      this.audioBySha.delete(oldest.value)
+    }
+    meta.hasAudio = !!audio
+    meta.audioVerified = true
+  }
+
   /**
    * Model bytes, decoded once and shared. `blob.arrayBuffer()` copies the
    * whole file every call, and poster + preview + viewer each did it (plus
@@ -97,7 +132,10 @@ export class AssetCache {
     if (!isSha256Hex(meta.sha256)) { this.failHash(meta); return undefined }
     const hit = this.modelBytes.get(meta.sha256)
     if (hit) {
-      if (await this.matchesClaimed(hit, meta.sha256)) return hit
+      if (await this.matchesClaimed(hit, meta.sha256)) {
+        this.inspectAudio(meta, hit)
+        return hit
+      }
       this.dropModelRam(meta.sha256)
     }
     const blob = await this.getModel(meta)
@@ -109,6 +147,7 @@ export class AssetCache {
       return undefined
     }
     this.modelBytes.set(meta.sha256, bytes)
+    this.inspectAudio(meta, bytes)
     // bytes are heavier than blobs (blobs can live on disk) — keep very few
     while (this.modelBytes.size > 3) {
       const oldest = this.modelBytes.keys().next()
@@ -141,6 +180,7 @@ export class AssetCache {
     this.modelBlobs.clear()
     this.modelBytes.clear()
     this.footprintBySha.clear()
+    this.audioBySha.clear()
     await clearStore('posterCache')
     await clearStore('modelCache')
   }

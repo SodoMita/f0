@@ -25,6 +25,7 @@ import { detectCapabilities } from './settings/capabilities'
 import { applySettings } from './settings/apply'
 import { graphics } from './render/graphics'
 import { mixer } from './audio/mixer'
+import { EmbeddedAudioPlayer, type AudioPlaybackState } from './audio/player'
 import { Legend } from './hud/legend'
 import { NetworkPanel } from './hud/networkPanel'
 import { ErrorSheet, ERRORS } from './hud/errorSheet'
@@ -122,6 +123,8 @@ async function boot(): Promise<void> {
   const netDot = $('net-dot')
   let relaysOnline = 0
   const btnPlay = $('btn-play') as HTMLButtonElement
+  const btnAudio = $('btn-audio') as HTMLButtonElement
+  const vbtnAudio = $('vbtn-audio')
   const camDots = $('cam-dots')
   const metaText = $('meta-text')
   const toast = $('toast')
@@ -207,6 +210,24 @@ async function boot(): Promise<void> {
     clearTimeout(toastTimer)
     toastTimer = window.setTimeout(() => { toast.hidden = true }, 3200)
   }
+
+  function syncAudio(state: AudioPlaybackState): void {
+    vbtnAudio.hidden = state === 'unavailable'
+    btnAudio.classList.toggle('audio-playing', state === 'playing')
+    btnAudio.classList.toggle('audio-loading', state === 'loading')
+    btnAudio.classList.toggle('audio-error', state === 'error')
+    btnAudio.disabled = state === 'loading'
+    btnAudio.setAttribute('aria-pressed', state === 'playing' ? 'true' : 'false')
+    const playing = state === 'playing'
+    btnAudio.title = playing ? 'stop sound (S)' : state === 'loading' ? 'starting sound…' : 'play sound (S)'
+    btnAudio.setAttribute('aria-label', playing ? 'stop sound' : 'play sound')
+  }
+  const audioPlayer = new EmbeddedAudioPlayer(
+    syncAudio,
+    () => showToast('sound could not play'),
+  )
+  syncAudio(audioPlayer.state)
+  btnAudio.addEventListener('click', () => void audioPlayer.toggle())
 
   let currentMeta: ThreadMeta | null = null
   let studioReply: { rootId: string; parentId: string } | null = null
@@ -1100,6 +1121,7 @@ async function boot(): Promise<void> {
       `vertices      ${s.vertices}`,
       `animations    ${s.animations}`,
       `cameras       ${s.cameras}`,
+      `audio         ${meta.audioVerified ? (meta.hasAudio ? 'embedded' : 'none') : 'unchecked'}`,
       '',
       ...meta.urls.map((u, i) => `url[${i}]        ${u}`),
     ]
@@ -1115,6 +1137,7 @@ async function boot(): Promise<void> {
     if (next !== 'viewer') {
       viewerNav++
       setLoading('model', false)
+      audioPlayer.clear()
       viewer.clear()
     }
     studioEl.hidden = next !== 'studio'
@@ -1151,6 +1174,15 @@ async function boot(): Promise<void> {
     }
   }
 
+  async function revealViewerAudio(meta: ThreadMeta, nav: number): Promise<void> {
+    const audio = await assets.getEmbeddedAudio(meta)
+    if (nav !== viewerNav || currentMeta?.eventId !== meta.eventId || mode !== 'viewer') return
+    audioPlayer.setAudio(audio)
+    // setAudio(undefined) may leave the already-unavailable state unchanged,
+    // so explicitly repaint the hidden state too.
+    syncAudio(audioPlayer.state)
+  }
+
   async function openViewer(id?: string): Promise<void> {
     if (!id) { setMode('board'); return }
     const meta = index.byId.get(id)
@@ -1163,6 +1195,10 @@ async function boot(): Promise<void> {
     }
     const nav = ++viewerNav
     currentMeta = meta
+    // A next/previous navigation stays in viewer mode, so stop the previous
+    // model's loop here rather than relying on setMode().
+    audioPlayer.clear()
+    syncAudio(audioPlayer.state)
     syncDeleteButton()
     setMode('viewer')
     camDots.innerHTML = ''
@@ -1194,6 +1230,7 @@ async function boot(): Promise<void> {
         renderCamDots()
         syncPlay()
         live.commit()
+        void revealViewerAudio(meta, nav)
         return
       } catch (err) {
         // Hand-off failed (e.g. parse result lost a mesh). Rollback the
@@ -1213,6 +1250,7 @@ async function boot(): Promise<void> {
       if (nav !== viewerNav) return
       renderCamDots()
       syncPlay()
+      void revealViewerAudio(meta, nav)
     } catch {
       if (nav === viewerNav) errorSheet.show(ERRORS.MODEL_PARSE(() => router.go({ name: 'board' })))
     } finally {
@@ -1397,6 +1435,7 @@ async function boot(): Promise<void> {
       case 'ArrowRight': void stepViewer(1); break
       case 'c': case 'C': viewer.cycleCamera(); renderCamDots(); break
       case 'a': case 'A': viewer.toggleAnimation(); syncPlay(); break
+      case 's': case 'S': void audioPlayer.toggle(); break
       case 'm': case 'M': toggleDrawer(); break
       case 't': case 'T':
         if (currentMeta) router.go({ name: 'thread', rootId: currentMeta.refs.rootId ?? currentMeta.eventId })
@@ -1408,7 +1447,7 @@ async function boot(): Promise<void> {
 
   ;(window as any).__form0 = {
     engine, pool, blossoms, index, board, viewer, studio, threadView, router, assets,
-    legend, networkPanel, errorSheet, settings, settingsPanel, graphics, mixer, caps,
+    legend, networkPanel, errorSheet, settings, settingsPanel, graphics, mixer, audioPlayer, caps,
     // transfer meter: lets scripts/loading-shot.mjs fake a slow transfer and
     // capture the speed readouts without waiting for a real 40 MiB model
     transfers, setLoading,

@@ -189,6 +189,23 @@ body[data-theme="light"] #thread-zoom .hbtn:hover { background: rgba(0, 0, 0, 0.
 #btn-play.playing .i-pause { display: block; }
 #btn-play .i-play { fill: currentColor; stroke-width: 1.2; }
 
+/* Embedded sound: stopped = speaker, playing = speaker/X, pending play =
+   spinner. The button only exists after the clip bytes pass GLB validation. */
+#btn-audio .i-audio-playing,
+#btn-audio .i-audio-loading { display: none; }
+#btn-audio.audio-playing .i-audio-stopped { display: none; }
+#btn-audio.audio-playing .i-audio-playing { display: block; }
+#btn-audio.audio-loading .i-audio-stopped { display: none; }
+#btn-audio.audio-loading .i-audio-loading {
+  display: block;
+  animation: audio-spin 0.8s linear infinite;
+}
+#btn-audio.audio-error { color: var(--danger); }
+@keyframes audio-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  #btn-audio.audio-loading .i-audio-loading { animation-duration: 1.8s; }
+}
+
 /* ---------- network dot ---------- */
 /* The plain dot (legend glyph, and the base look of the topbar button). */
 .net-dot {

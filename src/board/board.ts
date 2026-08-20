@@ -65,6 +65,9 @@ interface CardSlot {
   badge: Mesh
   badgeMat: ShaderMaterial
   badgeTex: DynamicTexture
+  // Verified embedded-audio marker (speaker icon, bottom-left).
+  audioBadge: Mesh
+  audioBadgeMat: ShaderMaterial
   replyCount: number
   /** last count painted into badgeTex (avoids needless canvas + upload) */
   badgeDrawn: number
@@ -118,6 +121,7 @@ const SCROLL_SETTLE_MS = 150
 const SPIN_MAX_MS = 25_000
 const BADGE_W = 3.4
 const BADGE_H = 1.25
+const AUDIO_BADGE_SIZE = 1.35
 // Pixels of pointer travel before a press becomes a scroll. Below this we
 // treat the gesture as a tap on the card that was under the POINTERDOWN.
 const TAP_SLOP = 8
@@ -141,6 +145,7 @@ export class Board {
   private backdropTex: DynamicTexture
   private shadowTex: DynamicTexture
   private spinnerTex: DynamicTexture
+  private audioTex: DynamicTexture
   private seps: LinesMesh[] = []
   private sepTops: number[] = []
   private background: string = theme.background
@@ -195,6 +200,9 @@ export class Board {
 
     this.shadowTex = makeContactShadow(this.scene, 'card-shadow-tex')
     this.spinnerTex = makeSpinnerTexture(this.scene, 'card-spinner-tex')
+    this.audioTex = new DynamicTexture('card-audio-tex', { width: 128, height: 128 }, this.scene, false, Texture.BILINEAR_SAMPLINGMODE)
+    this.audioTex.hasAlpha = true
+    this.paintAudioBadge()
 
     this.cb = cb
     this.previewPool = new PreviewPool(
@@ -294,6 +302,7 @@ export class Board {
     this.isDark = luminance(hex) < 0.5
     this.scene.clearColor = Color4.FromHexString(hex + 'FF')
     paintBackdrop(this.backdropTex, hex)
+    this.paintAudioBadge()
     for (const slot of this.cards) {
       setCardTint(slot.shadowMat, this.isDark ? '#000000' : '#1b1b22')
       setCardOpacity(slot.shadowMat, this.contactStrength * (this.isDark ? 1 : 0.4))
@@ -452,10 +461,20 @@ export class Board {
       setCardWhite(badgeMat)
       setCardFlip(badgeMat, 'dyn')
 
+      const audioBadge = MeshBuilder.CreatePlane(`audio-badge-${i}`, { width: 4, height: 4 }, this.scene)
+      audioBadge.setEnabled(false)
+      audioBadge.isPickable = false
+      audioBadge.position.z = -0.05
+      const audioBadgeMat = makeCardMaterial(this.scene)
+      audioBadge.material = audioBadgeMat
+      setCardTexture(audioBadgeMat, this.audioTex)
+      setCardWhite(audioBadgeMat)
+      setCardFlip(audioBadgeMat, 'dyn')
+
       const slot: CardSlot = {
         mesh, mat, w: CARD_W, h: CARD_H_REF, poster: null, live: null, requested: false, row: null, failed: false, spinSince: 0,
         shadow, shadowMat, spinner, spinnerMat,
-        badge, badgeMat, badgeTex, replyCount: 0, badgeDrawn: -1, footprint: null,
+        badge, badgeMat, badgeTex, audioBadge, audioBadgeMat, replyCount: 0, badgeDrawn: -1, footprint: null,
         opacity: 0, fadeFrom: 0, fadeTo: 0, fadeStart: 0,
         blend: 0, fadeFromBlend: 0, fadeToBlend: 1, fadeTex2: null, fadeTint2Hex: '#FFFFFF', fadeFlip: 'raw',
       }
@@ -463,6 +482,43 @@ export class Board {
       mesh.metadata = { card: slot }
       badge.metadata = { card: slot, badge: true }
     }
+  }
+
+  /** Shared vector speaker badge. Audio is verified from GLB bytes before
+   * this marker appears; the untrusted event tag alone never arms it. */
+  private paintAudioBadge(): void {
+    const { width: w, height: h } = this.audioTex.getSize()
+    const ctx = this.audioTex.getContext() as CanvasRenderingContext2D
+    ctx.clearRect(0, 0, w, h)
+    ctx.fillStyle = this.isDark ? 'rgba(12,12,14,0.68)' : 'rgba(250,250,252,0.78)'
+    ctx.strokeStyle = this.isDark ? 'rgba(255,255,255,0.32)' : 'rgba(0,0,0,0.28)'
+    ctx.lineWidth = 3
+    ctx.beginPath()
+    ctx.arc(w / 2, h / 2, w * 0.43, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.stroke()
+
+    ctx.fillStyle = this.isDark ? theme.ink : '#101014'
+    ctx.strokeStyle = ctx.fillStyle
+    ctx.lineWidth = 6
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
+    ctx.beginPath()
+    ctx.moveTo(34, 53)
+    ctx.lineTo(48, 53)
+    ctx.lineTo(64, 40)
+    ctx.lineTo(64, 88)
+    ctx.lineTo(48, 75)
+    ctx.lineTo(34, 75)
+    ctx.closePath()
+    ctx.fill()
+    ctx.beginPath()
+    ctx.arc(64, 64, 22, -0.72, 0.72)
+    ctx.stroke()
+    ctx.beginPath()
+    ctx.arc(64, 64, 34, -0.68, 0.68)
+    ctx.stroke()
+    this.audioTex.update()
   }
 
   /**
@@ -588,6 +644,7 @@ export class Board {
       slot.mesh.setEnabled(false)
       slot.mesh.isPickable = false
       slot.badge.setEnabled(false)
+      slot.audioBadge.setEnabled(false)
       slot.shadow.setEnabled(false)
       slot.spinner.setEnabled(false)
     }
@@ -734,6 +791,14 @@ export class Board {
     slot.badge.position.y = slot.mesh.position.y - slot.h / 2 + BADGE_H / 2 + 0.5
     slot.badge.position.z = -0.05
     slot.badge.setEnabled(slot.replyCount > 0 && slot.mesh.isEnabled())
+
+    slot.audioBadge.scaling.set(AUDIO_BADGE_SIZE / 4, AUDIO_BADGE_SIZE / 4, 1)
+    slot.audioBadge.position.set(
+      slot.mesh.position.x - slot.w / 2 + AUDIO_BADGE_SIZE / 2 + 0.5,
+      slot.mesh.position.y - slot.h / 2 + AUDIO_BADGE_SIZE / 2 + 0.5,
+      -0.05,
+    )
+    slot.audioBadge.setEnabled(!!slot.meta?.audioVerified && !!slot.meta.hasAudio && slot.mesh.isEnabled())
 
     const ring = Math.min(slot.h * 0.38, slot.w * 0.18)
     slot.spinner.scaling.set(ring / 4, ring / 4, 1)

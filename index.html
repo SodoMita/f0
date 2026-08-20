@@ -266,6 +266,11 @@
           <svg class="i-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5l10 6.5-10 6.5z"/></svg>
           <svg class="i-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5.5v13"/><path d="M15 5.5v13"/></svg>
         </button><span class="vlabel">play</span></span>
+        <span class="vbtn" id="vbtn-audio" hidden><button id="btn-audio" class="hbtn" title="play sound (S)" aria-label="play sound" aria-pressed="false">
+          <svg class="i-audio-stopped" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10h3l4-4v12l-4-4H4z"/><path d="M15 9a4 4 0 010 6"/><path d="M17.5 6.5a7.5 7.5 0 010 11"/></svg>
+          <svg class="i-audio-playing" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10h3l4-4v12l-4-4H4z"/><path d="M16 9l5 6"/><path d="M21 9l-5 6"/></svg>
+          <svg class="i-audio-loading" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12a7 7 0 11-2.05-4.95"/></svg>
+        </button><span class="vlabel">sound</span></span>
         <span class="rail-sep"></span>
         <span id="cam-dots"></span>
         <span class="rail-sep"></span>
@@ -322,7 +327,7 @@
           <div class="legend-row"><span class="legend-glyph"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg></span><span>board — the feed of 3D posts. Tap a card to open it.</span></div>
           <div class="legend-row"><span class="legend-glyph legend-pill">&#8617;&nbsp;3</span><span>replies — tap the pill on a card to open its thread map.</span></div>
           <div class="legend-row"><span class="legend-glyph"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5.5" r="2.2"/><circle cx="5.5" cy="18.5" r="2.2"/><circle cx="18.5" cy="18.5" r="2.2"/><path d="M12 7.7v4.3m0 0-5 4.7m5-4.7 5 4.7"/></svg></span><span>thread — drag pans, wheel / pinch zooms, tap a node opens it, its ↩+ pill replies to it, 0 re-fits.</span></div>
-          <div class="legend-row"><span class="legend-glyph"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 5.5v13l10-6.5z"/></svg></span><span>viewer — orbit with the pointer; A plays, C cycles the model's own cameras.</span></div>
+          <div class="legend-row"><span class="legend-glyph"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 5.5v13l10-6.5z"/></svg></span><span>viewer — orbit with the pointer; A plays animation, S toggles embedded sound, C cycles the model's own cameras.</span></div>
           <div class="legend-row"><span class="legend-glyph"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg></span><span>create — import a GLB model and post it.</span></div>
           <div class="legend-row"><span class="legend-glyph"><span class="net-dot legend-dot"></span></span><span>relays — grey none, amber partial, green all connected. Tap for the network panel.</span></div>
           <div class="legend-row"><span class="legend-glyph"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.5"/><path d="M14.8 14.8 20 20"/></svg></span><span>search — type a model name to filter the board.</span></div>
