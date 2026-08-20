@@ -354,6 +354,14 @@ body[data-theme="light"] .loading-bar { background: rgba(0, 0, 0, 0.12); }
   max-width: 80vw;
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
+  display: flex; align-items: flex-start; gap: 8px;
+  pointer-events: auto;
+  user-select: text; -webkit-user-select: text;
+}
+.toast-text {
+  flex: 1; min-width: 0;
+  user-select: text; -webkit-user-select: text; cursor: text;
+  overflow-wrap: anywhere;
 }
 
 /* ---------- fatal ---------- */
@@ -893,6 +901,11 @@ body[data-theme="light"] #btn-error-copy.copied {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.studio-status-wrap {
+  display: flex; align-items: flex-start; gap: 6px;
+  pointer-events: none;
+  max-width: min(62vw, 560px);
+}
 .studio-status { font: 11px/1 ui-monospace, monospace; color: var(--muted); min-width: 96px; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .studio-status.ok { color: var(--success); }
 .studio-status.busy { color: var(--warning); }
@@ -908,6 +921,19 @@ body[data-theme="light"] #btn-error-copy.copied {
   user-select: text;
   -webkit-user-select: text;
   cursor: text;
+  pointer-events: auto;
+}
+.studio-status-wrap:has(.studio-status.err) { pointer-events: auto; }
+.copy-err .i-copied { display: none; }
+.copy-err.copied .i-copy { display: none; }
+.copy-err.copied .i-copied { display: block; }
+.copy-err.copied { color: var(--success); border-color: rgba(152, 202, 114, 0.4); }
+body[data-theme="light"] .copy-err.copied { color: var(--success); border-color: rgba(46, 125, 50, 0.35); }
+.mi-warnings {
+  user-select: text; -webkit-user-select: text; cursor: text;
+}
+.mi-warnings li {
+  user-select: text; -webkit-user-select: text; cursor: text;
 }
 
 /* Imported-model info block (upload tab): stats from the safety scan, a
