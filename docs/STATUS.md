@@ -5,6 +5,18 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 
+- [x] **Idle OOM: relay reconnect no longer stacks sockets** (agent arena,
+      2026-08-20, SPEC AMENDMENT 73): leaving the tab open crashed after a
+      long idle. Relays drop idle connections and background tabs get their
+      WebSocket killed; each drop scheduled three retries (ws.onerror,
+      ws.onclose, connect() reject) and `open()` built a new Relay without
+      closing the previous one, so sockets + REQ subs grew without bound.
+      Now: one in-flight open per URL, drop the previous socket before
+      reconnecting, idempotent retry timer, 8s handshake timeout, verify-
+      worker jobs time out at 8s. Live preview GLBs stay resident (already
+      capped by settings; dropping them just re-parses). Guard:
+      `scripts/relay-pool-unit.mjs`.
+
 - [x] **Fresh posts can't race their own upload + E101 retry really
       retries** (agent arena, 2026-08-20, SPEC AMENDMENT 72): "uploaded
       bush twice, they always fail to load due hash or size mismatch —

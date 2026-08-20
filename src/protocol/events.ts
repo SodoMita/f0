@@ -26,6 +26,9 @@ function getWorker(): Worker | null {
   if (worker) return worker
   try {
     worker = new VerifyWorker()
+    // Bare bun/tsx resolve the worker module to an empty class (see
+    // verify.worker.ts) — that is not a Worker. Fall through to sync verify.
+    if (typeof worker.postMessage !== 'function') throw new Error('not a Worker')
     worker.onmessage = (m: MessageEvent<{ id: number; ok: boolean }>) => {
       const done = jobs.get(m.data.id)
       if (!done) return
@@ -57,12 +60,23 @@ export async function verifyFreshAsync(event: Event): Promise<boolean> {
   if (!w) return verifyFresh(event)
   const id = nextJob++
   const ok = await new Promise<boolean>((resolve) => {
-    jobs.set(id, resolve)
+    let done = false
+    const finish = (v: boolean) => {
+      if (done) return
+      done = true
+      jobs.delete(id)
+      clearTimeout(timer)
+      resolve(v)
+    }
+    // A stuck worker used to pin every event in `jobs` forever (the Promise
+    // never settled). Relays keep sending while the tab idles, so that map
+    // grew without bound. Time out to the sync path instead.
+    const timer = setTimeout(() => finish(verifyFresh(event)), 8000)
+    jobs.set(id, finish)
     try {
       w.postMessage({ id, event })
     } catch {
-      jobs.delete(id)
-      resolve(verifyEvent(event))
+      finish(verifyEvent(event))
     }
   })
   if (ok) selfVerified.add(event)

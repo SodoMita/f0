@@ -28,7 +28,8 @@
     "check:overflow": "node scripts/overflow-scan.mjs",
     "check:library": "node scripts/library-unit.mjs",
     "check:symbols": "npm run build:standalone && node scripts/repro-symbol.mjs",
-    "check:error-copy": "node scripts/error-copy-unit.mjs"
+    "check:error-copy": "node scripts/error-copy-unit.mjs",
+    "check:relay": "npx --yes tsx scripts/relay-pool-unit.mjs"
   },
   "dependencies": {
     "@babylonjs/core": "8.10.1",

@@ -1012,3 +1012,27 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     flag stands; unfail + retry serves the seeded cache again) +
     `search-unit.mjs` (rejectHash/unrejectHash round trip); tsc, vite
     and standalone builds clean.
+
+73. IDLE OOM — RELAY RECONNECT MUST NOT STACK SOCKETS (2026-08-20):
+    Leaving the tab open used to crash with an out-of-memory after a long
+    idle. Relays drop idle connections and background tabs get their
+    WebSocket killed; each drop scheduled THREE retries (ws.onerror,
+    ws.onclose, and `connect()`'s reject) and `open()` built a new
+    `Relay` without closing the previous one, so sockets + REQ subs
+    grew without bound. Fix:
+    - One in-flight `open()` per URL (`opening` Map keyed by the Relay
+      instance so applyRelays mid-connect cannot clear a newer attempt).
+    - `dropRelay` closes the previous socket + REQ before a new one is
+      created; `subs` is a Map keyed by URL, not an append-only array.
+    - `onclose` during `connect()` does not retry — the catch path does,
+      once. `scheduleRetry` is idempotent (one timer per URL).
+    - `connect({ timeout: 8000 })` so a hung handshake cannot pin a
+      socket forever.
+    - Verify-worker jobs time out at 8s (a stuck worker used to pin
+      every event in `jobs` forever while relays kept sending).
+    Live preview GLBs are NOT dropped on idle or on hide — they are
+    small, already capped by settings (livePreviews / keepOffscreen /
+    modelRamBudget), and dropping them just re-parses on wake.
+    Guard: `npx tsx scripts/relay-pool-unit.mjs`
+    (failed handshake retries once, eight remote drops stay at 1 live
+    socket, close() stops the loop, applyRelays/connect are idempotent).
