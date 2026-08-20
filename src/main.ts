@@ -24,7 +24,7 @@ import { SettingsPanel } from './settings/panel'
 import { detectCapabilities } from './settings/capabilities'
 import { applySettings } from './settings/apply'
 import { graphics } from './render/graphics'
-import { mixer } from './audio/mixer'
+import { mixer, type SpatialAudioPose } from './audio/mixer'
 import { EmbeddedAudioPlayer, type AudioPlaybackState } from './audio/player'
 import { extractEmbeddedAudio } from './audio/embedded'
 import { Legend } from './hud/legend'
@@ -74,6 +74,8 @@ async function boot(): Promise<void> {
   const board = new Board(engine, {
     onOpenModel: (meta) => router.go({ name: 'viewer', id: meta.eventId }),
     onOpenThread: (meta) => router.go({ name: 'thread', rootId: meta.refs.rootId ?? meta.eventId }),
+    onToggleAudio: (meta, pose) => togglePostAudio(meta, pose),
+    onAudioPosition: (meta, pose) => updatePostAudioPosition(meta, pose),
   })
   const assets = new AssetCache(blossoms, board.scene)
   board.setAssets(assets)
@@ -87,6 +89,8 @@ async function boot(): Promise<void> {
       const rootId = meta.refs.rootId ?? meta.eventId
       router.go({ name: 'studio', rootId, parentId: meta.eventId })
     },
+    (meta, pose) => togglePostAudio(meta, pose),
+    (meta, pose) => updatePostAudioPosition(meta, pose),
   )
 
   const legend = new Legend()
@@ -212,7 +216,9 @@ async function boot(): Promise<void> {
     toastTimer = window.setTimeout(() => { toast.hidden = true }, 3200)
   }
 
-  function syncAudio(state: AudioPlaybackState): void {
+  function syncAudio(state: AudioPlaybackState, sourceId: string | null = null): void {
+    board.setAudioPlayback(sourceId, state)
+    threadView.setAudioPlayback(sourceId, state)
     vbtnAudio.hidden = state === 'unavailable'
     btnAudio.classList.toggle('audio-playing', state === 'playing')
     btnAudio.classList.toggle('audio-loading', state === 'loading')
@@ -227,8 +233,26 @@ async function boot(): Promise<void> {
     syncAudio,
     () => showToast('sound could not play'),
   )
-  syncAudio(audioPlayer.state)
+  syncAudio(audioPlayer.state, audioPlayer.sourceId)
   btnAudio.addEventListener('click', () => void audioPlayer.toggle())
+
+  /** Babylon post-button gesture: the verified clip is already in RAM. */
+  function togglePostAudio(meta: ThreadMeta, pose: SpatialAudioPose): void {
+    const clip = assets.peekEmbeddedAudio(meta)
+    if (!clip) {
+      showToast('verified sound is not available')
+      return
+    }
+    if (audioPlayer.sourceId !== meta.eventId || !audioPlayer.available) {
+      audioPlayer.setAudio(clip, meta.eventId)
+    }
+    audioPlayer.setSpatialPose(pose)
+    void audioPlayer.toggle()
+  }
+
+  function updatePostAudioPosition(meta: ThreadMeta, pose: SpatialAudioPose): void {
+    if (audioPlayer.sourceId === meta.eventId) audioPlayer.setSpatialPose(pose)
+  }
 
   let currentMeta: ThreadMeta | null = null
   let studioReply: { rootId: string; parentId: string } | null = null
@@ -1139,12 +1163,14 @@ async function boot(): Promise<void> {
   function setMode(next: Exclude<Mode, 'boot'>): void {
     if (mode === next) return
     if (mode === 'studio' && next !== 'studio' && publishing) cancelPublish()
+    // A route switch is a hard lifecycle boundary for the object URL and
+    // WebAudio graph. In-route board/tree audio remains available until then.
+    audioPlayer.clear()
     mode = next
     if (next !== 'thread') threadView.detach()
     if (next !== 'viewer') {
       viewerNav++
       setLoading('model', false)
-      audioPlayer.clear()
       viewer.clear()
     }
     studioEl.hidden = next !== 'studio'
@@ -1184,10 +1210,16 @@ async function boot(): Promise<void> {
   async function revealViewerAudio(meta: ThreadMeta, nav: number): Promise<void> {
     const audio = await assets.getEmbeddedAudio(meta)
     if (nav !== viewerNav || currentMeta?.eventId !== meta.eventId || mode !== 'viewer') return
-    audioPlayer.setAudio(audio)
+    audioPlayer.setAudio(audio, meta.eventId)
+    audioPlayer.setSpatialPose({
+      source: { x: 0, y: 0, z: 0 },
+      listener: { x: 0, y: 0, z: -30 },
+      forward: { x: 0, y: 0, z: 1 },
+      up: { x: 0, y: 1, z: 0 },
+    })
     // setAudio(undefined) may leave the already-unavailable state unchanged,
     // so explicitly repaint the hidden state too.
-    syncAudio(audioPlayer.state)
+    syncAudio(audioPlayer.state, audioPlayer.sourceId)
   }
 
   async function openViewer(id?: string): Promise<void> {
@@ -1205,7 +1237,7 @@ async function boot(): Promise<void> {
     // A next/previous navigation stays in viewer mode, so stop the previous
     // model's loop here rather than relying on setMode().
     audioPlayer.clear()
-    syncAudio(audioPlayer.state)
+    syncAudio(audioPlayer.state, audioPlayer.sourceId)
     syncDeleteButton()
     setMode('viewer')
     camDots.innerHTML = ''
@@ -1285,6 +1317,8 @@ async function boot(): Promise<void> {
     if (route.name === 'board') setMode('board')
     else if (route.name === 'thread') {
       setMode('thread')
+      // A different root can replace the map without changing mode.
+      audioPlayer.clear()
       setLoading('thread', true, 'building thread')
       void threadView.open(route.rootId).finally(() => setLoading('thread', false))
     }

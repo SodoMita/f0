@@ -21,6 +21,11 @@ import {
 import type { ShaderMaterial } from '@babylonjs/core/Materials/shaderMaterial'
 import { flatCamera, makeBackdropTexture, paintBackdrop, makeSpinnerTexture, roundRect, luminance, shade } from '../core/gfx'
 import { theme } from '../theme'
+import type { AudioPlaybackState } from '../audio/player'
+import type { SpatialAudioPose } from '../audio/mixer'
+import {
+  makePostAudioTextures, repaintPostAudioTextures, type PostAudioTextures,
+} from '../audio/buttonTexture'
 
 interface TNode {
   meta: ThreadMeta
@@ -33,6 +38,9 @@ interface TNode {
   // reply button (bottom-right pill): tap -> studio compose for THIS node
   reply: Mesh
   replyMat: ShaderMaterial
+  // verified embedded-audio play/pause button (bottom-left)
+  audio: Mesh
+  audioMat: ShaderMaterial
   // poster texture (reapplied when the live preview is released)
   poster: TextureT | null
   // live animated preview (same pipeline as the board's cards)
@@ -79,6 +87,7 @@ const ZOOM_MAX = 6
 // reply pill (world units) — same visual language as the board badge
 const REPLY_W = 2.3
 const REPLY_H = 1.15
+const AUDIO_BUTTON_SIZE = 1.7
 
 /**
  * Thread view: a 2D map of the reply tree.
@@ -111,7 +120,12 @@ export class ThreadView {
   private spinnerTex: DynamicTexture
   private rootFrameTex: DynamicTexture
   private replyTex!: DynamicTexture
+  private audioTextures: PostAudioTextures
+  private activeAudioId: string | null = null
+  private audioState: AudioPlaybackState = 'unavailable'
   private onReply: ((m: ThreadMeta) => void) | null = null
+  private onToggleAudio: ((m: ThreadMeta, pose: SpatialAudioPose) => void) | null = null
+  private onAudioPosition: ((m: ThreadMeta, pose: SpatialAudioPose) => void) | null = null
   private background: string = theme.background
   private isDark = true
   private panX = 0
@@ -193,6 +207,7 @@ export class ThreadView {
     this.replyTex = new DynamicTexture('thread-reply-tex', { width: 256, height: 128 }, this.scene, true)
     this.replyTex.hasAlpha = true
     this.paintReplyTexture()
+    this.audioTextures = makePostAudioTextures(this.scene, 'thread-audio', this.isDark)
 
     this.applyCamera()
 
@@ -380,6 +395,8 @@ export class ThreadView {
     this.paintFrame(this.frameTex, false)
     this.paintFrame(this.rootFrameTex, true)
     this.paintReplyTexture()
+    repaintPostAudioTextures(this.audioTextures, this.isDark)
+    for (const n of this.nodes.values()) this.paintAudioState(n)
     const edge = Color3.FromHexString(shade(hex, this.isDark ? 0.3 : -0.3))
     for (const l of this.lineMeshes) l.color = edge
   }
@@ -389,11 +406,49 @@ export class ThreadView {
     index: ThreadIndex,
     onOpenModel: (m: ThreadMeta) => void,
     onReply?: (m: ThreadMeta) => void,
+    onToggleAudio?: (m: ThreadMeta, pose: SpatialAudioPose) => void,
+    onAudioPosition?: (m: ThreadMeta, pose: SpatialAudioPose) => void,
   ): void {
     this.assets = assets
     this.index = index
     this.onOpenModel = onOpenModel
     this.onReply = onReply ?? null
+    this.onToggleAudio = onToggleAudio ?? null
+    this.onAudioPosition = onAudioPosition ?? null
+  }
+
+  /** Synchronize all node controls with the one shared post-audio player. */
+  setAudioPlayback(sourceId: string | null, state: AudioPlaybackState): void {
+    this.activeAudioId = sourceId
+    this.audioState = state
+    for (const node of this.nodes.values()) this.paintAudioState(node)
+    this.form.kick()
+  }
+
+  private paintAudioState(node: TNode): void {
+    const state = node.meta.eventId === this.activeAudioId && this.audioState !== 'unavailable'
+      ? this.audioState
+      : 'stopped'
+    setCardTexture(node.audioMat, this.audioTextures[state])
+  }
+
+  private audioPose(node: TNode): SpatialAudioPose {
+    return {
+      source: { x: node.x, y: node.y, z: node.mesh.position.z },
+      listener: {
+        x: this.camera.position.x,
+        y: this.camera.position.y,
+        z: this.camera.position.z,
+      },
+      forward: { x: 0, y: 0, z: 1 },
+      up: { x: 0, y: 1, z: 0 },
+    }
+  }
+
+  private updateAudioPosition(): void {
+    if (!this.activeAudioId) return
+    const node = this.nodes.get(this.activeAudioId)
+    if (node?.audio.isEnabled()) this.onAudioPosition?.(node.meta, this.audioPose(node))
   }
 
   private makeFrameTexture(name: string, root: boolean): DynamicTexture {
@@ -552,18 +607,44 @@ export class ThreadView {
       reply.isPickable = true
       reply.metadata = { treply: meta }
 
+      const audio = MeshBuilder.CreatePlane(`taudio-${meta.eventId.slice(0, 8)}`, { width: 4, height: 4 }, this.scene)
+      const audioMat = makeCardMaterial(this.scene)
+      audio.material = audioMat
+      setCardTexture(audioMat, this.audioTextures.stopped)
+      setCardWhite(audioMat)
+      setCardFlip(audioMat, 'dyn')
+      audio.scaling.set(AUDIO_BUTTON_SIZE / 4, AUDIO_BUTTON_SIZE / 4, 1)
+      audio.position.set(
+        p.x - w / 2 + AUDIO_BUTTON_SIZE / 2 + 0.35,
+        p.y - h / 2 + AUDIO_BUTTON_SIZE / 2 + 0.35,
+        -0.12,
+      )
+      audio.isPickable = true
+      audio.setEnabled(false)
+      audio.metadata = { taudio: meta }
+
       setCardTint(mat, meta.tint || theme.panel)
       const node: TNode = {
-        meta, mesh, mat, frame, frameMat, spinner, spinnerMat, reply, replyMat,
+        meta, mesh, mat, frame, frameMat, spinner, spinnerMat, reply, replyMat, audio, audioMat,
         poster: null, live: null, x: p.x, y: p.y, w, h, depth: p.depth,
         opacity: 0.16, fadeFrom: 0.16, fadeTo: 0.16, fadeStart: 0,
         blend: 0, fadeFromBlend: 0, fadeToBlend: 1, fadeTex2: null, fadeTint2Hex: '#FFFFFF', fadeFlip: 'raw',
       }
       this.setNodeOpacityNow(node, 0.16)
+      this.paintAudioState(node)
       const gen = this.generation
       void this.assets.getPoster(meta).then((tex) => {
         // the map may have been cleared/reopened while the poster rendered
-        if (!tex || gen !== this.generation || mesh.isDisposed()) return
+        if (gen !== this.generation || mesh.isDisposed()) return
+        // The GLB inspection performed by getPoster, not the event hint, arms
+        // this in-scene control — even if poster rendering itself failed.
+        audio.setEnabled(!!meta.audioVerified && !!meta.hasAudio)
+        if (audio.isEnabled()) this.onAudioPosition?.(meta, this.audioPose(node))
+        if (!tex) {
+          spinner.setEnabled(false)
+          this.form.kick()
+          return
+        }
         node.poster = tex
         this.crossfadeTo(node, tex, '#FFFFFF', 'rtt')
         spinner.setEnabled(false)
@@ -679,8 +760,10 @@ export class ThreadView {
     this.backdrop.position.set(this.panX, this.panY, 4)
     // zoom changed -> the sharpness a node needs changed -> rescale the RTTs
     this.applyPreviewScale()
-    // viewport changed -> live previews must follow what is now on screen
+    // viewport changed -> live previews and the HRTF listener follow the
+    // active Babylon camera.
     this.syncPreviews()
+    this.updateAudioPosition()
   }
 
   /** Frame the whole map with a margin. */
@@ -859,7 +942,14 @@ export class ThreadView {
   }
 
   private tapAt(x: number, y: number): void {
-    // reply pill first — it overlaps the card corner and must win the tap
+    // In-scene controls overlap node corners and must win before the card.
+    const audio = this.scene.pick(x, y, (m) => Boolean(m.metadata?.taudio))
+    if (audio?.hit && audio.pickedMesh?.metadata?.taudio) {
+      const meta = audio.pickedMesh.metadata.taudio as ThreadMeta
+      const node = this.nodes.get(meta.eventId)
+      if (node) this.onToggleAudio?.(meta, this.audioPose(node))
+      return
+    }
     const reply = this.scene.pick(x, y, (m) => Boolean(m.metadata?.treply))
     if (reply?.hit && reply.pickedMesh?.metadata?.treply) {
       this.onReply?.(reply.pickedMesh.metadata.treply as ThreadMeta)
@@ -890,6 +980,7 @@ export class ThreadView {
     n.mesh.dispose(); n.mat.dispose(); n.frame.dispose(); n.frameMat.dispose()
     n.spinner.dispose(); n.spinnerMat.dispose()
     n.reply.dispose(); n.replyMat.dispose()
+    n.audio.dispose(); n.audioMat.dispose()
     this.nodes.delete(eventId)
     this.edges = this.edges.filter((e) => e.parent !== eventId && e.child !== eventId)
     for (const l of this.lineMeshes) l.dispose()
@@ -905,6 +996,7 @@ export class ThreadView {
       n.mesh.dispose(); n.mat.dispose(); n.frame.dispose(); n.frameMat.dispose()
       n.spinner.dispose(); n.spinnerMat.dispose()
       n.reply.dispose(); n.replyMat.dispose()
+      n.audio.dispose(); n.audioMat.dispose()
     }
     this.nodes.clear()
     for (const l of this.lineMeshes) l.dispose()

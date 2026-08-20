@@ -4,23 +4,41 @@ export type Bus = 'master' | 'music' | 'sfx' | 'voice' | 'ui'
 
 interface DeviceInfo { id: string; label: string }
 
+export interface AudioPoint3 {
+  x: number
+  y: number
+  z: number
+}
+
+/** Absolute scene-space pose for one positional source and the active camera. */
+export interface SpatialAudioPose {
+  source: AudioPoint3
+  listener: AudioPoint3
+  forward?: AudioPoint3
+  up?: AudioPoint3
+}
+
+/** App-owned WebAudio graph for one media element. */
+export interface PositionalMediaRoute {
+  readonly source: MediaElementAudioSourceNode
+  readonly panner: PannerNode
+  readonly gain: GainNode
+  setPose(pose: SpatialAudioPose): void
+  dispose(): void
+}
+
 /**
- * Audio mixer: one AudioContext, one gain node per bus, plus device routing.
+ * Audio mixer: one AudioContext and one gain node per bus.
  *
- * Everything the web platform actually provides is here — per-bus volume,
- * output device selection (`AudioContext.setSinkId`, Chromium 110+), input
- * device enumeration for recording, HRTF spatialisation, channel count for
- * surround passthrough, and mute-on-blur. Object-based formats (Atmos, Windows
- * Sonic) are applied by the OS on the chosen output device; the browser only
- * hands it channels.
- *
- * Models can carry audio (spec AMENDMENT 11); playback routes through
- * `connect()` so it lands on the right bus and obeys the mixer.
+ * Embedded post audio keeps browser media decoding, but each active element is
+ * routed as MediaElementAudioSourceNode → PannerNode(HRTF) → clip gain → SFX
+ * bus. The app owns every node so changing posts can disconnect the complete
+ * graph deterministically. No context or media source starts playback by
+ * itself; EmbeddedAudioPlayer creates/resumes it only from toggle().
  */
 export class AudioMixer {
   private ctx: AudioContext | null = null
   private gains = new Map<Bus, GainNode>()
-  private panner: PannerNode | null = null
   private values: SettingsValues | null = null
   private focused = true
   outputs: DeviceInfo[] = []
@@ -37,7 +55,7 @@ export class AudioMixer {
     })
   }
 
-  /** Created lazily: an AudioContext before a user gesture starts suspended. */
+  /** Created lazily. A suspended context is still silent until a gesture resumes it. */
   private ensure(): AudioContext | null {
     if (this.ctx) return this.ctx
     try {
@@ -61,20 +79,81 @@ export class AudioMixer {
 
   get context(): AudioContext | null { return this.ctx }
 
-  /** Node to feed a source into, e.g. `source.connect(mixer.busInput('sfx'))`. */
+  /** Plain bus input for non-positional application sounds. */
   busInput(bus: Exclude<Bus, 'master'>): AudioNode | null {
+    return this.ensure() ? (this.gains.get(bus) ?? null) : null
+  }
+
+  /**
+   * Create a dedicated HRTF route for one HTMLMediaElement.
+   *
+   * 0.72 is the model's glTF gain and 0.78 is the UI base volume. Master and
+   * effects settings remain downstream on the shared mixer buses.
+   */
+  createPositionalMediaRoute(
+    element: HTMLMediaElement,
+    bus: Exclude<Bus, 'master'> = 'sfx',
+  ): PositionalMediaRoute | null {
     const ctx = this.ensure()
-    if (!ctx) return null
-    if (this.values?.spatialAudio === 'hrtf') {
-      if (!this.panner) {
-        this.panner = ctx.createPanner()
-        this.panner.panningModel = 'HRTF'
-        this.panner.distanceModel = 'inverse'
+    const busGain = this.gains.get(bus)
+    if (!ctx || !busGain) return null
+
+    let source: MediaElementAudioSourceNode | null = null
+    let panner: PannerNode | null = null
+    let clipGain: GainNode | null = null
+    try {
+      source = ctx.createMediaElementSource(element)
+      panner = ctx.createPanner()
+      clipGain = ctx.createGain()
+
+      panner.panningModel = 'HRTF'
+      panner.distanceModel = 'inverse'
+      // Flat board/tree cameras sit 30 world units in front of their cards.
+      // Keep that front-on source at full authored loudness while preserving
+      // lateral and depth cues as the camera pans or the feed scrolls.
+      panner.refDistance = 30
+      panner.maxDistance = 240
+      panner.rolloffFactor = 0.35
+      panner.coneInnerAngle = 360
+      panner.coneOuterAngle = 360
+      clipGain.gain.value = 0.72 * 0.78
+
+      source.connect(panner)
+      panner.connect(clipGain)
+      clipGain.connect(busGain)
+
+      let disposed = false
+      const setPose = (pose: SpatialAudioPose): void => {
+        if (disposed || !panner) return
+        const now = ctx.currentTime
+        setPannerPosition(panner, pose.source, now)
+        setListenerPose(
+          ctx.listener,
+          pose.listener,
+          pose.forward ?? { x: 0, y: 0, z: 1 },
+          pose.up ?? { x: 0, y: 1, z: 0 },
+          now,
+        )
       }
-      this.panner.connect(this.gains.get(bus)!)
-      return this.panner
+      return {
+        source,
+        panner,
+        gain: clipGain,
+        setPose,
+        dispose: () => {
+          if (disposed) return
+          disposed = true
+          try { source?.disconnect() } catch { /* already disconnected */ }
+          try { panner?.disconnect() } catch { /* already disconnected */ }
+          try { clipGain?.disconnect() } catch { /* already disconnected */ }
+        },
+      }
+    } catch {
+      try { source?.disconnect() } catch { /* partial graph */ }
+      try { panner?.disconnect() } catch { /* partial graph */ }
+      try { clipGain?.disconnect() } catch { /* partial graph */ }
+      return null
     }
-    return this.gains.get(bus) ?? null
   }
 
   async refreshDevices(): Promise<void> {
@@ -94,7 +173,8 @@ export class AudioMixer {
     if (!this.ctx) return
     this.updateGains()
     void this.applySink(String(values.audioOutput ?? 'default'))
-    // channel layout for surround passthrough
+    // Channel layout for non-positional surround passthrough. HRTF itself is
+    // binaural and therefore asks for two destination channels.
     try {
       const dest = this.ctx.destination
       const wanted = values.spatialAudio === 'surround' ? dest.maxChannelCount : 2
@@ -129,10 +209,46 @@ export class AudioMixer {
     try { await ctx.setSinkId(deviceId === 'default' ? '' : deviceId) } catch { /* device vanished */ }
   }
 
-  /** Resume after the first user gesture (browsers require it). */
+  /** Resume after an explicit playback gesture (browsers require it). */
   resume(): void {
     const ctx = this.ensure()
     if (ctx && ctx.state === 'suspended') void ctx.resume()
+  }
+}
+
+function setPannerPosition(node: PannerNode, p: AudioPoint3, now: number): void {
+  if (node.positionX) {
+    node.positionX.setValueAtTime(p.x, now)
+    node.positionY.setValueAtTime(p.y, now)
+    node.positionZ.setValueAtTime(p.z, now)
+  } else {
+    node.setPosition(p.x, p.y, p.z)
+  }
+}
+
+function setListenerPose(
+  listener: AudioListener,
+  p: AudioPoint3,
+  forward: AudioPoint3,
+  up: AudioPoint3,
+  now: number,
+): void {
+  if (listener.positionX) {
+    listener.positionX.setValueAtTime(p.x, now)
+    listener.positionY.setValueAtTime(p.y, now)
+    listener.positionZ.setValueAtTime(p.z, now)
+  } else {
+    listener.setPosition(p.x, p.y, p.z)
+  }
+  if (listener.forwardX) {
+    listener.forwardX.setValueAtTime(forward.x, now)
+    listener.forwardY.setValueAtTime(forward.y, now)
+    listener.forwardZ.setValueAtTime(forward.z, now)
+    listener.upX.setValueAtTime(up.x, now)
+    listener.upY.setValueAtTime(up.y, now)
+    listener.upZ.setValueAtTime(up.z, now)
+  } else {
+    listener.setOrientation(forward.x, forward.y, forward.z, up.x, up.y, up.z)
   }
 }
 

@@ -29,10 +29,17 @@ import {
   roundRect, luminance, shade,
 } from '../core/gfx'
 import { theme, LIMITS } from '../theme'
+import type { AudioPlaybackState } from '../audio/player'
+import type { SpatialAudioPose } from '../audio/mixer'
+import {
+  makePostAudioTextures, repaintPostAudioTextures, type PostAudioTextures,
+} from '../audio/buttonTexture'
 
 export interface BoardCallbacks {
   onOpenModel: (meta: ThreadMeta) => void
   onOpenThread: (meta: ThreadMeta) => void
+  onToggleAudio?: (meta: ThreadMeta, pose: SpatialAudioPose) => void
+  onAudioPosition?: (meta: ThreadMeta, pose: SpatialAudioPose) => void
 }
 
 interface CardSlot {
@@ -65,7 +72,7 @@ interface CardSlot {
   badge: Mesh
   badgeMat: ShaderMaterial
   badgeTex: DynamicTexture
-  // Verified embedded-audio marker (speaker icon, bottom-left).
+  // Verified embedded-audio play/pause button (bottom-left).
   audioBadge: Mesh
   audioBadgeMat: ShaderMaterial
   replyCount: number
@@ -121,7 +128,8 @@ const SCROLL_SETTLE_MS = 150
 const SPIN_MAX_MS = 25_000
 const BADGE_W = 3.4
 const BADGE_H = 1.25
-const AUDIO_BADGE_SIZE = 1.35
+// 2.2 world units = 44 CSS px at the board's standard 20 px/unit.
+const AUDIO_BUTTON_SIZE = 2.2
 // Pixels of pointer travel before a press becomes a scroll. Below this we
 // treat the gesture as a tap on the card that was under the POINTERDOWN.
 const TAP_SLOP = 8
@@ -145,7 +153,9 @@ export class Board {
   private backdropTex: DynamicTexture
   private shadowTex: DynamicTexture
   private spinnerTex: DynamicTexture
-  private audioTex: DynamicTexture
+  private audioTextures: PostAudioTextures
+  private activeAudioId: string | null = null
+  private audioState: AudioPlaybackState = 'unavailable'
   private seps: LinesMesh[] = []
   private sepTops: number[] = []
   private background: string = theme.background
@@ -200,9 +210,7 @@ export class Board {
 
     this.shadowTex = makeContactShadow(this.scene, 'card-shadow-tex')
     this.spinnerTex = makeSpinnerTexture(this.scene, 'card-spinner-tex')
-    this.audioTex = new DynamicTexture('card-audio-tex', { width: 128, height: 128 }, this.scene, false, Texture.BILINEAR_SAMPLINGMODE)
-    this.audioTex.hasAlpha = true
-    this.paintAudioBadge()
+    this.audioTextures = makePostAudioTextures(this.scene, 'card-audio', this.isDark)
 
     this.cb = cb
     this.previewPool = new PreviewPool(
@@ -302,8 +310,9 @@ export class Board {
     this.isDark = luminance(hex) < 0.5
     this.scene.clearColor = Color4.FromHexString(hex + 'FF')
     paintBackdrop(this.backdropTex, hex)
-    this.paintAudioBadge()
+    repaintPostAudioTextures(this.audioTextures, this.isDark)
     for (const slot of this.cards) {
+      this.paintAudioState(slot)
       setCardTint(slot.shadowMat, this.isDark ? '#000000' : '#1b1b22')
       setCardOpacity(slot.shadowMat, this.contactStrength * (this.isDark ? 1 : 0.4))
       setCardTint(slot.spinnerMat, this.isDark ? theme.ink : '#3a3a44')
@@ -318,6 +327,38 @@ export class Board {
   setAssets(assets: AssetCache): void {
     this.assets = assets
     for (const slot of this.cards) if (slot.meta) this.drive(slot)
+  }
+
+  /** Repaint all recycled meshes when the shared post player changes state. */
+  setAudioPlayback(sourceId: string | null, state: AudioPlaybackState): void {
+    this.activeAudioId = sourceId
+    this.audioState = state
+    for (const slot of this.cards) this.paintAudioState(slot)
+    this.invalidate(2)
+  }
+
+  private paintAudioState(slot: CardSlot): void {
+    const state = slot.meta?.eventId === this.activeAudioId && this.audioState !== 'unavailable'
+      ? this.audioState
+      : 'stopped'
+    setCardTexture(slot.audioBadgeMat, this.audioTextures[state])
+  }
+
+  private audioPose(slot: CardSlot): SpatialAudioPose {
+    return this.audioPoseAt(slot.mesh.position.x, slot.mesh.position.y, slot.mesh.position.z)
+  }
+
+  private audioPoseAt(x: number, y: number, z: number): SpatialAudioPose {
+    return {
+      source: { x, y, z },
+      listener: {
+        x: this.camera.position.x,
+        y: this.camera.position.y,
+        z: this.camera.position.z,
+      },
+      forward: { x: 0, y: 0, z: 1 },
+      up: { x: 0, y: 1, z: 0 },
+    }
   }
 
   setMetas(metas: ThreadMeta[]): void {
@@ -461,13 +502,15 @@ export class Board {
       setCardWhite(badgeMat)
       setCardFlip(badgeMat, 'dyn')
 
-      const audioBadge = MeshBuilder.CreatePlane(`audio-badge-${i}`, { width: 4, height: 4 }, this.scene)
+      const audioBadge = MeshBuilder.CreatePlane(`audio-button-${i}`, { width: 4, height: 4 }, this.scene)
       audioBadge.setEnabled(false)
+      // Board taps use the same manual CSS→world hit test as cards, avoiding
+      // hardware-scale disagreement while still keeping this a Babylon mesh.
       audioBadge.isPickable = false
-      audioBadge.position.z = -0.05
+      audioBadge.position.z = -0.08
       const audioBadgeMat = makeCardMaterial(this.scene)
       audioBadge.material = audioBadgeMat
-      setCardTexture(audioBadgeMat, this.audioTex)
+      setCardTexture(audioBadgeMat, this.audioTextures.stopped)
       setCardWhite(audioBadgeMat)
       setCardFlip(audioBadgeMat, 'dyn')
 
@@ -481,44 +524,8 @@ export class Board {
       this.cards.push(slot)
       mesh.metadata = { card: slot }
       badge.metadata = { card: slot, badge: true }
+      audioBadge.metadata = { card: slot, audioButton: true }
     }
-  }
-
-  /** Shared vector speaker badge. Audio is verified from GLB bytes before
-   * this marker appears; the untrusted event tag alone never arms it. */
-  private paintAudioBadge(): void {
-    const { width: w, height: h } = this.audioTex.getSize()
-    const ctx = this.audioTex.getContext() as CanvasRenderingContext2D
-    ctx.clearRect(0, 0, w, h)
-    ctx.fillStyle = this.isDark ? 'rgba(12,12,14,0.68)' : 'rgba(250,250,252,0.78)'
-    ctx.strokeStyle = this.isDark ? 'rgba(255,255,255,0.32)' : 'rgba(0,0,0,0.28)'
-    ctx.lineWidth = 3
-    ctx.beginPath()
-    ctx.arc(w / 2, h / 2, w * 0.43, 0, Math.PI * 2)
-    ctx.fill()
-    ctx.stroke()
-
-    ctx.fillStyle = this.isDark ? theme.ink : '#101014'
-    ctx.strokeStyle = ctx.fillStyle
-    ctx.lineWidth = 6
-    ctx.lineCap = 'round'
-    ctx.lineJoin = 'round'
-    ctx.beginPath()
-    ctx.moveTo(34, 53)
-    ctx.lineTo(48, 53)
-    ctx.lineTo(64, 40)
-    ctx.lineTo(64, 88)
-    ctx.lineTo(48, 75)
-    ctx.lineTo(34, 75)
-    ctx.closePath()
-    ctx.fill()
-    ctx.beginPath()
-    ctx.arc(64, 64, 22, -0.72, 0.72)
-    ctx.stroke()
-    ctx.beginPath()
-    ctx.arc(64, 64, 34, -0.68, 0.68)
-    ctx.stroke()
-    this.audioTex.update()
   }
 
   /**
@@ -710,14 +717,29 @@ export class Board {
       slot.shadow.setEnabled(false)
     }
     this.drawBadge(slot)
+    this.paintAudioState(slot)
   }
 
   private positionBoundSlots(): void {
+    let positionedActive = false
     for (const slot of this.cards) {
       const row = slot.row
       if (!slot.meta || !row) continue
       slot.mesh.position.set(this.colX(row.col), this.worldY(row), 0)
       this.positionExtras(slot)
+      if (slot.meta.eventId === this.activeAudioId) positionedActive = true
+    }
+    // Virtualisation may recycle a playing card after it leaves the prefetch
+    // window. Its logical row still exists, so keep moving the HRTF source
+    // with that row instead of freezing it at its last on-screen position.
+    if (this.activeAudioId && !positionedActive) {
+      const row = this.rows.find((r) => r.meta.eventId === this.activeAudioId)
+      if (row) {
+        this.cb.onAudioPosition?.(
+          row.meta,
+          this.audioPoseAt(this.colX(row.col), this.worldY(row), 0),
+        )
+      }
     }
   }
 
@@ -792,13 +814,15 @@ export class Board {
     slot.badge.position.z = -0.05
     slot.badge.setEnabled(slot.replyCount > 0 && slot.mesh.isEnabled())
 
-    slot.audioBadge.scaling.set(AUDIO_BADGE_SIZE / 4, AUDIO_BADGE_SIZE / 4, 1)
+    slot.audioBadge.scaling.set(AUDIO_BUTTON_SIZE / 4, AUDIO_BUTTON_SIZE / 4, 1)
     slot.audioBadge.position.set(
-      slot.mesh.position.x - slot.w / 2 + AUDIO_BADGE_SIZE / 2 + 0.5,
-      slot.mesh.position.y - slot.h / 2 + AUDIO_BADGE_SIZE / 2 + 0.5,
-      -0.05,
+      slot.mesh.position.x - slot.w / 2 + AUDIO_BUTTON_SIZE / 2 + 0.5,
+      slot.mesh.position.y - slot.h / 2 + AUDIO_BUTTON_SIZE / 2 + 0.5,
+      -0.08,
     )
-    slot.audioBadge.setEnabled(!!slot.meta?.audioVerified && !!slot.meta.hasAudio && slot.mesh.isEnabled())
+    const hasAudio = !!slot.meta?.audioVerified && !!slot.meta.hasAudio && slot.mesh.isEnabled()
+    slot.audioBadge.setEnabled(hasAudio)
+    if (hasAudio && slot.meta) this.cb.onAudioPosition?.(slot.meta, this.audioPose(slot))
 
     const ring = Math.min(slot.h * 0.38, slot.w * 0.18)
     slot.spinner.scaling.set(ring / 4, ring / 4, 1)
@@ -981,28 +1005,40 @@ export class Board {
     const wx = (x - cssW / 2) / this.pxPerUnit
     const wy = this.halfH - (y / cssH) * (2 * this.halfH)
 
-    let best: { slot: CardSlot; d: number; badge: boolean } | null = null
+    let best: { slot: CardSlot; d: number; action: 'audio' | 'thread' | 'model' } | null = null
     for (const slot of this.cards) {
       const row = slot.row
       if (!slot.meta || !row || !slot.mesh.isEnabled()) continue
       const cx = this.colX(row.col)
       const cy = this.worldY(row)
+      // Audio wins before the underlying card. The visible 44 px circle and
+      // the manual hit target are exactly the same Babylon-space bounds.
+      if (slot.audioBadge.isEnabled()) {
+        const ax = slot.audioBadge.position.x
+        const ay = slot.audioBadge.position.y
+        if (Math.abs(wx - ax) <= AUDIO_BUTTON_SIZE / 2 && Math.abs(wy - ay) <= AUDIO_BUTTON_SIZE / 2) {
+          const d = (wx - ax) ** 2 + (wy - ay) ** 2
+          if (!best || d < best.d) best = { slot, d, action: 'audio' }
+          continue
+        }
+      }
       if (slot.replyCount > 0 && slot.badge.isEnabled()) {
         const bx = slot.badge.position.x
         const by = slot.badge.position.y
         if (Math.abs(wx - bx) <= BADGE_W / 2 && Math.abs(wy - by) <= BADGE_H / 2) {
           const d = (wx - bx) ** 2 + (wy - by) ** 2
-          if (!best || d < best.d) best = { slot, d, badge: true }
+          if (!best || d < best.d) best = { slot, d, action: 'thread' }
           continue
         }
       }
       if (Math.abs(wx - cx) <= slot.w / 2 && Math.abs(wy - cy) <= slot.h / 2) {
         const d = (wx - cx) ** 2 + (wy - cy) ** 2
-        if (!best || d < best.d) best = { slot, d, badge: false }
+        if (!best || d < best.d) best = { slot, d, action: 'model' }
       }
     }
     if (!best?.slot.meta) return
-    if (best.badge) this.cb.onOpenThread(best.slot.meta)
+    if (best.action === 'audio') this.cb.onToggleAudio?.(best.slot.meta, this.audioPose(best.slot))
+    else if (best.action === 'thread') this.cb.onOpenThread(best.slot.meta)
     else this.cb.onOpenModel(best.slot.meta)
   }
 
@@ -1027,6 +1063,9 @@ export class Board {
         slot.failed = true
         slot.spinner.setEnabled(false)
         this.fadeOpacityTo(slot, 0.09)
+        // Audio verification comes from the downloaded GLB bytes and remains
+        // useful even when local poster rendering fails.
+        this.positionExtras(slot)
         this.invalidate(2)
         return
       }

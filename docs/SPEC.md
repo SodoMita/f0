@@ -23,7 +23,7 @@ EDITOR: brush paint in 3D, not CAD. GRID 0.05 != CUBE 0.25, overlap, never dedup
 
 TEXT+ANIM: text = real flat low-poly geometry (NOT textured quad), FORM <120 tris; pixel-font table + run-merge. Anim: tracks -> node props, keyframes {time,value,LINEAR|STEP|CUBICSPLINE}, RECORD keyframing. Camera anim fly-throughs, export real glTF (quaternion sign guard). FRAMING: auto-fit faces content (dominant facing), same policy poster+RTT. Acceptance: <120 tris, round-trips, 30s/200keys >=55fps.
 
-PROTOCOL: relays damus.io/nos.lol/primal.net + nostr.band (flaky). Filters {'#m':[gltf-binary,gltf+json]} + {kinds:[5]}; mime recheck. v2 tags: t/m/x/size/url/server/color/v/e(root/reply); v3 added preview-camera/animation (index), anim/cameras/camera-anim, filename/source-format/source-filename; v4 REMOVES the thumb PNG tags (posters are only ever rendered locally from the model) and adds dim (WxH, the local poster render size; validated 64..4096 px, aspect 0.5..2, default 448x280). Parse: multi-url replicas, x->ox, NIP-10. Publish: empty content, url(xN)/m/x/ox/size/dim/f flags/e tags, nostr-tools, 1/3=partial — model bytes only, no poster upload. Kind-5: pubkey match, tombstones. Blossom: blossom.primal.net + cdn.satellite.earth, replicas, SHA-256; BUD-01 (kind-24242). Audio: KHR_audio/MSFT_audio_emitter, append BIN, <=8MiB. IndexedDB: posts/posters/blobs/owned/config, forward-only, never deleteDatabase(), secrets AES-GCM, poster LRU.
+PROTOCOL: relays damus.io/nos.lol/primal.net + nostr.band (flaky). Filters {'#m':[gltf-binary,gltf+json]} + {kinds:[5]}; mime recheck. v2 tags: t/m/x/size/url/server/color/v/e(root/reply); v3 added preview-camera/animation (index), anim/cameras/camera-anim, filename/source-format/source-filename; v4 REMOVES the thumb PNG tags (posters are only ever rendered locally from the model) and adds dim (WxH, the local poster render size; validated 64..4096 px, aspect 0.5..2, default 448x280). Parse: multi-url replicas, x->ox, NIP-10. Publish: empty content, url(xN)/m/x/ox/size/dim/f flags/e tags, nostr-tools, 1/3=partial — model bytes only, no poster upload. Kind-5: pubkey match, tombstones. Blossom: blossom.primal.net + cdn.satellite.earth, replicas, SHA-256; BUD-01 (kind-24242). Audio: KHR_audio/MSFT_audio_emitter, append BIN, <=256KiB. IndexedDB: posts/posters/blobs/owned/config, forward-only, never deleteDatabase(), secrets AES-GCM, poster LRU.
 
 SECURITY: trusted = bundle + nostr-tools + Babylon; else untrusted until verified (sig/schema/size/URL/cycles). Blob: cap, no credentials, timeout, SHA-256, magic/length, no cross-origin redirects. GLB limits: 20MiB, 2MiB JSON, 2k nodes, 500 meshes, 2M verts, 6M idx, 256 mats, 64 tex, 128MP, 32 skins, 16 cams, 32 lights, depth 128; re-verify, dispose on mismatch. GPU: caps, one model, contextlost -> stop. Secrets: per-post keys, envelope only. Endpoints: wss:/https: only, no localhost. Privacy: IP visible, deletion != destroy, per-post key unlinks.
 
@@ -777,17 +777,24 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     OPTIONAL: bad/unsupported/oversized clips are ignored and the model still
     renders. Extraction is identity-cached for shared Uint8Array model bytes
     and by WeakMap<Blob, Promise> for Blob callers. The kind-1063 `audio` tag
-    remains a hint only; card speaker chrome appears only after actual bytes
-    verify. The viewer feeds the extracted Blob to one HTMLAudioElement via
-    an object URL: autoplay=false, loop=true, base element volume=0.78
-    (scaled by master/effects settings), button/S gesture to start, pending
-    spinner, play rejection handled, media-element sink/background settings,
-    and pause/src
-    clear/object-URL revoke on model change or view exit. No AudioBuffer,
-    WebAudio panner, microphone, stream or positional playback is involved.
-    Contrary to the future note in item 26, do NOT register Babylon's
-    MSFT_audio_emitter loader: that would construct a second scene Sound,
-    decode twice and bypass this explicit one-player/no-autoplay lifecycle.
-    Pass-through studio publish re-emits the `audio` hint only when its final
-    GLB still contains a verified clip. Guards: audio-unit.mjs,
-    audio-playback.mjs and audio-integration.mjs (offline-rig flavour c).
+    remains a hint only; a Babylon play/pause mesh appears on verified-audio
+    posts in both the board and reply-tree map. The viewer also exposes its
+    button/S control. One shared player feeds the extracted Blob to an
+    HTMLAudioElement/object URL for browser decoding: autoplay=false,
+    loop=true, and playback starts only in the explicit button/key gesture.
+    That gesture creates a per-source WebAudio graph:
+    MediaElementAudioSourceNode -> PannerNode (`panningModel=HRTF`, inverse
+    distance) -> clip GainNode -> mixer SFX/master buses. Clip gain is glTF
+    0.72 × UI base 0.78; settings buses apply effects/master/background mute
+    and output-device routing downstream. The board tracks recycled card
+    coordinates against its flat Babylon camera; the tree tracks each node
+    and updates the AudioListener whenever its Babylon camera pans/zooms.
+    Loading, playing/pause and error faces are rendered directly on both
+    in-scene controls. Route changes pause/clear media, disconnect every graph
+    node, clear src and revoke the object URL. No AudioBuffer, microphone or
+    stream is involved. Do NOT register Babylon's MSFT_audio_emitter loader:
+    that would construct a second scene Sound, decode twice and bypass this
+    explicit one-player/no-autoplay lifecycle. Pass-through studio publish
+    re-emits the `audio` hint only when its final GLB still contains a verified
+    clip. Guards: audio-unit.mjs, audio-playback.mjs and audio-integration.mjs
+    (offline-rig flavour c; board + thread controls).

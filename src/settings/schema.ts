@@ -401,7 +401,7 @@ export const SETTINGS: SettingDef[] = [
   { id: 'volVoice', label: 'Voice / dialogue', group: 'audio', kind: 'slider', default: 100, ...pct },
   { id: 'volUi', label: 'Interface', group: 'audio', kind: 'slider', default: 60, ...pct },
   {
-    id: 'spatialAudio', label: 'Spatial audio', group: 'audio', kind: 'select', default: 'stereo',
+    id: 'spatialAudio', label: 'Spatial audio', group: 'audio', kind: 'select', default: 'hrtf',
     options: [
       { value: 'mono', label: 'Mono' },
       { value: 'stereo', label: 'Stereo' },

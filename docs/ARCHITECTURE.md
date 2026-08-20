@@ -31,8 +31,9 @@ src/
   audio/
     embedded.ts      bounded GLB KHR_audio/MSFT_audio_emitter WAV/MP3 extractor
                      (signature + bufferView verification, 256 KiB, WeakMap cache)
-    player.ts        one no-autoplay HTMLAudioElement/object-URL viewer player
-    mixer.ts         settings/device mixer (recording and future generated audio)
+    player.ts        shared no-autoplay media/object-URL post player + route lifecycle
+    buttonTexture.ts Babylon play/loading/pause/error faces for board/tree controls
+    mixer.ts         settings/device buses + per-source MediaElement→HRTF panners
   model/
     importSidecar.ts bounded/local-only GLB + glTF sidecar + OBJ import/repack
     draco.ts         local Draco decoders (data: URIs), numWorkers:0
@@ -77,8 +78,12 @@ relays ──(kind 1063 + 5)──▶ RelayPool ─▶ parseModelEvent ─▶ Th
                      ├─ AssetCache.getPoster ─▶ PosterRenderer ─▶ transparent RTT (no flip)
                      └─ PreviewPool.request ─▶ RTT (no flip) ─────▶ card shader
    tap card ─▶ #/viewer/:id ─▶ Viewer.load ─▶ authored cameras + orbit
-                    model bytes ─▶ embedded-audio verify ─▶ speaker badge
-                                                       └─▶ HTMLAudioElement (S/button; never autoplay)
+                    model bytes ─▶ embedded-audio verify ─▶ board/tree play meshes
+                                                       └─▶ HTMLAudioElement (never autoplay)
+                                                            │ explicit gesture
+                                                            ▼
+                                               MediaElementSource → HRTF Panner
+                                               → clip gain → SFX/master → output
    tap badge ─▶ #/thread/:id ─▶ ThreadView.open ─▶ tidy-tree 2D map
 ```
 
