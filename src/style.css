@@ -1060,7 +1060,6 @@ body[data-theme="light"] .mi-meter { background: rgba(0, 0, 0, 0.10); }
   border-radius: 18px;
   background: rgba(18,18,19,.62);
   border: 1px solid var(--line);
-  backdrop-filter: blur(10px);
   overflow: hidden;
   max-height: 100%;
 }
