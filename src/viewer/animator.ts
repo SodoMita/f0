@@ -60,8 +60,8 @@ export class TrackAnimator {
   get forward(): boolean { return this.forwardVal }
   get stepped(): boolean { return this.steppedVal }
 
-  /** Any positive number (0.01 floor guards against freezing/crawling playback). */
-  setSpeed(x: number): void { this.speedVal = Number.isFinite(x) ? Math.max(0.01, x) : 1 }
+  /** Any finite number: 0 freezes the pose, negatives play the clip backwards. */
+  setSpeed(x: number): void { this.speedVal = Number.isFinite(x) ? x : 1 }
   setDirection(forward: boolean): void { this.forwardVal = forward }
   setStepped(on: boolean): void { this.steppedVal = on; this.lastPosed = Number.NaN; this.pose() }
 
