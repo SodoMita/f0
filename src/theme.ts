@@ -25,6 +25,9 @@ export const POSTER_H = 280
 export const LIMITS = {
   modelBytesHard: 20 * 1024 * 1024,
   modelBytesRecommended: 8 * 1024 * 1024,
+  // Optional embedded WAV/MP3 payload. Audio must stay message-sized; an
+  // oversized clip is ignored without rejecting the model itself.
+  audioBytes: 256 * 1024,
   jsonChunkBytes: 2 * 1024 * 1024,
   nodes: 2000,
   meshes: 500,
