@@ -507,7 +507,8 @@ body.reduce-motion * { animation-duration: 0.01ms !important; transition-duratio
 #perf-overlay {
   display: none; left: 16px; bottom: 14px; font-size: 10px; letter-spacing: 0.06em;
   color: var(--muted); background: rgba(10,10,12,0.6); border: 1px solid rgba(255,255,255,0.1);
-  border-radius: 8px; padding: 5px 9px; pointer-events: none; white-space: pre;
+  border-radius: 8px; padding: 5px 9px; pointer-events: none; white-space: pre-wrap;
+  max-width: calc(100vw - 32px);
 }
 body.show-perf #perf-overlay { display: block; }
 #calibration {
@@ -854,8 +855,17 @@ body[data-theme="light"] .sheet-card { background: rgba(253, 246, 245, 0.97); bo
 }
 .studio-status { font: 11px/1 ui-monospace, monospace; color: var(--muted); min-width: 96px; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .studio-status.ok { color: var(--success); }
-.studio-status.err { color: var(--danger); }
 .studio-status.busy { color: var(--warning); }
+/* Error messages wrap to new lines so they stay inside the studio stage
+   boundary instead of spilling out of the bar on one unbroken line
+   (pre-line keeps any explicit \n breaks in the message, too). */
+.studio-status.err {
+  color: var(--danger);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+  max-width: min(56vw, 520px);
+}
 #btn-studio-publish:disabled { opacity: 0.4; cursor: not-allowed; }
 #btn-studio-publish.danger {
   background: transparent;
