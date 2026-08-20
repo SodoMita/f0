@@ -6,6 +6,14 @@ This document records exactly how a working headless browser and a live-content
 test feed were obtained anyway, so the next agent does not have to rediscover
 it. It applies to ANY restricted environment with an npm registry allowlist.
 
+> **TL;DR — run `bash scripts/agent-bootstrap.sh` first.** It automates this
+> whole document: bun via the npm registry, `bun install`, the
+> @sparticuz/chromium headless shell + NSS libs, the Playwright wrapper shims
+> (revisions read from `browsers.json`, never hardcoded), the offline-rig TLS
+> certs, and an end-to-end WebGL2 smoke check. Idempotent — safe to re-run;
+> each satisfied step is skipped. The sections below explain WHY each step
+> exists and how to debug it when the environment shifts.
+
 ## The allowlist (measured)
 
 | Endpoint | Reachable |

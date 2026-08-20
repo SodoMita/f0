@@ -28,6 +28,10 @@ trailing AMENDMENTS section overrides earlier wording where they conflict.
 ## First steps for any agent
 
 ```bash
+bash scripts/agent-bootstrap.sh   # FIRST, in a fresh/reset sandbox: installs
+                                  # bun (npm registry — bun.sh is blocked),
+                                  # node_modules, headless Chromium + Playwright
+                                  # shims, offline-rig certs. Idempotent.
 bun install            # Bun, NOT npm (bun.lock is the lockfile)
 bun run dev            # http://localhost:5173
 bun run build          # typecheck (tsc --noEmit) + vite build → release/
