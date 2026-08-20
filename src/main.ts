@@ -27,7 +27,7 @@ import { graphics } from './render/graphics'
 import { mixer } from './audio/mixer'
 import { Legend } from './hud/legend'
 import { NetworkPanel } from './hud/networkPanel'
-import { ErrorSheet, ERRORS } from './hud/errorSheet'
+import { ErrorSheet, ERRORS, bindCopyButton } from './hud/errorSheet'
 import { attachAllDragNumbers } from './studio/dragNumber'
 import { transfers, formatRate, formatBytes, formatDirStats, type TransferStats } from './core/transfer'
 import { handoffContainer } from './core/sceneTransfer'
@@ -59,6 +59,7 @@ async function boot(): Promise<void> {
     const fatal = $('fatal')
     fatal.hidden = false
     $('fatal-text').textContent = 'WebGL unavailable.'
+    bindCopyButton($('btn-fatal-copy'), () => $('fatal-text').textContent ?? '')
     $('fatal-reload').addEventListener('click', () => location.reload())
     return
   }
@@ -90,6 +91,8 @@ async function boot(): Promise<void> {
     },
   )
 
+  bindCopyButton($('btn-fatal-copy'), () => $('fatal-text').textContent ?? '')
+
   const legend = new Legend()
   const networkPanel = new NetworkPanel(pool, blossoms)
   const errorSheet = new ErrorSheet()
@@ -103,6 +106,7 @@ async function boot(): Promise<void> {
   const studioEl = $('studio')
   const studioFilename = $('studio-filename')
   const studioStatus = $('studio-status')
+  const btnStudioStatusCopy = $('btn-studio-status-copy') as HTMLButtonElement | null
   const btnStudioImport = $('btn-studio-import') as HTMLButtonElement
   const btnStudioPublish = $('btn-studio-publish') as HTMLButtonElement
   const studioText = $('studio-text') as HTMLTextAreaElement
@@ -202,9 +206,11 @@ async function boot(): Promise<void> {
   }
   transfers.subscribe(paintTransfers)
 
+  const toastText = $('toast-text')
+  bindCopyButton($('btn-toast-copy'), () => toastText.textContent ?? '')
   let toastTimer = 0
   function showToast(msg: string): void {
-    toast.textContent = msg
+    toastText.textContent = msg
     toast.hidden = false
     clearTimeout(toastTimer)
     toastTimer = window.setTimeout(() => { toast.hidden = true }, 3200)
@@ -315,7 +321,9 @@ async function boot(): Promise<void> {
   function setStudioStatus(text: string, cls = ''): void {
     studioStatus.textContent = text
     studioStatus.className = 'studio-status ' + cls
+    if (btnStudioStatusCopy) btnStudioStatusCopy.hidden = cls !== 'err' || !text
   }
+  bindCopyButton(btnStudioStatusCopy, () => studioStatus.textContent ?? '')
 
   // ---------- studio model info (AMENDMENT 66) ----------
   // The upload tab card shows the imported model's name, format, safety-scan

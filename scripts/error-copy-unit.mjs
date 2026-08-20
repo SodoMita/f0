@@ -43,6 +43,12 @@ const selectStyles = await page.evaluate(() => {
   const fatalText = document.getElementById('fatal-text')
   const studioStatus = document.getElementById('studio-status')
   studioStatus.className = 'studio-status err'
+  const toast = document.getElementById('toast')
+  toast.hidden = false
+  const toastText = document.getElementById('toast-text')
+  toastText.textContent = 'download failed'
+  const miWarnings = document.getElementById('mi-warnings')
+  miWarnings.hidden = false
 
   return {
     sheetUserSelect: getComputedStyle(sheet).userSelect,
@@ -52,6 +58,10 @@ const selectStyles = await page.evaluate(() => {
     fatalCardUserSelect: getComputedStyle(fatalCard).userSelect,
     fatalTextUserSelect: getComputedStyle(fatalText).userSelect,
     studioStatusErrUserSelect: getComputedStyle(studioStatus).userSelect,
+    studioStatusErrPointer: getComputedStyle(studioStatus).pointerEvents,
+    toastUserSelect: getComputedStyle(toast).userSelect,
+    toastTextUserSelect: getComputedStyle(toastText).userSelect,
+    miWarningsUserSelect: getComputedStyle(miWarnings).userSelect,
   }
 })
 
@@ -63,6 +73,20 @@ check('cause is selectable (user-select: text)', selectStyles.causeUserSelect ==
 check('fatal-card is selectable (user-select: text)', selectStyles.fatalCardUserSelect === 'text', selectStyles.fatalCardUserSelect)
 check('fatal-text is selectable (user-select: text)', selectStyles.fatalTextUserSelect === 'text', selectStyles.fatalTextUserSelect)
 check('studio-status.err is selectable (user-select: text)', selectStyles.studioStatusErrUserSelect === 'text', selectStyles.studioStatusErrUserSelect)
+check('studio-status.err receives pointer events', selectStyles.studioStatusErrPointer === 'auto', selectStyles.studioStatusErrPointer)
+check('toast is selectable (user-select: text)', selectStyles.toastUserSelect === 'text', selectStyles.toastUserSelect)
+check('toast-text is selectable (user-select: text)', selectStyles.toastTextUserSelect === 'text', selectStyles.toastTextUserSelect)
+check('mi-warnings is selectable (user-select: text)', selectStyles.miWarningsUserSelect === 'text', selectStyles.miWarningsUserSelect)
+
+const extraBtns = await page.evaluate(() => ({
+  toastCopy: !!document.getElementById('btn-toast-copy'),
+  studioCopy: !!document.getElementById('btn-studio-status-copy'),
+  fatalCopy: !!document.getElementById('btn-fatal-copy'),
+}))
+check('toast copy button exists', extraBtns.toastCopy)
+check('studio-status copy button exists', extraBtns.studioCopy)
+check('fatal copy button exists', extraBtns.fatalCopy)
+
 
 console.log('\n--- Checking Copy Button DOM & Layout ---')
 
