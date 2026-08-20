@@ -1181,3 +1181,13 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
       new getPoster jobs per pass, and cancel queued posters that panned
       off or shrank. Live previews and 3D models use the same size gate.
     Guard: `bun scripts/direct3d-unit.mjs` + `bun scripts/thread-open-unit.mjs`.
+
+78. STUDIO MUST CLOSE THE BOARD (2026-08-21): opening the studio left the
+    feed "still open" — board-only topbar controls (search / shuffle / 3D /
+    create) stayed clickable over the editor, a live feed event re-bound
+    cards `isPickable=true`, and the studio camera called `attachControl`
+    in its constructor so it stole canvas pointers while the board was on
+    screen. Fix: `body[data-mode=studio]` hides those controls; `Board.setInteractive(false)`
+    while another view owns the canvas (bind/tap respect the flag); studio
+    camera attaches only in `attach()`/`detach()`. Poster queue pauses in
+    studio/viewer. Guard: `node scripts/studio-open.mjs`.

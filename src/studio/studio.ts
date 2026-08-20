@@ -121,7 +121,10 @@ export class Studio {
     engine.addAnimationSource(() => engine.activeScene === this.scene && this.isAnimating())
     this.scene.clearColor = Color4.FromHexString(theme.background + 'FF')
     this.camera = new ArcRotateCamera('studio-cam', Math.PI / 2, Math.PI / 2.2, 8, Vector3.Zero(), this.scene)
-    this.camera.attachControl(true)
+    // Do NOT attachControl here: the studio shares the one canvas with the
+    // board. Attaching at construction stole pointer events while the board
+    // was on screen (and left the feed feeling "still open" inside studio).
+    // attach() / detach() own the canvas for the studio's lifetime.
     this.camera.wheelPrecision = 50
     this.camera.lowerRadiusLimit = 0.001
     this.camera.upperRadiusLimit = 1e6

@@ -4,6 +4,16 @@ Claim a task by moving it to **In progress** with your name/date, push, then
 move it to **Done** with a commit reference. One agent per area.
 
 ## Done
+- [x] **Studio left the board clickable** (agent arena, 2026-08-21, SPEC
+      AMENDMENT 78): opening the studio left board-only topbar controls
+      (search / shuffle / 3D / create) clickable over the editor, a live
+      feed event re-bound cards pickable, and the studio camera attached
+      at construction so it stole canvas pointers on the board. Now
+      `body[data-mode=studio]` hides those controls, `Board.setInteractive`
+      drops picking/drag while another view owns the canvas, and the
+      studio camera attaches only in attach()/detach(). Guard:
+      `node scripts/studio-open.mjs`.
+
 - [x] **2D thread-open freeze** (agent arena, 2026-08-21, SPEC AMENDMENT 77):
       opening a reply tree with the cube toggle OFF hitch-froze after
       Direct-3D. `sync3D` no longer runs in 2D; `fit()` still puts the whole

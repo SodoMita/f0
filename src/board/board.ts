@@ -183,6 +183,8 @@ export class Board {
   private rowIds = ''
   private prefetchScreens = 1
   private contactStrength = 0.55
+  /** False while another view owns the canvas — cards must not steal taps. */
+  private interactive = true
   /**
    * Autoplay (settings → Interface → "Autoplay animations"): when ON, live
    * previews start as cards come into view (the historical feed behaviour);
@@ -463,6 +465,24 @@ export class Board {
 
   setInertia(v: number): void {
     this.inertia = Math.max(0, Math.min(1, v))
+  }
+
+  /**
+   * The board shares the one canvas. While studio/viewer/thread is up the
+   * cards must not remain pickable (a live feed event would re-bind them
+   * isPickable=true) and a leftover drag must not keep scrolling.
+   */
+  setInteractive(on: boolean): void {
+    this.interactive = on
+    if (!on) {
+      this.dragging = false
+      this.velocity = 0
+      this.activePointers.clear()
+    }
+    for (const slot of this.cards) {
+      slot.mesh.isPickable = on && !!slot.meta && slot.mesh.isEnabled()
+      slot.play.isPickable = on && slot.play.isEnabled()
+    }
   }
 
   /**
@@ -862,7 +882,7 @@ export class Board {
     // also keeps the whole board rendering
     slot.spinner.setEnabled(false)
     slot.mesh.setEnabled(true)
-    slot.mesh.isPickable = true
+    slot.mesh.isPickable = this.interactive
     const size = cardSize(row.meta)
     slot.w = size.w
     slot.h = size.h
@@ -935,8 +955,10 @@ export class Board {
     // NB both directions: leaving this latched at true kept isAnimating()
     // true forever, i.e. the board never stopped drawing after a scroll.
     this.pendingSettle = !settled
-    // stop chewing on GLBs while the feed is moving
-    this.assets?.setPaused(!settled)
+    // stop chewing on GLBs while the feed is moving. Only while THIS view
+    // owns the canvas — otherwise a live event would unpause the queue
+    // behind the studio / thread.
+    if (this.interactive) this.assets?.setPaused(!settled)
     for (const slot of this.cards) {
       const row = slot.row
       if (!slot.meta || !row) continue
@@ -1112,6 +1134,7 @@ export class Board {
       const ev = info.event as PointerEvent
       switch (info.type) {
         case PointerEventTypes.POINTERDOWN: {
+          if (!this.interactive) return
           if (ev.button !== 0) return
           this.activePointers.add(ev.pointerId)
           if (this.activePointers.size > 1) { this.dragging = false; return }
@@ -1228,6 +1251,7 @@ export class Board {
   }
 
   private tapAt(x: number, y: number): void {
+    if (!this.interactive) return
     // Hit-test in the same CSS→world space as screenPosOf. scene.pick can
     // disagree with the ortho layout (hardware scale, jittered scroll),
     // which opened the post one row above the one that was pressed.
