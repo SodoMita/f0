@@ -1116,6 +1116,33 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     (request → onPlaced → isLive → release); the button toggle persists
     across reload with no page errors.
 
+    FIXES (2026-08-21, after the first merge — reported as "duplicated
+    inverted models in the tree, animations don't play, positions off"):
+    - The 2D poster a node/card had requested BEFORE the 3D toggle resolves
+      asynchronously; it used to land on the card quad (z=0, in front of the
+      model at z=0) and paint a static poster OVER the animated 3D model —
+      the "duplicated / not animating" symptom. Both views now bump a
+      mode-generation counter on every 2D↔3D switch and drop poster results
+      whose generation is stale.
+    - The no-camera auto-fit rotation was `FromUnitVectorsToRef(facing, -Z)`;
+      for opposite vectors that picks an arbitrary 180° axis and can flip a
+      flat model upside-down / mirror it. It is now the exact inverse of the
+      auto-fit camera the poster pipeline builds (`LookAtLH(eye=facing,
+      target=0, up≈+Y)` → quaternion), so the flat camera reproduces the
+      poster view for every facing, including vertical ones.
+    - Models were centred at z=0.25 with depth 0.6·min(w,h): the back half
+      poked behind the opaque backdrop (board z=2) and interleaved with the
+      contact shadow. Now centred at z=0 with depth 0.4·min(w,h), and the
+      board's contact shadow moves to z=1.9 (behind the model) in 3D mode.
+    - A load that completes after the feed scrolled landed at the cell
+      captured at REQUEST time. The pool keeps the latest pending place per
+      post and applies it on load completion (models stay glued to their
+      cards), and release()/releaseAll() cancel in-flight loads that nobody
+      wants any more (no zombie models).
+    - The board never ticked the 3D pool, so slot visibility (eviction
+      preference) stayed stale; `Board.tick()` now advances it like the
+      preview pool.
+
 76. OVERLAY DRAW ORDER — CARDS/NODES MUST NOT PAINT OVER THEIR BUTTONS
     (2026-08-20):
     A board card's reply badge and play button (and a thread node's reply

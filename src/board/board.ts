@@ -143,6 +143,10 @@ export class Board {
   /** Direct-3D models rendered in the visible scene (no render-to-texture). */
   readonly pool3d: Direct3DPool
   private threeD = false
+  /** Bumped on every 2D↔3D switch; async poster jobs capture it so a poster
+   *  that resolves AFTER the toggle cannot paint over a direct 3D model
+   *  (the "duplicated static poster over the animated model" regression). */
+  private modeGen = 0
   private assets: AssetCache | null = null
   private halfH = 20
   private aspect = 1.6
@@ -511,6 +515,7 @@ export class Board {
     if (this.threeD === on) return
     const was = this.threeD
     this.threeD = on
+    this.modeGen++ // invalidate any in-flight poster jobs from the old mode
     // Free the pipeline we are leaving (never both resident at once).
     if (was) this.pool3d.releaseAll()
     else this.previewPool.releaseAll()
@@ -1054,7 +1059,9 @@ export class Board {
       slot.shadow.scaling.set(w / 4, h / 4, 1)
       slot.shadow.position.x = slot.mesh.position.x + (fp.cx - 0.5) * slot.w
       slot.shadow.position.y = slot.mesh.position.y + (fp.bottom - 0.5) * slot.h - h * 0.18
-      slot.shadow.position.z = 0.5
+      // 3D mode: the model has real depth (z ∈ [-d/2, +d/2]), so the contact
+      // shadow must sit BEHIND it — just in front of the backdrop (z=2).
+      slot.shadow.position.z = this.threeD ? 1.9 : 0.5
     }
   }
 
@@ -1163,6 +1170,8 @@ export class Board {
       this.invalidate(2)
     }
     this.previewPool.tick(this.visiblePosts)
+    // keep each 3D slot's visibility flag fresh for eviction preference
+    this.pool3d.tick(this.visiblePosts)
     // Drive the 120ms card crossfades (SPEC CARD "Crossfade 120ms"): the
     // same clock ramps the plate opacity AND the tex->tex2 blend; when the
     // ramp completes the card adopts tex2 as its texture and resets.
@@ -1302,16 +1311,20 @@ export class Board {
     this.drive2D(slot)
   }
 
-  /** The card cell for a slot's model, in board-scene world units. */
+  /** The card cell for a slot's model, in board-scene world units.
+   *  z = 0 is the card plane; the model is centred there and its depth is
+   *  capped so it never pokes behind the backdrop (z=2) or through the
+   *  contact shadow (z≈1.9 in 3D mode) — the "clipped against the
+   *  background" regression. */
   private placeFor(slot: CardSlot): Place3D {
     const row = slot.row
     return {
       x: this.colX(row?.col ?? 0),
       y: row ? this.worldY(row) : 0,
-      z: 0.25,
+      z: 0,
       w: slot.w,
       h: slot.h,
-      depth: Math.min(slot.w, slot.h) * 0.6,
+      depth: Math.min(slot.w, slot.h) * 0.4,
     }
   }
 
@@ -1338,8 +1351,12 @@ export class Board {
     const assets = this.assets
     if (!meta || !assets) return
     if (meta.hashFailed || assets.isHashFailed(meta.eventId)) return
+    const gen = this.modeGen
     void assets.getPoster(meta).then((tex) => {
       if (slot.meta?.eventId !== meta.eventId) return
+      // The mode flipped while the poster rendered: a direct 3D model now
+      // owns this card, so the poster must not appear over/under it.
+      if (gen !== this.modeGen) return
       if (meta.hashFailed || assets.isHashFailed(meta.eventId)) {
         slot.failed = true
         slot.spinner.setEnabled(false)

@@ -142,6 +142,9 @@ export class ThreadView {
   /** Direct-3D models rendered in the visible thread scene (no RTT). */
   readonly pool3d: Direct3DPool
   private threeD = false
+  /** Bumped on every 2D↔3D switch; async poster jobs capture it so a poster
+   *  that resolves after the toggle cannot paint over a direct 3D model. */
+  private modeGen = 0
   /** Autoplay (settings → Interface): see Board.setAutoplay. */
   autoplay = true
   /** posts the user started with ▶ (kept playing even with autoplay off) */
@@ -415,6 +418,9 @@ export class ThreadView {
 
   /** Show the node's poster texture (fallback after its live preview is released). */
   private showNodePoster(n: TNode): void {
+    // In 3D mode the direct model owns the node; a stale preview release must
+    // not re-show a poster over it.
+    if (this.threeD) { this.setNodeOpacityNow(n, 0); return }
     if (n.poster) {
       this.crossfadeTo(n, n.poster, '#FFFFFF', 'rtt')
     } else {
@@ -620,6 +626,7 @@ export class ThreadView {
     if (this.threeD === on) return
     const was = this.threeD
     this.threeD = on
+    this.modeGen++ // invalidate in-flight poster jobs from the old mode
     // Free the pipeline we are leaving (never both resident at once).
     if (was) this.pool3d.releaseAll()
     else this.previewPool.releaseAll()
@@ -644,9 +651,13 @@ export class ThreadView {
     if (!this.assets) return
     const { meta, mesh, spinner } = n
     const gen = this.generation
+    const modeGen = this.modeGen
     void this.assets.getPoster(meta).then((tex) => {
       // the map may have been cleared/reopened while the poster rendered
       if (!tex || gen !== this.generation || mesh.isDisposed()) return
+      // the mode flipped while the poster rendered: a direct 3D model now
+      // owns this node — the poster must not stack over/under it
+      if (modeGen !== this.modeGen) return
       n.poster = tex
       this.crossfadeTo(n, tex, '#FFFFFF', 'rtt')
       spinner.setEnabled(false)
@@ -670,12 +681,13 @@ export class ThreadView {
     }
   }
 
-  /** The node cell for a model, in thread-scene world units. */
+  /** The node cell for a model, in thread-scene world units. z = 0 is the
+   *  node plane; depth is capped so models stay clear of the frame plane. */
   private placeFor(n: TNode): Place3D {
     return {
-      x: n.x, y: n.y, z: 0.25,
+      x: n.x, y: n.y, z: 0,
       w: n.w, h: n.h,
-      depth: Math.min(n.w, n.h) * 0.6,
+      depth: Math.min(n.w, n.h) * 0.4,
     }
   }
 

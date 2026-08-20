@@ -73,6 +73,11 @@ export class Direct3DPool {
   private byPost = new Map<string, Slot>()
   private loading = new Set<string>()
   private rejected = new Set<string>()
+  /** Latest target cell for a post whose load is still in flight. The card
+   *  may scroll while the GLB parses; the model must land where the card is
+   *  NOW, not where it was when the request fired (a stale place left models
+   *  floating over the wrong card — "positions off sometimes"). */
+  private pendingPlace = new Map<string, Place3D>()
   /** In-flight loads whose result nobody wants any more (toggled off). */
   private cancelled = new Set<string>()
   private claimedSounds = new Set<Sound>()
@@ -128,7 +133,11 @@ export class Direct3DPool {
   request(postId: string, place: Place3D): boolean {
     const live = this.byPost.get(postId)
     if (live) { this.place(postId, place); return true }
-    if (this.loading.has(postId)) { this.cancelled.delete(postId); return true }
+    if (this.loading.has(postId)) {
+      this.cancelled.delete(postId)
+      this.pendingPlace.set(postId, place) // card moved while parsing
+      return true
+    }
     if (this.rejected.has(postId)) return false
 
     let slot = this.slots.find((s) => !s.postId && !s.pending)
@@ -141,24 +150,27 @@ export class Direct3DPool {
     if (slot.postId) this.release(slot.postId)
     slot.pending = true
     this.loading.add(postId)
-    void this.load(slot, postId, place)
+    this.pendingPlace.set(postId, place)
+    void this.load(slot, postId)
     return true
   }
 
   /** Move an already-resident model (the card scrolled / the map panned). */
   place(postId: string, place: Place3D): void {
     const slot = this.byPost.get(postId)
-    if (!slot) return
-    this.applyPlace(slot, place)
+    if (slot) { this.applyPlace(slot, place); return }
+    if (this.loading.has(postId)) this.pendingPlace.set(postId, place)
   }
 
   release(postId: string): void {
     const slot = this.byPost.get(postId)
     if (!slot) {
-      if (this.loading.has(postId)) this.loading.delete(postId)
+      if (this.loading.has(postId)) { this.loading.delete(postId); this.cancelled.add(postId) }
+      this.pendingPlace.delete(postId)
       return
     }
     this.byPost.delete(postId)
+    this.pendingPlace.delete(postId)
     this.clearSlot(slot)
     this.onReleased?.(postId)
   }
@@ -235,7 +247,12 @@ export class Direct3DPool {
    * The display rotation: inverse of the authored main camera's world
    * rotation when the model ships a camera (the static display camera looks
    * along +Z with identity rotation, so R_d·R_a⁻¹ = R_a⁻¹ — spec AMENDMENT
-   * 43); dominant-facing-to-camera otherwise.
+   * 43). Without a camera, the auto-fit camera the poster pipeline would
+   * build (positioned at center + facing·d, targeting center, up = +Y) is
+   * inverted the same way, so the flat camera shows exactly the poster's
+   * view. A FromUnitVectorsToRef(facing, -Z) fallback is NOT equivalent: for
+   * opposite vectors it picks an arbitrary 180° axis, which flips flat models
+   * upside-down or mirror-inverts them (the "inverted models" regression).
    */
   private displayRotation(container: AssetContainer, cameraIndex: number): Quaternion {
     const authored = cameraIndex >= 0 && cameraIndex < container.cameras.length ? container.cameras[cameraIndex] : null
@@ -247,9 +264,16 @@ export class Direct3DPool {
       authored.getWorldMatrix().decompose(undefined, quat, undefined)
       return quat.invertInPlace()
     }
-    const facing = dominantFacing(container)
+    // Auto-fit: model front (dominantFacing) turned toward the camera at -Z,
+    // up kept as +Y (or +Z when facing is vertical). LookAtLH(eye=facing,
+    // target=0) IS the inverse of the auto-fit camera's world rotation —
+    // exactly what rotating the model needs to reproduce the poster view.
+    const facing = dominantFacing(container).normalizeToNew()
+    const up = Math.abs(facing.y) > 0.99 ? new Vector3(0, 0, 1) : Vector3.Up()
+    const view = new Matrix()
+    Matrix.LookAtLHToRef(facing, Vector3.Zero(), up, view)
     const quat = new Quaternion()
-    Quaternion.FromUnitVectorsToRef(facing, Vector3.Backward(), quat)
+    Quaternion.FromRotationMatrixToRef(view, quat)
     return quat
   }
 
@@ -285,7 +309,7 @@ export class Direct3DPool {
     slot.root.position.set(place.x, place.y, place.z)
   }
 
-  private async load(slot: Slot, postId: string, place: Place3D): Promise<void> {
+  private async load(slot: Slot, postId: string): Promise<void> {
     let container: AssetContainer | null = null
     const alive = (): boolean => this.slots.includes(slot)
     try {
@@ -339,7 +363,9 @@ export class Direct3DPool {
       slot.postId = postId
       slot.started = false
       slot.playing = false
-      this.applyPlace(slot, place)
+      // Land at the LATEST cell, not the one captured when the request fired
+      // (the board may have scrolled during the parse).
+      this.applyPlace(slot, this.pendingPlace.get(postId) ?? { x: 0, y: 0, z: 0, w: 1, h: 1, depth: 1 })
       this.byPost.set(postId, slot)
       this.onPlaced?.(postId)
     } catch {
@@ -350,6 +376,7 @@ export class Direct3DPool {
       if (!this.cancelled.has(postId)) this.onFailed?.(postId)
     } finally {
       this.cancelled.delete(postId)
+      this.pendingPlace.delete(postId)
       slot.pending = false
       this.loading.delete(postId)
       this.onLoadDone?.()

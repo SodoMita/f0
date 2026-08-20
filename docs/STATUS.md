@@ -51,6 +51,24 @@ move it to **Done** with a commit reference. One agent per area.
       (request → onPlaced → isLive → release); the toggle persists across
       reload with no page errors.
 
+- [x] **Direct-3D card fixes** (agent arena, 2026-08-21, SPEC AMENDMENT 75
+      FIXES): after the first merge the toggle was buggy — "duplicated
+      inverted models in the tree, animations don't play, positions off".
+      Root causes + fixes: (1) posters requested in 2D mode resolve after the
+      3D toggle and painted a static poster over the animated model (a
+      mode-generation counter now drops stale poster results); (2) the
+      no-camera auto-fit rotation (`FromUnitVectorsToRef(facing, -Z)`) flips
+      flat models with an arbitrary 180° axis — replaced by the exact inverse
+      of the poster's auto-fit camera (`LookAtLH`); (3) models at z=0.25 with
+      depth 0.6·min poked behind the backdrop and through the shadow — now
+      z=0, depth 0.4·min, shadow at z=1.9 in 3D; (4) loads completed at the
+      cell captured at request time, so models landed off their cards after a
+      scroll — the pool keeps the latest pending place; (5) the board never
+      ticked the 3D pool's visibility. Verified headless (playwright +
+      swiftshader): a synthetic animated GLB advances through Direct3DPool,
+      both rotation paths keep the model upright, live models are glued to
+      their cards, no duplicated meshes, no page errors, tsc/vite clean.
+
 - [x] **Idle OOM: relay reconnect no longer stacks sockets** (agent arena,
       2026-08-20, SPEC AMENDMENT 73): leaving the tab open crashed after a
       long idle. Relays drop idle connections and background tabs get their
