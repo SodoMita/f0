@@ -4,6 +4,15 @@ Claim a task by moving it to **In progress** with your name/date, push, then
 move it to **Done** with a commit reference. One agent per area.
 
 ## Done
+- [x] **2D thread-open freeze** (agent arena, 2026-08-21, SPEC AMENDMENT 77):
+      opening a reply tree with the cube toggle OFF hitch-froze after
+      Direct-3D. `sync3D` no longer runs in 2D; `fit()` still puts the whole
+      tree "in view", so posters now skip postage-stamp nodes (`nodeWorthTexture`),
+      bind `peekPoster` instantly, trickle two getPoster jobs per pass, and
+      cancel offscreen/tiny queued posters. Headless: 5-node tree opens in
+      <1s with Direct3DPool empty and no >1.5s main-thread stall. Guards:
+      `bun scripts/thread-open-unit.mjs` + `node scripts/thread-open.mjs`.
+
 - [x] **Cards/nodes can't paint over their own buttons** (agent arena,
       2026-08-20, SPEC AMENDMENT 76): a board card's reply badge / play
       button (and a thread node's reply pill / play button) could be drawn
@@ -745,12 +754,6 @@ move it to **Done** with a commit reference. One agent per area.
   onto main instead of rewriting again. Branch protection now blocks force
   pushes to `main`.
 ## In progress
-
-- [ ] **2D thread-open freeze (Direct-3D follow-up)** — claimed by agent arena,
-      2026-08-21. Opening a reply tree with the cube toggle OFF still hitch-
-      froze after AMENDMENT 75: `sync3D` ran every frame in 2D, `open()`
-      parsed every node's GLB, and `fit()` puts the whole tree in view so a
-      viewport gate is a no-op. Keep debugging on `arena/01a0214e-f0`.
 
 - [ ] **Per-card play/pause (animation + sound) + autoplay setting** — claimed by
       agent arena, 2026-08-20. SPEC AMENDMENT 69. Board cards and thread nodes
