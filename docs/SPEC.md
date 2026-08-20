@@ -825,8 +825,9 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     Posters auto-fit; the author can still +cam.
     Guard: `node scripts/library-unit.mjs`.
 
-68. LIBRARY SYMBOLS LOAD + TINT AS TEXT (2026-08-20): two defects closed
-    together because they interacted.
+68. LIBRARY SYMBOLS LOAD + TINT MODULATES VERTEX COLOURS + PER-ITEM COLOURS
+    (2026-08-20, corrected 2026-08-21): two defects were closed, the tint
+    approach was revised, and then colours became per-item.
     - DEFECT A — Draco decode was CSP-blocked, so every library piece (and
       every other Draco-compressed model) FAILED to load in both builds.
       The GLBs ship `KHR_draco_mesh_compression` and the local decoder
@@ -842,22 +843,34 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
       (the library GLBs are inlined as data: URIs in both builds) and
       `http://localhost:* http://127.0.0.1:*` so the dev / preview servers
       can serve the Draco wasm/js assets over plain http.
-      The symbols tab no longer fails silently: placement errors surface in
-      the studio status line like import errors do.
-    - DEFECT B — placed symbols rendered BLACK. The GLBs carry quantized
-      per-vertex COLOR_0 (VEC4); the glTF loader leaves `useVertexColors`
-      on (and sets `hasVertexAlpha` for VEC4 COLOR_0 on non-Draco loads),
-      which puts the PBR shader on a vertex-colour path that comes out
-      black (reproduced headlessly: the vertex-colour/alpha state renders
-      ~547 k black pixels where the fixed state renders ~16 k lit-gray /
-      14 k tint pixels). Symbol meshes now clear both flags and take the
-      studio accent EXACTLY like text (`emissive = tint` over a black base
-      — same recipe as buildTextMesh), so symbols share the text tool's
-      tint, re-tint live when the colour input changes, and publish the
-      tint in the event `color` tag (already wired via `studio.tintColor`).
+      The symbols tab no longer fails silently: placement errors now
+      surface in the error sheet (code E301) AND the studio status line,
+      exactly like import errors do.
+    - DEFECT B (corrected) — initially the fix used `useVertexColors=false`
+      + `albedo=Black` + `emissive=tint`, which made the tint FULLY
+      replace the model's colour — the original vertex colours were lost
+      and a neutral grey tint still showed as solid grey. The library GLBs
+      carry per-vertex COLOR_0 (VEC4); the shader should modulate those
+      colors, not discard them. `tintMesh` keeps `useVertexColors=true`
+      and sets `albedoColor` to the tint, so the tint MULTIPLIES with the
+      vertex colours (final = tint × vertex). This way the original model
+      colours remain visible — a white tint leaves them unchanged, a grey
+      tint dims them proportionally, and a coloured tint shifts the hue
+      without losing the shape's shading. `emissiveColor` is Black.
+      The text tool (buildTextMesh) continues to use the old emissive
+      approach because text geometry has no vertex colours.
+    - PER-ITEM COLOURS (2026-08-21) — every placed symbol and the text
+      carry their OWN colour instead of sharing one studio tint. The colour
+      picker sets the colour of the NEXT placement; selecting a symbol or
+      the text mesh loads its colour into the picker and repainting
+      repaints only that item (`studio.setSelectedColor` /
+      `getSelectedColor`, per-container `extraColors` map). Text has its
+      own `textColor` (baked at rebuild). The global `tint` remains the
+      fallback for placements without an explicit colour and the event
+      `color` tag follows the most recently placed symbol's colour.
     - Size stays put: the library is still ~103 KiB and the standalone is
       ~4.4 MB; the wasm decoder path is used as before (no fallback JS
       decoder inlined as a new dependency).
     Guards: `node scripts/library-unit.mjs` (size + GLB invariants),
     `npx tsc --noEmit`, and a browser round trip (place → tinted render →
-    delete → publish carries the tint).
+    per-item repaint → delete → publish carries the tint).
