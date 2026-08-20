@@ -24,6 +24,7 @@
     "check:hash": "bun scripts/hash-unit.mjs",
     "check:search": "bun scripts/search-unit.mjs",
     "check:load": "bun scripts/load-unit.mjs",
+    "check:anim": "bun scripts/anim-unit.mjs",
     "check:studio-error": "node scripts/studio-error-wrap.mjs",
     "check:overflow": "node scripts/overflow-scan.mjs",
     "check:library": "node scripts/library-unit.mjs",
