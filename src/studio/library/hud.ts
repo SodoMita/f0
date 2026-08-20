@@ -64,7 +64,7 @@ function svgFor(id: string): string {
   return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg>`
 }
 
-export function bindLibraryHud(studio: Studio, onChange: () => void, onError?: (msg: string) => void): void {
+export function bindLibraryHud(studio: Studio, onChange: () => void, onError?: (msg: string) => void, getColor?: () => string): void {
   const grid = document.getElementById('symbol-grid')
   if (!grid) return
   let group: LibraryGroup | 'all' = 'all'
@@ -111,7 +111,9 @@ export function bindLibraryHud(studio: Studio, onChange: () => void, onError?: (
   const place = async (item: (typeof LIBRARY)[number]): Promise<void> => {
     try {
       const bytes = await libraryBytes(item)
-      await studio.addLibraryItem(bytes, { faceCamera: item.dim === '2d' })
+      // Each placement takes its own color from the picker (AMENDMENT 68
+      // corrected 2026-08-21): every symbol can carry a different color.
+      await studio.addLibraryItem(bytes, { faceCamera: item.dim === '2d', color: getColor?.() })
       onChange()
     } catch (err) {
       // Never fail silently (AMENDMENT 68): a blocked Draco decoder, a bad

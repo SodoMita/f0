@@ -723,10 +723,12 @@ async function boot(): Promise<void> {
     setStudioStatus(studio.libraryCount ? `${studio.libraryCount} pieces` : '')
   }, (msg) => {
     // The symbols tab must not fail silently: placement errors (Draco/CSP,
-    // fetch, validation) surface in the studio status line like import
-    // errors do (AMENDMENT 68).
+    // fetch, validation) surface in the error sheet AND the studio status
+    // line, exactly like import errors do (AMENDMENT 68, corrected
+    // 2026-08-20).
     setStudioStatus(msg, 'err')
-  })
+    errorSheet.show(ERRORS.STUDIO_IMPORT(msg))
+  }, () => studioColor.value)
 
   // ---- Studio text + camera settings ----
   const ALIGN_CYCLE: Array<'left' | 'center' | 'right'> = ['left', 'center', 'right']
@@ -792,9 +794,25 @@ async function boot(): Promise<void> {
     scheduleRebuild()
   })
 
+  // Selecting a symbol or the text mesh shows its own color in the picker
+  // (AMENDMENT 68 corrected 2026-08-21): each item keeps an independent color.
+  studio.onSelect = () => {
+    // Only symbols and the text mesh have their own color; an imported
+    // model's selection leaves the picker alone (AMENDMENT 68 corrected
+    // 2026-08-21).
+    const c = studio.getSelectedColor()
+    if (c !== null) studioColor.value = c
+  }
+
   studioColor.addEventListener('input', () => {
-    studio.setTintColor(studioColor.value)
-    if (studio.currentModel === null) studio.rebuildText()
+    if (studio.selected) {
+      // Repaint only the selected symbol / text, not every placed piece.
+      // setSelectedColor rebuilds the text mesh itself (color is baked in).
+      studio.setSelectedColor(studioColor.value)
+    } else {
+      // No selection: the picker sets the color of the NEXT placement.
+      studio.setTintColor(studioColor.value)
+    }
   })
 
   studioAlign.addEventListener('click', () => {
