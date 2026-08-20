@@ -1036,3 +1036,60 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     Guard: `npx tsx scripts/relay-pool-unit.mjs`
     (failed handshake retries once, eight remote drops stay at 1 live
     socket, close() stops the loop, applyRelays/connect are idempotent).
+74. VERTEX COLOURS RENDER IN VIEW + POST LIKE IN STUDIO (2026-08-20):
+    reported as "make vertex color work in view, post like in studio".
+    The studio was fine everywhere (it loads the same GLBs); the viewer and
+    the board poster both lost the colours. TWO independent bugs shared the
+    symptom, both on the load/render path the studio never exercises:
+    - DRACO MAIN-THREAD DECODE DROPPED `normalized` — library GLBs carry
+      quantized vertex colours (`KHR_mesh_quantization`: COLOR_0 is
+      `{componentType: 5121 (u8), type: VEC4, normalized: true}`) with
+      `KHR_draco_mesh_compression`. The app decodes Draco on the main
+      thread (`configureDraco` in src/model/draco.ts sets `numWorkers: 0`
+      and ships the wasm inline — no CDN, see AMENDMENT 68). Babylon's
+      `DracoDecoder.decodeMeshToMeshDataAsync` has TWO paths: the worker
+      pool applies the KHR_draco extension's `gltfNormalizedOverride` map
+      to every decoded attribute, but the single-module path returned the
+      buffer with `normalized: false`. The vertex shader then read the raw
+      bytes 0..255 as floats — every channel ≥ 1 — and the PBR material
+      rendered a uniform white slab (verified by pixel sampling: the red
+      heart library symbol rendered solid white in the viewer). The plain
+      (non-Draco) loader was never affected (glTFLoader passes
+      `accessor.normalized` straight into the VertexBuffer, which is why
+      hand-imported models always looked fine). The studio LOOKED fine
+      with the same broken bytes only by accident: placed symbols set
+      `albedoColor` to the tint and multiply it with the vertex colours,
+      so white-clipped channels (all ≥ 1.0) still read as saturated hues
+      modulo brightness — the wash-out only becomes obvious in the
+      plain-PBR viewer/poster. Fix: src/model/
+      draco.ts monkey-patches `DracoDecoder.prototype.decodeMeshToMeshDataAsync`
+      to apply the normalized override exactly like the worker
+      path does (idempotent — a no-op once/if Babylon fixes it upstream,
+      because it only corrects attributes whose flag differs from the
+      accessor's).
+    - PAINT BAKE EXPORTED A FIXED GREY EMISSIVE — the studio paint stroke
+      preview (thin instances, StandardMaterial, emissive 0.55) shows
+      saturated ink because the STANDARD shader clamps
+      `diffuse + emissive` to [0,1] before multiplying the vertex colour.
+      The publish bake (`bakeStamps`, paint/bake.ts) reused a 0.55 grey
+      emissive on the EXPORT-ONLY material; the exported PBR metallic-
+      roughness factors came out `emissiveFactor [0.55,0.55,0.55]`, and in
+      the PBR shader `surfaceAlbedo *= vColor.rgb` while emissive is added
+      UNMODULATED — a constant grey floor that washed every stroke to
+      pastel in the viewer/poster. The bake material's emissive is now
+      Black: vertex-colour strokes export as pure albedo×vColor, matching
+      what the studio shows. (Diffuse white stays — the glTF exporter's
+      0.5-scale linear conversion is the STANDARD convention and cancels
+      out; emissive was the only channel that broke the hue.)
+    Guards: `npm run check:vcolor` = three render suites against the dev
+    server (`scripts/vcolor-check.mjs` — viewer: plain-u8 control plus the
+    draco heart/cube library GLBs, asserting the decoded VertexBuffer has
+    `normalized: true` and pixel hue dominance; `scripts/vcolor-poster.mjs`
+    — the board's PosterRenderer in-process; `scripts/vcolor-paint.mjs` —
+    studio paint strokes through `getContentForPublish` into the viewer,
+    asserting no fixed emissive in the exported materials and all three
+    inks rendering saturated). Proof shots: `.test-shots/shot-draco-hea.png`
+    (red heart in the viewer), `.test-shots/shot-viewer-paint.png` (three
+    painted inks). Browser acquisition for the sandbox is documented in
+    docs/SANDBOX-VERIFY.md (2026-08-20 section); the shared launcher is
+    `scripts/browser.mjs`.

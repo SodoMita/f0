@@ -67,7 +67,14 @@ export function bakeStamps(scene: Scene, store: StampStore, sources: Map<ShapeKi
     data.applyToMesh(mesh)
     const mat = new StandardMaterial('paint-bake-' + shape, scene)
     mat.diffuseColor = Color3.White()
-    mat.emissiveColor = new Color3(0.55, 0.55, 0.55)
+    // EXPORT-ONLY material (the studio preview renders thin instances with
+    // their own 0.55-emissive material in instances.ts). A grey emissive is
+    // fatal here: glTF/PBR never modulates emissiveFactor by COLOR_0, so the
+    // 0.55 grey landed as a constant term on top of the vertex-coloured ink
+    // and every published stroke washed out to pastel in the viewer / board
+    // poster / live preview (2026-08-20 "vertex colors work in studio, not in
+    // the post" report). Black emissive = ink hue survives the glTF round-trip.
+    mat.emissiveColor = Color3.Black()
     mat.specularColor = Color3.Black()
     mat.backFaceCulling = false
     mesh.material = mat

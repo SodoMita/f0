@@ -264,3 +264,75 @@ checks had ratified:
   pollute each other's feed; `npm run build` must run AFTER
   `build:standalone` (both write release/, the preview serves whichever
   ran last).
+
+## Round 3 (2026-08-20): the thirty-second browser recipe + sandbox pitfalls
+
+This session needed a browser with **WebGL2** for pixel-level vertex-colour
+checks (`scripts/vcolor-*.mjs`). Everything below is the fast path — the
+earlier sections' wrapper-script dance and any from-source NSS/NSPR build are
+now superseded.
+
+### Browser in ~30 seconds
+
+```bash
+cd /home/user/f0                     # packages must land in the repo's node_modules
+npm i --no-save @sparticuz/chromium  # (+ `bun` if the unit suites need it)
+# NSS/NSPR shared libs the chromium binary needs — THEY SHIP IN THE PACKAGE:
+node -e "const fs=require('fs'),z=require('zlib');\
+  fs.writeFileSync('/tmp/al2023.tar', z.brotliDecompressSync(\
+  fs.readFileSync('node_modules/@sparticuz/chromium/bin/al2023.tar.br')))"
+mkdir -p /tmp/chromium-libs && tar -xf /tmp/al2023.tar -C /tmp/chromium-libs
+# -> /tmp/chromium-libs/lib  (libnspr4, libnss3, libnssutil3, libsmime3, …)
+```
+
+Then launch via the shared helper `scripts/browser.mjs`:
+
+```js
+import { launchFormBrowser } from './browser.mjs'   // from any scripts/*.mjs
+const browser = await launchFormBrowser()           // -> playwright Browser, WebGL2 works
+```
+
+`launchFormBrowser()` tries `playwright` first (a dev machine that ran
+`npx playwright install chromium`), then falls back to `playwright-core` +
+`@sparticuz/chromium`'s `executablePath()` (which extracts the binary to
+`/tmp/chromium` on first call), with SwiftShader WebGL flags
+(`--use-angle=swiftshader-webgl --enable-unsafe-swiftshader --no-sandbox`)
+and `LD_LIBRARY_PATH=/tmp/chromium-libs/lib:/tmp/nsslibs` pre-filled
+(override via the `VCOLOR_LD_LIBRARY_PATH` env var). Verified renderer:
+`ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device …), SwiftShader driver)` —
+`canvas.getContext('webgl2')` + `WEBGL_debug_renderer_info` must be non-null.
+
+Red herrings to skip: (a) the NSS/NSPR libraries do NOT need building from
+mozilla source — `bin/al2023.tar.br` inside the npm package carries them
+(one round of this session wasted ~an hour rebuilding NSS 3.101.4 before
+the tar was noticed; its output lives at `/tmp/nsslibs` and ALSO works);
+(b) no `~/.cache/ms-playwright` wrapper scripts are needed when launching
+through playwright-core with an explicit `executablePath`.
+
+### Gotchas that bit this session
+
+- **`npm install` PURGES `--no-save` packages.** `@sparticuz/chromium` and
+  `bun` disappear silently the next time anyone runs a bare `npm install`
+  (including postinstall hooks of other work). Re-add with the same
+  `npm i --no-save …` line; the render suites fail loudly with the
+  launcher error if they vanished.
+- **SwiftShader shader compile is slow and parallel.** Never assert pixels
+  after fixed sleeps: poll `mesh.isReady(true)` in ~250 ms loops.
+  `gl.readPixels` must run in the SAME synchronous task right after
+  `scene.render()` (the canvas is created with `preserveDrawingBuffer:
+  false`).
+- **The board PosterRenderer outruns compile in this sandbox.** Its three
+  back-to-back renders + `sleep(0)` are fine on a real GPU but capture
+  empty frames here; `scripts/vcolor-poster.mjs` stretches `setTimeout`
+  during the poster render to compensate (flagged in the script, sandbox
+  behaviour only).
+- **`scene.whenReadyAsync()` hangs on a never-rendered headless scene.**
+  `GLTF2Export.GLBAsync` awaits it, and any always-on EffectLayer (e.g.
+  the studio's selection HighlightLayer) never reports ready on a
+  NullEngine — its blur RTT chain is only ever made ready by real renders.
+  `scripts/studio-unit.mjs` disposes `studio.scene.effectLayers` up front
+  (2026-08-20; before that the suite never finished under bun or node).
+- Registry reachability is unchanged from the table above:
+  `registry.npmjs.org`, `github.com`/codeload, `pypi.org` + localhost only.
+  `bun` itself installs from the npm registry: `npm i --no-save bun`,
+  then `npx bun scripts/<suite>.mjs`.
