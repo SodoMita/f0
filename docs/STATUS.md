@@ -4,6 +4,17 @@ Claim a task by moving it to **In progress** with your name/date, push, then
 move it to **Done** with a commit reference. One agent per area.
 
 ## Done
+- [x] **Cards/nodes can't paint over their own buttons** (agent arena,
+      2026-08-20, SPEC AMENDMENT 76): a board card's reply badge / play
+      button (and a thread node's reply pill / play button) could be drawn
+      over by the post itself. Babylon sorts transparent meshes by their
+      bounding-sphere center's distance to the camera, so a corner-mounted
+      button on a screen-centered card sorted BEHIND its own card and was
+      painted over wherever the post's opaque pixels reached the corner.
+      Overlays now render in renderingGroupId 1 (after group 0 =
+      cards/nodes/backdrop), so they are always on top. Guard:
+      `scripts/overlay-order.mjs`.
+
 
 - [x] **Viewer: multi-track animation rail** (agent arena, 2026-08-20):
       models with animations get a second rail above the toolbar — a track
