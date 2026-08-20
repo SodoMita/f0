@@ -1,3 +1,5 @@
+import type { SettingsValues } from '../settings/schema'
+
 export type AudioPlaybackState = 'unavailable' | 'stopped' | 'loading' | 'playing' | 'error'
 
 /**
@@ -13,15 +15,33 @@ export class EmbeddedAudioPlayer {
   private objectUrl: string | null = null
   private operation = 0
   private currentState: AudioPlaybackState = 'unavailable'
+  private settings: SettingsValues | null = null
+  private focused = true
 
   constructor(
     private onState: (state: AudioPlaybackState) => void,
     private onError?: (error: unknown) => void,
-  ) {}
+  ) {
+    // Keep using the plain media element while still honouring the app's
+    // master/effects/background controls. Muting (rather than pausing) on
+    // blur lets playback resume in sync when focus returns.
+    window.addEventListener('blur', () => { this.focused = false; this.applyElementSettings() })
+    window.addEventListener('focus', () => { this.focused = true; this.applyElementSettings() })
+    document.addEventListener('visibilitychange', () => {
+      this.focused = !document.hidden
+      this.applyElementSettings()
+    })
+  }
 
   get state(): AudioPlaybackState { return this.currentState }
   get available(): boolean { return this.element !== null }
   get playing(): boolean { return this.currentState === 'playing' }
+
+  /** Settings stay on the HTMLAudioElement; no WebAudio source is created. */
+  apply(settings: SettingsValues): void {
+    this.settings = settings
+    this.applyElementSettings()
+  }
 
   /** Replace the model's clip. This always stops and releases the old one. */
   setAudio(audio: Blob | undefined): void {
@@ -42,6 +62,7 @@ export class EmbeddedAudioPlayer {
       element.addEventListener('error', this.handleError)
       this.objectUrl = url
       this.element = element
+      this.applyElementSettings()
       this.setState('stopped')
     } catch (error) {
       this.release()
@@ -93,6 +114,19 @@ export class EmbeddedAudioPlayer {
     if (!this.element) return
     this.setState('error')
     this.onError?.(this.element.error ?? new Error('audio playback failed'))
+  }
+
+  private applyElementSettings(): void {
+    const element = this.element
+    if (!element) return
+    const settings = this.settings
+    const master = Number(settings?.volMaster ?? 100) / 100
+    const effects = Number(settings?.volSfx ?? 100) / 100
+    element.volume = Math.max(0, Math.min(1, 0.78 * master * effects))
+    element.muted = !this.focused && !(settings?.audioBackground ?? false)
+    const sink = String(settings?.audioOutput ?? 'default')
+    const routed = element as HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }
+    if (routed.setSinkId) void routed.setSinkId(sink === 'default' ? '' : sink).catch(() => {})
   }
 
   private release(): void {

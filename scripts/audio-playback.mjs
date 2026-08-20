@@ -60,6 +60,14 @@ check('assigning a clip never autoplays', initial.state === 'stopped' && initial
 check('HTMLAudioElement uses loop=true and volume=0.78', initial.loop && Math.abs(initial.volume - 0.78) < 0.001)
 check('clip is an object URL and autoplay is false', initial.src.startsWith('blob:') && !initial.autoplay, initial.src.slice(0, 16))
 check('verified-source control is visible and unpressed', !initial.hidden && initial.pressed === 'false')
+const scaledVolume = await page.evaluate(() => {
+  const f = window.__form0
+  f.settings.set({ volMaster: 50, volSfx: 50 })
+  const level = f.audioPlayer.element.volume
+  f.settings.set({ volMaster: 100, volSfx: 100 })
+  return level
+})
+check('master/effects settings scale the element without WebAudio', Math.abs(scaledVolume - 0.195) < 0.001, String(scaledVolume))
 
 await page.evaluate(() => document.getElementById('btn-audio').click())
 await page.waitForFunction(() => window.__form0.audioPlayer.state === 'playing')

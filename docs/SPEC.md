@@ -779,8 +779,10 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     and by WeakMap<Blob, Promise> for Blob callers. The kind-1063 `audio` tag
     remains a hint only; card speaker chrome appears only after actual bytes
     verify. The viewer feeds the extracted Blob to one HTMLAudioElement via
-    an object URL: autoplay=false, loop=true, element volume=0.78, button/S
-    gesture to start, pending spinner, play rejection handled, and pause/src
+    an object URL: autoplay=false, loop=true, base element volume=0.78
+    (scaled by master/effects settings), button/S gesture to start, pending
+    spinner, play rejection handled, media-element sink/background settings,
+    and pause/src
     clear/object-URL revoke on model change or view exit. No AudioBuffer,
     WebAudio panner, microphone, stream or positional playback is involved.
     Contrary to the future note in item 26, do NOT register Babylon's

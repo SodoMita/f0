@@ -1038,9 +1038,11 @@ async function boot(): Promise<void> {
 
   settings.subscribe((values, changed) => {
     applySettings(wiring, values, changed)
+    audioPlayer.apply(values)
     settingsPanel.refresh()
   })
   applySettings(wiring, settings.all, null)
+  audioPlayer.apply(settings.all)
 
   mixer.onDevices = () => {
     settingsPanel.setOptions('audioOutput', [
