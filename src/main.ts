@@ -32,6 +32,8 @@ import { attachAllDragNumbers } from './studio/dragNumber'
 import { transfers, formatRate, formatBytes, formatDirStats, type TransferStats } from './core/transfer'
 import { handoffContainer } from './core/sceneTransfer'
 import { bindPaintHud } from './studio/paintHud'
+import { formatCount, formatSize, modelNameForPublish, modelWarnings, sizeHeatColor } from './studio/modelInfo'
+import type { ImportedModel } from './studio/studio'
 
 type Mode = 'boot' | 'board' | 'viewer' | 'studio' | 'thread'
 
@@ -229,6 +231,7 @@ async function boot(): Promise<void> {
     const base = (m.filename || '').replace(/\.[^.]+$/, '')
     return m.filename?.toLowerCase().includes(q)
       || base.toLowerCase().includes(q)
+      || m.name?.toLowerCase().includes(q) === true
       || m.eventId.toLowerCase().includes(q)
   }
 
@@ -314,6 +317,59 @@ async function boot(): Promise<void> {
     studioStatus.className = 'studio-status ' + cls
   }
 
+  // ---------- studio model info (AMENDMENT 66) ----------
+  // The upload tab card shows the imported model's name, format, safety-scan
+  // stats (size, vertices, triangles, meshes, materials, …) and the
+  // big/near-limit warnings. The size number + meter run green -> red toward
+  // the 20 MiB hard limit (sizeHeatColor).
+  const modelInfoEl = $('model-info')
+  const miRows = $('mi-rows')
+  const miMeterFill = $('mi-meter-fill')
+  const miWarnings = $('mi-warnings')
+
+  function fillModelInfo(model: ImportedModel | null): void {
+    modelInfoEl.hidden = model === null
+    if (!model) return
+    miRows.innerHTML = ''
+    const s = model.report.stats
+    const sizeLabel = formatSize(model.bytes.length)
+    const add = (key: string, value: string, color?: string, title?: string): void => {
+      const k = document.createElement('span')
+      k.className = 'mi-k'
+      k.textContent = key
+      const v = document.createElement('span')
+      v.className = 'mi-v'
+      v.textContent = value
+      if (color) v.style.color = color
+      if (title) v.title = title
+      miRows.append(k, v)
+    }
+    add('name', modelNameForPublish(model.file.name) || model.file.name)
+    add('format', model.sourceFormat === 'glb' ? 'glb · pass-through' : `${model.sourceFormat} → glb`)
+    add('size', sizeLabel, sizeHeatColor(model.bytes.length), `${formatCount(model.bytes.length)} bytes`)
+    add('vertices', formatCount(s.vertices))
+    add('triangles', formatCount(Math.floor(s.indices / 3)))
+    add('meshes', s.primitives && s.primitives !== s.meshes ? `${formatCount(s.meshes)} · ${formatCount(s.primitives)} parts` : formatCount(s.meshes))
+    if (s.materials) add('materials', formatCount(s.materials))
+    if (s.textures) add('textures', formatCount(s.textures))
+    if (s.decodedPixels) add('tex memory', formatSize(s.decodedPixels))
+    if (s.cameras) add('cameras', formatCount(s.cameras))
+    if (s.lights) add('lights', formatCount(s.lights))
+    if (s.skins) add('skins', formatCount(s.skins))
+    if (s.animations) add('animations', `${formatCount(s.animations)} · ${formatCount(s.keyframes)} keys`)
+    const heat = sizeHeatColor(model.bytes.length)
+    miMeterFill.style.width = `${Math.min(100, (model.bytes.length / LIMITS.modelBytesHard) * 100).toFixed(1)}%`
+    miMeterFill.style.background = heat
+    const warnings = modelWarnings(model.bytes.length, s)
+    miWarnings.hidden = warnings.length === 0
+    miWarnings.innerHTML = ''
+    for (const w of warnings) {
+      const li = document.createElement('li')
+      li.textContent = w
+      miWarnings.append(li)
+    }
+  }
+
   async function pickStudioFile(): Promise<void> {
     fileInput.value = ''
     const prevAccept = fileInput.accept
@@ -331,8 +387,14 @@ async function boot(): Promise<void> {
         const label = picked.length === 1 ? picked[0].name : `${picked.length} files`
         studioFilename.textContent = label
         btnStudioPublish.disabled = false
-        setStudioStatus(`${imported.report.stats.meshes} mesh · ${(imported.file.size / 1048576).toFixed(1)} MiB`)
+        fillModelInfo(imported)
+        // Big or near-limit models (AMENDMENT 66) surface here as amber; the
+        // red reasons are the models the safety scan refused outright.
+        const warnCount = modelWarnings(imported.bytes.length, imported.report.stats).length
+        const brief = `${imported.report.stats.meshes} mesh · ${formatCount(imported.report.stats.vertices)} verts`
+        setStudioStatus(warnCount ? `${warnCount} warning${warnCount === 1 ? '' : 's'} · ${brief}` : brief, warnCount ? 'busy' : 'ok')
       } catch (err) {
+        fillModelInfo(null)
         setStudioStatus(err instanceof Error ? err.message : 'import failed', 'err')
       }
     }, { once: true })
@@ -393,6 +455,8 @@ async function boot(): Promise<void> {
           height: previewDim.height,
           tint: studio.tintColor,
           filename: content.filename,
+          // the model name fills the nostr event's `content` (NIP-50 finds it)
+          name: modelNameForPublish(content.filename, studio.hasModel() ? '' : studio.text),
           sourceFormat: content.sourceFormat,
           role: studioReply ? 'reply' : 'root',
           rootId: studioReply?.rootId,
@@ -426,6 +490,24 @@ async function boot(): Promise<void> {
 
   btnStudioImport.addEventListener('click', () => { if (!publishing) void pickStudioFile() })
   btnStudioPublish.addEventListener('click', () => void publishStudio())
+
+  // Remove every studio addition (text, paint, cameras, mesh moves): the
+  // studio reloads the model from its pristine imported bytes, so publishing
+  // is byte-identical to the import again (AMENDMENT 66).
+  $('btn-studio-reset').addEventListener('click', () => {
+    if (publishing) return
+    setStudioStatus('resetting…', 'busy')
+    void studio.resetAdditions().then((ok) => {
+      if (!ok) { setStudioStatus(''); return }
+      studioText.value = '' // a pending debounced rebuild is a no-op on empty text
+      btnStudioPublish.disabled = !studio.hasContent()
+      fillModelInfo(studio.currentModel)
+      refreshCameraControls()
+      updateTextBudget()
+      setStudioStatus('additions removed · original bytes')
+      studio.kick(500)
+    }).catch((err) => setStudioStatus(err instanceof Error ? err.message : 'reset failed', 'err'))
+  })
 
   // ---- Studio card preview (format v4) ----
   // The card IS a local render, so the studio can show the exact card the
@@ -611,7 +693,9 @@ async function boot(): Promise<void> {
       p.hidden = p.dataset.panel !== tab
     })
     studio.setPaintMode(tab === 'paint')
-    if (tab === 'type' && !studio.text) {
+    // Seed '/0' ONLY for a text-first post. With an imported model the empty
+    // text field must stay empty so NO text is added to the model (AMEND 66).
+    if (tab === 'type' && !studio.text && !studio.hasModel()) {
       studio.setText('/0'); studio.rebuildText()
       // seeding text IS content: publish must enable (it only listened to
       // the textarea's input event, so the seeded '/0' left it dead)
@@ -856,7 +940,7 @@ async function boot(): Promise<void> {
   attachAllDragNumbers(document.body)
 
   const paintHud = bindPaintHud(studio, () => {
-    studio.markDirty()
+    studio.touched() // paint additions are observable (paint.count), not sticky
     if (!publishing) btnStudioPublish.disabled = !studio.hasContent()
   })
   void paintHud
@@ -1094,6 +1178,7 @@ async function boot(): Promise<void> {
       meta.refs.rootId ? `root          ${meta.refs.rootId}` : null,
       meta.refs.parentId ? `parent        ${meta.refs.parentId}` : null,
       meta.filename ? `filename      ${meta.filename}` : null,
+      meta.name ? `name          ${meta.name}` : null,
       meta.sourceFormat ? `source-format ${meta.sourceFormat}` : null,
       '',
       `meshes        ${s.meshes}`,
@@ -1249,6 +1334,7 @@ async function boot(): Promise<void> {
       setMode('studio')
       studio.clearModel()
       studioFilename.textContent = ''
+      fillModelInfo(null)
       // Upload tab first: the import drop zone must be visible immediately.
       // (Opening on TYPE hid "choose model" behind a tab switch; the text
       // tab still seeds '/0' the first time it is opened.)

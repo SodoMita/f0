@@ -767,3 +767,45 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     (`snapshot()`). Opaque materials write alpha=1; the card shader treats
     non-black RGB as coverage. IDB keeps anim/footprint flags only (p7).
     Guard: offline-verify + verify-publish sample a one-shot snapshot.
+
+66. STUDIO MODEL INFO, EVENT `content` CARRIES THE MODEL NAME, STUDIO
+    ADDITIONS REMOVABLE (2026-08-20):
+    - The studio upload tab shows an info card for the imported model: name,
+      source format, size, vertices, triangles, meshes/parts, materials,
+      textures, decoded texture memory, cameras, lights, skins, animations —
+      all from the `validateGLB` safety-scan report (measured, not claimed).
+      The size number and its meter run GREEN at 0 bytes to RED at the 20 MiB
+      hard limit (`sizeHeatColor`, an RGB lerp of the theme success/danger
+      endpoints). Big (>= the 8 MiB recommendation) and near-limit (>= 70% of
+      any cap) models show AMBER warnings in the card and a status hint;
+      over-limit / hostile models are still REFUSED at import with the scan
+      reason shown in red.
+    - The nostr event `content` (always '' before) now carries the model
+      NAME: file base name for an imported model, first typed line for a
+      text post (`modelNameForPublish`; single line, control chars stripped,
+      capped at LIMITS.contentChars = 140). `parseModelEvent` accepts content
+      up to 140 chars (landed on `ThreadMeta.name`, searchable and shown in
+      the info drawer) and still accepts the legacy empty content; longer
+      content is off-format and the event is skipped. NOTE: clients older
+      than this amendment REQUIRE `content === ''` and will skip named
+      posts; every tag is unchanged (`v` stays `form-zero:4`) — the name is
+      additive metadata only.
+    - Empty text adds NOTHING to the model: the '/0' seed applies only when
+      no model is imported, a no-op `rebuildText()` no longer dirties
+      anything, and a stale text mesh (cleared within the rebuild debounce)
+      is dropped at publish time.
+    - Byte-identity rule: publishing an imported GLB ships the imported bytes
+      unless the player added text/paint/cameras or moved/deleted imported
+      meshes. Text, paint and camera additions are OBSERVABLE state
+      (textValue / paint.count / storedCameras), so removing them restores
+      the pass-through automatically; only gizmo drags and mesh deletes set
+      the sticky `meshEdits` flag (the old blanket `contentDirty` made even
+      an undone text rebuild re-export the model). The upload tab's
+      "remove additions" button re-imports the pristine bytes into the
+      studio — reverting even moves — so the model publishes bit-identical
+      again (the only exception is a model whose bytes fail the safety scan,
+      which never imports at all).
+    - Guards: `scripts/model-info-unit.mjs` (name/heat/warning helpers),
+      `scripts/studio-unit.mjs` (pass-through, restore-on-remove, reset,
+      publishModel content + byte-identical upload end-to-end), and
+      verify-publish asserts `meta.name` on the received events.

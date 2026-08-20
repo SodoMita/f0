@@ -83,7 +83,11 @@ export class Studio {
   private paintMode = false
   private frozen = false
   private frozenGizmo: 'position' | 'rotation' | 'scale' | 'none' = 'position'
-  private contentDirty = false
+  // Sticky "imported meshes were edited" flag (gizmo move / mesh delete).
+  // Text, paint and user cameras are NOT sticky: they are observable state
+  // (textValue / paint.count / storedCameras), so removing them restores the
+  // byte-for-byte pass-through by itself (AMENDMENT 66).
+  private meshEdits = false
 
   // ---- user added cameras (publishable) ----
   private storedCameras: CameraState[] = []
@@ -117,12 +121,17 @@ export class Studio {
     this.gizmos.scaleGizmoEnabled = true
     this.gizmos.usePointerToAttachGizmos = false
     ;(this.gizmos as any).onAttachedToMeshObservable?.add((m: AbstractMesh | null) => { if (m) this.kick(2000) })
-    const markMoved = () => this.markDirty()
+    const markMoved = () => {
+      // Dragging the text mesh is baked at export time — only a drag of an
+      // IMPORTED mesh is a sticky edit (the bytes can no longer pass through).
+      if (this.selection && this.textMesh?.mesh !== this.selection) this.markDirty()
+      else this.notifyEdit()
+    }
     this.gizmos.gizmos.positionGizmo?.onDragEndObservable.add(markMoved)
     this.gizmos.gizmos.rotationGizmo?.onDragEndObservable.add(markMoved)
     this.gizmos.gizmos.scaleGizmo?.onDragEndObservable.add(markMoved)
     this.paint = new PaintSession(this.scene, (ms) => this.kick(ms), () => this.scene.activeCamera ?? this.camera)
-    this.paint.onChange = () => this.markDirty()
+    this.paint.onChange = () => this.notifyEdit()
     // Tap a mesh to select it; tap empty space to deselect.
     // Paint mode owns the left button (ink / erase / pick) — don't steal taps.
     this.scene.onPointerObservable.add((info) => {
@@ -205,10 +214,16 @@ export class Studio {
 
   get isFrozen(): boolean { return this.frozen }
 
-  markDirty(): void { if (!this.frozen) { this.contentDirty = true; this.notifyEdit() } }
+  /** A sticky edit of the imported meshes (move/rotate/scale/delete) — after
+   *  this the publish bytes can no longer be the original file. */
+  markDirty(): void { if (!this.frozen) { this.meshEdits = true; this.notifyEdit() } }
+
+  /** A non-sticky content change (text/paint/cameras): re-renders the card
+   *  preview but does not, by itself, break byte-for-byte pass-through. */
+  touched(): void { if (!this.frozen) this.notifyEdit() }
 
   /** Fired on any content-affecting change (the HUD card preview listens to
-   *  re-render; this has NO publish semantics — contentDirty is separate). */
+   *  re-render; this has NO publish semantics — meshEdits is separate). */
   onDirty: (() => void) | null = null
   private notifyEdit(): void { try { this.onDirty?.() } catch { /* HUD only */ } }
 
@@ -246,17 +261,19 @@ export class Studio {
   /** Delete the currently selected mesh (text or part of an imported model). */
   deleteSelection(): void {
     if (this.frozen) return
-    if (this.paint.deleteSelection()) { this.markDirty(); return }
+    if (this.paint.deleteSelection()) { this.touched(); return }
     if (!this.selection) return
     const m = this.selection
     this.select(null)
-    if (this.textMesh?.mesh === m) {
+    const isText = this.textMesh?.mesh === m
+    if (isText) {
       this.textBuildToken++
       this.textMesh = null
       this.textValue = ''
     }
     m.dispose(false, true)
-    this.markDirty()
+    if (isText) this.touched() // empty text = no text in the export at all
+    else this.markDirty()
     this.kick(500)
   }
 
@@ -306,7 +323,36 @@ export class Studio {
     this.clearCameras()
     this.imported = null
     this.paint.clear()
-    this.contentDirty = false
+    this.meshEdits = false
+  }
+
+  /**
+   * Remove every studio addition and restore the imported model to its
+   * original bytes (AMENDMENT 66): typed text, paint strokes and user cameras
+   * are cleared, and the container is re-loaded from a pristine copy of the
+   * imported file so gizmo moves / mesh deletes are reverted too. Afterwards
+   * `getContentForPublish()` takes the pass-through branch again — the model
+   * publishes bit-identical to the imported file (unless that file itself
+   * fails the safety scan, in which case it is refused at import).
+   */
+  async resetAdditions(): Promise<boolean> {
+    if (this.frozen) return false
+    this.textValue = '' // the HUD textarea is synced by the caller
+    if (this.imported) {
+      // A detached copy: the live File may alias the container's buffers.
+      const file = toFile(new Blob([copyBytes(this.imported.bytes).buffer as ArrayBuffer], { type: 'model/gltf-binary' }), this.imported.file.name)
+      await this.importFiles([file]) // clearModel() resets text/paint/cams/meshEdits
+    } else {
+      this.textBuildToken++
+      this.select(null)
+      if (this.textMesh) { this.textMesh.mesh.dispose(); this.textMesh = null }
+      this.clearCameras()
+      this.paint.clear()
+      this.meshEdits = false
+      this.notifyEdit()
+      this.kick(500)
+    }
+    return true
   }
 
   // ---- typed text tool (SPEC TEXT+ANIM: flat low-poly geometry) ----
@@ -347,13 +393,18 @@ export class Studio {
   /** Build/rebuild the text geometry and frame it. */
   async rebuildText(): Promise<void> {
     if (this.frozen) return
-    this.markDirty()
+    const hadText = this.textMesh !== null
+    const wantsText = this.textValue.trim().length > 0
+    // Empty text adds NO geometry (AMENDMENT 66): the no-op rebuild must
+    // stay a no-op so an untouched model keeps its byte-for-byte pass-through.
+    if (!hadText && !wantsText) return
+    this.touched()
     const token = ++this.textBuildToken
     if (this.textMesh) {
       this.textMesh.mesh.dispose()
       this.textMesh = null
     }
-    if (!this.textValue.trim()) return
+    if (!wantsText) return
     const result = await buildTextMesh(this.scene, this.textValue, {
       color: this.tint,
       align: this.textAlign,
@@ -699,7 +750,7 @@ export class Studio {
     // model. Framing is explicit (frame / fit-selected / look-at buttons).
     const imported: ImportedModel = { file, bytes, report, sourceFormat: result.sourceFormat }
     this.imported = imported
-    this.contentDirty = false
+    this.meshEdits = false
     this.notifyEdit()
     const first = result.container.meshes.find((m) => m.name !== '__root__') ?? null
     if (first) this.select(first as AbstractMesh)
@@ -722,9 +773,16 @@ export class Studio {
     const hasUserCams = this.storedCameras.length > 0
     const hasPaint = this.paint.count > 0
     const hasText = this.textValue.trim().length > 0
+    // Empty text adds nothing to the model (AMENDMENT 66). A stale mesh can
+    // outlive the textarea by the rebuild debounce — drop it before deciding.
+    if (!hasText && this.textMesh) {
+      this.textBuildToken++
+      this.textMesh.mesh.dispose()
+      this.textMesh = null
+    }
     // Pass-through only when the published bytes are still the imported GLB.
     // A detached copy: the File may alias live import buffers.
-    if (this.imported && !hasUserCams && !hasPaint && !hasText && !this.contentDirty) {
+    if (this.imported && !hasUserCams && !hasPaint && !hasText && !this.meshEdits) {
       const bytes = copyBytes(this.imported.bytes)
       return {
         blob: new Blob([bytes.buffer as ArrayBuffer], { type: 'model/gltf-binary' }),
@@ -733,7 +791,7 @@ export class Studio {
       }
     }
     // Text mode OR imported + user cameras: make sure font geometry exists.
-    if (!this.textMesh && this.textValue.trim()) await this.rebuildText()
+    if (!this.textMesh && hasText) await this.rebuildText()
 
     // Ensure camera nodes exist for all stored cameras (they should, but recreate if missing)
     while (this.storedCameraNodes.length < this.storedCameras.length) {

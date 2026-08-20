@@ -91,7 +91,9 @@ function allTags(tags: string[][], name: string): string[] {
 }
 
 export function parseModelEvent(event: Event): ThreadMeta | null {
-  if (event.kind !== MODEL_KIND || event.content !== '' || !verifyFresh(event)) return null
+  // AMENDMENT 66: `content` MAY carry the model name (bounded, single line);
+  // older format posts have it empty. Longer content is off-format — skip.
+  if (event.kind !== MODEL_KIND || event.content.length > LIMITS.contentChars || !verifyFresh(event)) return null
   const tags = event.tags as string[][]
 
   const mime = tag(tags, 'm')
@@ -141,6 +143,8 @@ export function parseModelEvent(event: Event): ThreadMeta | null {
     cameraCount: Number(tag(tags, 'cameras')) || 0,
     hasAudio: tag(tags, 'audio') === '1' || hasF('audio'),
     filename: tag(tags, 'filename')?.slice(0, 120),
+    /** Model name from event `content` (AMENDMENT 66); empty for older posts. */
+    name: event.content.trim() || undefined,
     sourceFormat: tag(tags, 'source-format')?.slice(0, 20),
     previewCamera: tag(tags, 'preview-camera') !== undefined ? Number(tag(tags, 'preview-camera')) : undefined,
     previewAnimation: tag(tags, 'preview-animation') !== undefined ? Number(tag(tags, 'preview-animation')) : undefined,

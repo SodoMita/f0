@@ -5,6 +5,36 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 
+- [x] **Studio model info + nostr `content` carries the model name + removable
+      studio additions** (agent arena, 2026-08-20, SPEC AMENDMENT 66):
+      - The studio upload tab shows an info card for the imported model
+        (name, format, size, vertices, triangles, meshes/parts, materials,
+        textures, texture memory, cameras, lights, skins, animations — from
+        the safety-scan report). The size number + meter run green → red
+        toward the 20 MiB hard limit; big (≥8 MiB) and near-limit (≥70% of
+        any cap) models warn in amber, and refused models still fail import
+        in red.
+      - `publishModel` stamps the model name into the event `content`
+        (`modelNameForPublish`: file base name, or the first typed line for
+        a text post; single line, ≤ 140 chars). `parseModelEvent` accepts
+        ≤140-char content onto `ThreadMeta.name` (searchable, shown in the
+        info drawer) and keeps accepting legacy empty content.
+      - Empty text never adds text to a model: the '/0' seed is skipped when
+        a model is imported, no-op rebuilds don't dirty, stale text meshes
+        are dropped at publish.
+      - Byte-identity: text/paint/camera additions are observable state, so
+        removing them restores the byte-for-byte pass-through by itself;
+        gizmo moves/mesh deletes set a sticky `meshEdits` flag. The upload
+        tab's "remove additions" button re-imports the pristine bytes,
+        reverting even moves — the model publishes bit-identical again.
+      - Guards: `scripts/model-info-unit.mjs`,
+        `scripts/studio-unit.mjs` (pass-through + reset + publishModel
+        content/upload byte-identity end-to-end), and verify-publish asserts
+        `meta.name` on received posts. Verified (no browser in this sandbox):
+        tsc, vite build, build:standalone, all headless unit suites green;
+        browser scripts (verify-publish etc.) updated but runnable only on a
+        machine with playwright's chromium.
+
 - [x] **Posters render to a transparent RTT, never a PNG** (agent arena, 2026-08-19,
       SPEC AMENDMENT 65): each post gets its own transparent RenderTargetTexture
       (detached after capture). No PNG, no pixel cache, no blank-check retry —

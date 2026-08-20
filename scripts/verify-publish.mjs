@@ -83,6 +83,7 @@ await page.waitForFunction(() => window.__form0.index.byId.size >= 52, null, { t
       size: newest?.size,
       sha: newest?.sha256,
       filename: newest?.filename,
+      name: newest?.name,
     }
   }, before)
   check('publish button completes and routes to the new post', !!published.eventId && published.grew,
@@ -90,6 +91,9 @@ await page.waitForFunction(() => window.__form0.index.byId.size >= 52, null, { t
   check('event advertises a localhost replica + dim (v4: no thumb)',
     (published.urls ?? []).every((u) => u.startsWith('https://localhost:8443/')) && !!published.dim,
     JSON.stringify({ urls: published.urls, dim: published.dim }))
+  // AMENDMENT 66: the model name rides in event `content` (a text post names
+  // itself after its first line — the seeded '/0' here)
+  check('event content carries the model name', published.name === '/0', JSON.stringify({ name: published.name }))
 
   // SHA-verified re-download of the published model via the app's client
   const roundtrip = await page.evaluate(async (m) => {
@@ -163,6 +167,28 @@ await page.waitForFunction(() => window.__form0.index.byId.size >= 52, null, { t
     px.red > 0.5 && px.green < 0.01,
     `red=${(px.red * 100).toFixed(1)}% green=${(px.green * 100).toFixed(2)}%`)
   await page.screenshot({ path: 'shots/verify-publish.png' })
+
+  // AMENDMENT 66: publishing the untouched import ships the ORIGINAL bytes
+  // and names the event after the file. Wait over one second so the sort by
+  // createdAt cannot tie with the previous flow's post.
+  await page.waitForTimeout(1100)
+  const before2 = await page.evaluate(() => window.__form0.index.byId.size)
+  await page.evaluate(() => document.querySelector('#btn-studio-publish').click())
+  await page.waitForFunction(() => location.hash.startsWith('#/viewer/'), null, { timeout: 120000 })
+  const importedPublish = await page.evaluate((bc) => {
+    const f = window.__form0
+    const newest = [...f.index.byId.values()].filter((m) => m.role === 'root')
+      .sort((a, b) => b.createdAt - a.createdAt)[0]
+    return { grew: f.index.byId.size > bc, name: newest?.name, sha: newest?.sha256, filename: newest?.filename }
+  }, before2)
+  check('imported model names its nostr event after the file', importedPublish.grew && importedPublish.name === 'a',
+    JSON.stringify(importedPublish))
+  const origSha = await page.evaluate(async () => {
+    const r = await fetch('https://localhost:8443/models/a.glb')
+    const digest = await crypto.subtle.digest('SHA-256', await r.arrayBuffer())
+    return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('')
+  })
+  check('imported model publishes byte-identical (event sha == file sha)', importedPublish.sha === origSha)
 }
 
 // -------------------------------------------- cancel mid-upload + hash hide
