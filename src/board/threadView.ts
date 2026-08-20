@@ -14,6 +14,7 @@ import type { FormEngine } from '../core/engine'
 import type { AssetCache } from '../core/assets'
 import type { ThreadIndex, ThreadMeta } from '../protocol/thread-index'
 import { PreviewPool } from './previewPool'
+import { Direct3DPool, type Place3D } from './modelCard3d'
 import {
   makeCardMaterial, setCardTexture, setCardTexture2, setCardTint, setCardTint2, setCardWhite,
   setCardFlip, setCardOpacity, setCardBlend, type CardTextureKind,
@@ -138,6 +139,9 @@ export class ThreadView {
   private attached = false
   private form: FormEngine
   readonly previewPool: PreviewPool
+  /** Direct-3D models rendered in the visible thread scene (no RTT). */
+  readonly pool3d: Direct3DPool
+  private threeD = false
   /** Autoplay (settings → Interface): see Board.setAutoplay. */
   autoplay = true
   /** posts the user started with ▶ (kept playing even with autoplay off) */
@@ -193,6 +197,32 @@ export class ThreadView {
     }
     this.previewPool.onLoadDone = () => {
       this.syncPreviews()
+      this.form.kick()
+    }
+
+    // Direct-3D pool for the thread map: real meshes in the visible scene
+    // (no poster, no render-to-texture), active while the 3D toggle is on.
+    this.pool3d = new Direct3DPool(
+      this.scene,
+      (postId) => this.assets?.getModelBytesByPostId(postId) ?? Promise.resolve(undefined),
+      { maxSlots: 6 },
+    )
+    this.pool3d.onPlaced = (postId) => {
+      const n = this.nodes.get(postId)
+      if (!n || n.mesh.isDisposed()) return
+      n.spinner.setEnabled(false)
+      this.positionPlayButton(n)
+      this.form.kick()
+    }
+    this.pool3d.onFailed = (postId) => {
+      const n = this.nodes.get(postId)
+      if (!n || n.mesh.isDisposed()) return
+      n.spinner.setEnabled(false)
+      // Direct 3D failed: fall back to the poster pipeline.
+      this.drivePoster2D(n)
+    }
+    this.pool3d.onLoadDone = () => {
+      this.sync3D()
       this.form.kick()
     }
 
@@ -284,6 +314,7 @@ export class ThreadView {
     for (const n of this.nodes.values()) {
       if (n.spinner.isEnabled() || n.fadeStart > 0) return true
     }
+    if (this.threeD && this.pool3d.hasWork(this.visibleNodeIds())) return true
     return this.previewPool.hasWork(this.visibleNodeIds())
   }
 
@@ -308,6 +339,9 @@ export class ThreadView {
    */
   private syncPreviews(): void {
     if (!this.assets) return
+    // In 3D mode the direct-model pool (sync3D) owns node rendering; a node
+    // that fell back to its poster stays a static poster, never a live RTT.
+    if (this.threeD) return
     const visible = this.visibleNodeIds()
     for (const n of this.nodes.values()) {
       const id = n.meta.eventId
@@ -535,6 +569,9 @@ export class ThreadView {
    * posts, and never when livePreviews = 0 (a dead control).
    */
   private playButtonVisible(n: TNode): boolean {
+    if (this.threeD) {
+      return this.pool3d.isLive(n.meta.eventId) && this.pool3d.hasAnims(n.meta.eventId)
+    }
     if (!n.poster) return false
     if (this.previewPool.isRejected(n.meta.eventId)) return false
     if (this.previewPool.opts.maxSlots <= 0) return false
@@ -550,6 +587,17 @@ export class ThreadView {
   setAutoplay(on: boolean): void {
     if (this.autoplay === on) return
     this.autoplay = on
+    if (this.threeD) {
+      for (const n of this.nodes.values()) {
+        const id = n.meta.eventId
+        if (!this.pool3d.isLive(id) || !this.pool3d.hasAnims(id)) continue
+        if (on && !this.pausedByUser.has(id) && !this.pool3d.isPlaying(id)) this.pool3d.play(id)
+        else if (!on && !this.manualPlay.has(id) && this.pool3d.isPlaying(id)) this.pool3d.pause(id)
+      }
+      for (const n of this.nodes.values()) this.positionPlayButton(n)
+      this.form.kick()
+      return
+    }
     for (const n of this.nodes.values()) {
       const id = n.meta.eventId
       if (!n.live) continue
@@ -563,13 +611,120 @@ export class ThreadView {
     this.form.kick()
   }
 
+  /**
+   * Toggle "3D models" for the thread map (topbar button / settings →
+   * Interface). ON replaces poster nodes with real GLB meshes rendered
+   * directly in the map; OFF restores the poster pipeline.
+   */
+  setDirect3D(on: boolean): void {
+    if (this.threeD === on) return
+    const was = this.threeD
+    this.threeD = on
+    // Free the pipeline we are leaving (never both resident at once).
+    if (was) this.pool3d.releaseAll()
+    else this.previewPool.releaseAll()
+    for (const n of this.nodes.values()) {
+      n.poster = null
+      n.live = null
+      if (on) {
+        this.setNodeOpacityNow(n, 0)
+        n.spinner.setEnabled(true)
+        this.request3D(n)
+      } else {
+        this.setNodeOpacityNow(n, 0.16)
+        this.drivePoster2D(n)
+      }
+      this.positionPlayButton(n)
+    }
+    this.form.kick()
+  }
+
+  /** 2D mode: render this node's poster (then its live preview, below). */
+  private drivePoster2D(n: TNode): void {
+    if (!this.assets) return
+    const { meta, mesh, spinner } = n
+    const gen = this.generation
+    void this.assets.getPoster(meta).then((tex) => {
+      // the map may have been cleared/reopened while the poster rendered
+      if (!tex || gen !== this.generation || mesh.isDisposed()) return
+      n.poster = tex
+      this.crossfadeTo(n, tex, '#FFFFFF', 'rtt')
+      spinner.setEnabled(false)
+      this.positionPlayButton(n) // animatable posts reveal their ▶ now
+      this.syncPreviews()
+      this.form.kick()
+    })
+  }
+
+  /** 3D mode: load this node's real model into the thread scene. */
+  private request3D(n: TNode): void {
+    if (!this.assets) return
+    const meta = n.meta
+    if (meta.hashFailed || this.assets.isHashFailed(meta.eventId)) return
+    n.spinner.setEnabled(true)
+    const ok = this.pool3d.request(meta.eventId, this.placeFor(n))
+    if (!ok) {
+      // Pool refused (rejected / over capacity): fall back to the poster.
+      n.spinner.setEnabled(false)
+      this.drivePoster2D(n)
+    }
+  }
+
+  /** The node cell for a model, in thread-scene world units. */
+  private placeFor(n: TNode): Place3D {
+    return {
+      x: n.x, y: n.y, z: 0.25,
+      w: n.w, h: n.h,
+      depth: Math.min(n.w, n.h) * 0.6,
+    }
+  }
+
+  /** True when a node's rect intersects the viewport, padded by `pad` screens. */
+  private nodeInView(n: TNode, pad: number): boolean {
+    const halfH = 20 * this.zoom * pad
+    const halfW = halfH * this.aspect
+    if (n.x + n.w / 2 < this.panX - halfW || n.x - n.w / 2 > this.panX + halfW) return false
+    if (n.y + n.h / 2 < this.panY - halfH || n.y - n.h / 2 > this.panY + halfH) return false
+    return true
+  }
+
+  /**
+   * 3D-mode counterpart of syncPreviews(): load models only near the
+   * viewport (AMENDMENT 43), release them once panned away, and apply the
+   * autoplay / ▶ gating to the direct models.
+   */
+  private sync3D(): void {
+    if (!this.assets) return
+    const idle = this.pointers.size === 0
+    for (const n of this.nodes.values()) {
+      const id = n.meta.eventId
+      const inView = this.nodeInView(n, 1.0)
+      const near = this.nodeInView(n, 1.8)
+      if (!near && this.pool3d.isLive(id)) {
+        this.pool3d.release(id)
+        continue
+      }
+      if (inView && idle && !this.pool3d.isLive(id) && !this.pool3d.isLoading(id) && !this.pool3d.isRejected(id)) {
+        this.request3D(n)
+        continue
+      }
+      if (this.pool3d.isLive(id) && this.pool3d.hasAnims(id)) {
+        const manual = this.manualPlay.has(id)
+        const auto = this.autoplay && !this.pausedByUser.has(id)
+        if ((auto || manual) && !this.pool3d.isPlaying(id)) this.pool3d.play(id, manual)
+        else if (!(auto || manual) && this.pool3d.isPlaying(id)) this.pool3d.pause(id)
+      }
+    }
+  }
+
   /** Position + visibility + icon of a node's play button. */
   private positionPlayButton(n: TNode): void {
     const show = this.playButtonVisible(n) && !n.mesh.isDisposed()
     n.play.scaling.set(PLAY_W / 4, PLAY_H / 4, 1)
     n.play.position.set(n.x - n.w / 2 + PLAY_W / 2 + 0.35, n.y + n.h / 2 - PLAY_H / 2 - 0.28, -0.12)
     n.play.setEnabled(show)
-    if (n.live) this.setPlayState(n, this.previewPool.isPlaying(n.meta.eventId))
+    if (this.threeD) this.setPlayState(n, this.pool3d.isPlaying(n.meta.eventId))
+    else if (n.live) this.setPlayState(n, this.previewPool.isPlaying(n.meta.eventId))
     else this.setPlayState(n, false)
   }
 
@@ -610,6 +765,8 @@ export class ThreadView {
         }
         this.syncPreviews()
         this.previewPool.tick(this.visibleNodeIds())
+        this.sync3D()
+        this.pool3d.tick(this.visibleNodeIds())
       })
       this.spinObserver = true
     }
@@ -695,19 +852,14 @@ export class ThreadView {
         opacity: 0.16, fadeFrom: 0.16, fadeTo: 0.16, fadeStart: 0,
         blend: 0, fadeFromBlend: 0, fadeToBlend: 1, fadeTex2: null, fadeTint2Hex: '#FFFFFF', fadeFlip: 'raw',
       }
-      this.setNodeOpacityNow(node, 0.16)
+      this.setNodeOpacityNow(node, this.threeD ? 0 : 0.16)
       this.positionPlayButton(node)
-      const gen = this.generation
-      void this.assets.getPoster(meta).then((tex) => {
-        // the map may have been cleared/reopened while the poster rendered
-        if (!tex || gen !== this.generation || mesh.isDisposed()) return
-        node.poster = tex
-        this.crossfadeTo(node, tex, '#FFFFFF', 'rtt')
-        spinner.setEnabled(false)
-        this.positionPlayButton(node) // animatable posts reveal their ▶ now
-        this.syncPreviews()
-        this.form.kick()
-      })
+      if (this.threeD) {
+        node.spinner.setEnabled(true)
+        this.request3D(node)
+      } else {
+        this.drivePoster2D(node)
+      }
 
       this.nodes.set(meta.eventId, node)
     }
@@ -909,6 +1061,7 @@ export class ThreadView {
     // budget; its slots are re-created lazily when the map reopens).
     this.previewPool.releaseAll()
     this.previewPool.prune()
+    this.pool3d.releaseAll()
     const canvas = this.canvas
     if (!canvas) { this.attached = false; return }
     canvas.removeEventListener('pointerdown', this.onDown)
@@ -1024,6 +1177,20 @@ export class ThreadView {
     const n = this.nodes.get(meta.eventId)
     if (!n) return
     const id = meta.eventId
+    if (this.threeD) {
+      if (this.pool3d.isPlaying(id)) {
+        this.pool3d.pause(id)
+        this.pausedByUser.add(id)
+        this.manualPlay.delete(id)
+      } else {
+        this.pausedByUser.delete(id)
+        this.manualPlay.add(id)
+        this.pool3d.play(id, true)
+      }
+      this.positionPlayButton(n)
+      this.form.kick()
+      return
+    }
     if (n.live && this.previewPool.isPlaying(id)) {
       this.previewPool.pause(id)
       this.pausedByUser.add(id)
@@ -1054,6 +1221,7 @@ export class ThreadView {
     const n = this.nodes.get(eventId)
     if (!n) return
     this.previewPool.release(eventId)
+    this.pool3d.release(eventId)
     n.mesh.dispose(); n.mat.dispose(); n.frame.dispose(); n.frameMat.dispose()
     n.spinner.dispose(); n.spinnerMat.dispose()
     n.reply.dispose(); n.replyMat.dispose()
@@ -1069,6 +1237,7 @@ export class ThreadView {
   clear(): void {
     this.generation++
     this.previewPool.releaseAll()
+    this.pool3d.releaseAll()
     for (const n of this.nodes.values()) {
       n.mesh.dispose(); n.mat.dispose(); n.frame.dispose(); n.frameMat.dispose()
       n.spinner.dispose(); n.spinnerMat.dispose()
@@ -1090,6 +1259,7 @@ export class ThreadView {
     this.detach()
     this.clear()
     this.previewPool.dispose()
+    this.pool3d.dispose()
     this.scene.dispose()
   }
 }

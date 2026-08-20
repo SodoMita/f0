@@ -1036,6 +1036,7 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     Guard: `npx tsx scripts/relay-pool-unit.mjs`
     (failed handshake retries once, eight remote drops stay at 1 live
     socket, close() stops the loop, applyRelays/connect are idempotent).
+
 74. VERTEX COLOURS RENDER IN VIEW + POST LIKE IN STUDIO (2026-08-20):
     reported as "make vertex color work in view, post like in studio".
     The studio was fine everywhere (it loads the same GLBs); the viewer and
@@ -1093,3 +1094,24 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     painted inks). Browser acquisition for the sandbox is documented in
     docs/SANDBOX-VERIFY.md (2026-08-20 section); the shared launcher is
     `scripts/browser.mjs`.
+
+75. DIRECT-3D CARDS (BOARD + THREAD), TOGGLED BY A BUTTON (2026-08-20):
+    A topbar cube button (persisted as settings → Interface → "Show posts as
+    3D models", default OFF) swaps the board AND the thread map from poster /
+    render-to-texture rendering to the posts' REAL GLB meshes rendered
+    directly in the visible scene — no poster, no offscreen RTT. Each model
+    is rotated by inverse(main-camera rotation) (AMENDMENT 43's 3D framing)
+    so the static flat camera sees exactly the view the author framed;
+    models without a camera auto-fit via dominantFacing. Uniform scale fits
+    the oriented AABB into the card/node cell (0.7 fill so corner badges stay
+    clear). A bounded Direct3DPool (`src/board/modelCard3d.ts`) mirrors the
+    preview pool's load/evict/audio-claiming, but adds the meshes to the
+    board/thread scene under a root→orient→fit chain instead of a hidden
+    stage: models load only near the viewport (same budget as posters),
+    release on scroll/pan-away, animate in place under the existing autoplay
+    + per-card ▶ gating (sound still needs the tap), and fall back to the
+    poster pipeline when a 3D load fails. Static models simply render (no ▶).
+    Verified: tsc + vite + standalone builds clean; orient.mjs passes; a
+    headless probe renders a local GLB through Direct3DPool
+    (request → onPlaced → isLive → release); the button toggle persists
+    across reload with no page errors.

@@ -129,6 +129,12 @@ export function applySettings(w: Wiring, v: SettingsValues, changed: string[] | 
     w.board.setAutoplay(!!v.autoplayAnimations)
     w.threadView.setAutoplay(!!v.autoplayAnimations)
   }
+  if (touched('direct3D')) {
+    // One toggle, two viewports: board cards and thread nodes both swap
+    // poster/RTT rendering for real 3D models in the visible scene.
+    w.board.setDirect3D(!!v.direct3D)
+    w.threadView.setDirect3D(!!v.direct3D)
+  }
   if (touched('reduceMotion')) {
     document.body.classList.toggle('reduce-motion', !!v.reduceMotion)
   }

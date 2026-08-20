@@ -419,6 +419,10 @@ export const SETTINGS: SettingDef[] = [
     id: 'autoplayAnimations', label: 'Autoplay animations', group: 'interface', kind: 'toggle', default: true,
     hint: 'Cards and thread nodes start animating when they come into view. Off = everything opens paused; the ▶ button on a card is the only way to start. Sound always needs that button tap (browsers block audio without a gesture).',
   },
+  {
+    id: 'direct3D', label: 'Show posts as 3D models', group: 'interface', kind: 'toggle', default: false,
+    hint: 'Board cards and thread nodes render each post as its real 3D model, animated in place — no poster snapshot, no render-to-texture. Heavier on the GPU: models load near the viewport only, so turn this off on weak devices.',
+  },
   { id: 'reduceMotion', label: 'Reduce motion', group: 'interface', kind: 'toggle', default: false },
 { id: 'showFps', label: 'Show performance overlay', group: 'interface', kind: 'toggle', default: false },
 

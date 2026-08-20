@@ -817,6 +817,13 @@ body[data-theme="light"] .net-btn { background: rgba(0, 0, 0, 0.05); border-colo
   border-color: var(--accent);
   color: var(--accent);
 }
+/* Active "3D models" toggle: accent = the board/thread are showing real
+   3D models, not poster snapshots. */
+#btn-3d.active {
+  background: rgba(255, 92, 53, 0.16);
+  border-color: var(--accent);
+  color: var(--accent);
+}
 body[data-theme="light"] #search-panel { background: rgba(252, 252, 254, 0.96); border-color: rgba(0, 0, 0, 0.10); }
 body[data-theme="light"] .search-field { background: rgba(0, 0, 0, 0.05); border-color: rgba(0, 0, 0, 0.14); }
 body[data-theme="light"] .search-field:focus-within { border-color: var(--accent); }

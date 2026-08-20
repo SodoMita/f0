@@ -5,6 +5,24 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 
+- [x] **Direct-3D cards: board + thread show posts as real models, toggled by
+      a button** (agent arena, 2026-08-20, SPEC AMENDMENT 75): a topbar cube
+      button (settings → Interface → "Show posts as 3D models", persisted,
+      default OFF) renders posts as their real GLB meshes directly in the
+      board and thread scenes instead of poster textures / render-to-texture.
+      Framing follows AMENDMENT 43 — the model is rotated by inverse(main-
+      camera rotation) so the flat camera sees the author's view; models
+      without a camera auto-fit via dominant facing; uniform scale fits the
+      oriented AABB into the card/node cell. `src/board/modelCard3d.ts`
+      (Direct3DPool) loads models near the viewport, releases them on
+      scroll/pan-away, animates them under the existing autoplay + per-card ▶
+      gating (sound still needs the tap), claims embedded audio, and falls
+      back to the poster pipeline when a 3D load fails; static models just
+      render. Verified: tsc + vite + standalone builds clean; orient.mjs
+      passes; a headless probe renders a local GLB through Direct3DPool
+      (request → onPlaced → isLive → release); the toggle persists across
+      reload with no page errors.
+
 - [x] **Idle OOM: relay reconnect no longer stacks sockets** (agent arena,
       2026-08-20, SPEC AMENDMENT 73): leaving the tab open crashed after a
       long idle. Relays drop idle connections and background tabs get their
@@ -734,12 +752,13 @@ move it to **Done** with a commit reference. One agent per area.
 **Rest (spec order):**
 
 - [ ] **3D thread view mode** (AMENDMENT 43): thread setting — (a) 2D posters
-      (current), (b) tree view, (c) 3D actual GLB models. In 3D, apply the
-      model's MAIN camera as the MODEL transform vs a static thread camera
-      (model rotated by inverse(main-cam rotation), at the node's camera
-      position; thread camera is only a position). Center a node -> thread view
-      == model's main-camera view. Fall back to auto-fit when no camera. Load
-      models only near viewport (same pipeline as board).
+      (current), (b) tree view, (c) 3D actual GLB models. **(c) now lands as a
+      button toggle for BOTH board and thread (SPEC AMENDMENT 75 / Direct3DPool);
+      mode (b) tree-view layout is still open.** In 3D, apply the model's MAIN
+      camera as the MODEL transform vs a static thread camera (model rotated by
+      inverse(main-cam rotation); thread camera is only a position). Center a
+      node -> thread view == model's main-camera view. Fall back to auto-fit
+      when no camera. Load models only near viewport (same pipeline as board).
 - [ ] **VR support** (AMENDMENT 41): WebXR immersive viewing in the viewer —
       `WebXRExperienceHelper`, xrCompatible canvas (same engine/canvas), 6-DOF
       tracking, enter-VR action hidden when unsupported, error sheet on failed
