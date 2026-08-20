@@ -330,6 +330,11 @@ export class FormEngine {
       // call deltaTime stayed 0 and AnimationGroup.start() on direct-3D cards
       // never advanced — frozen models even while the loop kept drawing.
       this.engine.beginFrame()
+      // After a long idle the first sample is "time since last frame" which
+      // can be seconds. Babylon then catch-up-animates that whole gap on the
+      // next scene.render() and the tab hitch-freezes. Cap like TrackAnimator.
+      const dt = this.engine.getDeltaTime()
+      if (dt > 100) (this.engine as unknown as { _deltaTime: number })._deltaTime = 100
       this.active.render()
       this.engine.endFrame()
       const submitMs = performance.now() - now

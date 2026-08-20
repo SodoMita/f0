@@ -314,11 +314,16 @@ export class ThreadView {
   /** Render-on-demand probe: pointers down, a crossfade, a spinner, or a live node. */
   isAnimating(): boolean {
     if (this.pointers.size > 0) return true
+    // Only VISIBLE nodes count. Offscreen spinners (a failed/pending poster
+    // for a node the camera isn't looking at) used to latch this true and
+    // the thread never stopped drawing.
+    const visible = this.visibleNodeIds()
     for (const n of this.nodes.values()) {
+      if (!visible.has(n.meta.eventId)) continue
       if (n.spinner.isEnabled() || n.fadeStart > 0) return true
     }
-    if (this.threeD && this.pool3d.hasWork(this.visibleNodeIds())) return true
-    return this.previewPool.hasWork(this.visibleNodeIds())
+    if (this.threeD && this.pool3d.hasWork(visible)) return true
+    return this.previewPool.hasWork(visible)
   }
 
   /** Node ids whose card rect intersects the current viewport. */
@@ -632,16 +637,14 @@ export class ThreadView {
       if (on) {
         this.setNodeOpacityNow(n, 0)
         n.spinner.setEnabled(false)
-        // Viewport-gated: sync3D() below loads near-camera nodes and
-        // request3D turns their spinner on. Enabling every spinner here
-        // kept the thread drawing forever (offscreen rings never stop).
       } else {
         this.setNodeOpacityNow(n, 0.16)
-        this.drivePoster2D(n)
+        n.spinner.setEnabled(false)
       }
       this.positionPlayButton(n)
     }
     if (on) this.sync3D()
+    else this.syncPosters()
     this.form.kick()
   }
 
@@ -652,15 +655,36 @@ export class ThreadView {
     spinner.setEnabled(true)
     const gen = this.generation
     void this.assets.getPoster(meta).then((tex) => {
-      // the map may have been cleared/reopened while the poster rendered
-      if (!tex || gen !== this.generation || mesh.isDisposed()) return
+      if (gen !== this.generation || mesh.isDisposed()) return
+      spinner.setEnabled(false)
+      // Failed / cancelled poster: stop the ring. Leaving it spinning
+      // latched isAnimating() and the 2D tree never idled (felt frozen).
+      if (!tex) { this.form.kick(); return }
       n.poster = tex
       this.crossfadeTo(n, tex, '#FFFFFF', 'rtt')
-      spinner.setEnabled(false)
       this.positionPlayButton(n) // animatable posts reveal their ▶ now
       this.syncPreviews()
       this.form.kick()
     })
+  }
+
+  /**
+   * 2D posters follow the viewport the same way 3D models do. open() used
+   * to getPoster() every node in the tree up front — a large thread parsed
+   * every GLB on the main thread and froze. Load only what's near the camera;
+   * pan/zoom picks up the rest.
+   */
+  private syncPosters(): void {
+    if (this.threeD || !this.assets) return
+    for (const n of this.nodes.values()) {
+      const near = this.nodeInView(n, 1.8)
+      if (!near) {
+        if (n.spinner.isEnabled() && !n.poster) n.spinner.setEnabled(false)
+        continue
+      }
+      if (n.poster || n.live || n.spinner.isEnabled()) continue
+      this.drivePoster2D(n)
+    }
   }
 
   /** 3D mode: load this node's real model into the thread scene. */
@@ -790,6 +814,10 @@ export class ThreadView {
       this.spinObserver = true
     }
     if (!this.assets || !this.index) return
+    // Board pauses the poster queue while the feed is flung. Thread open
+    // happens on a different scene — if we leave the queue paused, every
+    // getPoster sits forever, spinners never stop, the tree looks frozen.
+    this.assets.setPaused(false)
     const metas = this.index.flatten(rootId).filter((m) => !m.hashFailed && !m.tombstoned)
     if (metas.length === 0) return
     // play-intent bookkeeping belongs to this tree: drop entries for posts
@@ -877,13 +905,9 @@ export class ThreadView {
       }
       this.setNodeOpacityNow(node, this.threeD ? 0 : 0.16)
       this.positionPlayButton(node)
-      if (this.threeD) {
-        // Viewport-gated: fit() → applyCamera → sync3D loads near-camera
-        // nodes (and request3D turns their spinner on).
-      } else {
-        this.drivePoster2D(node)
-      }
-
+      // Viewport-gated: fit() → applyCamera loads near-camera nodes
+      // (syncPosters in 2D, sync3D in 3D). Requesting every node here
+      // parsed the whole tree on open and froze the tab.
       this.nodes.set(meta.eventId, node)
     }
 
@@ -992,8 +1016,12 @@ export class ThreadView {
     this.backdrop.position.set(this.panX, this.panY, 4)
     // zoom changed -> the sharpness a node needs changed -> rescale the RTTs
     this.applyPreviewScale()
-    // viewport changed -> live previews must follow what is now on screen
-    this.syncPreviews()
+    // viewport changed -> posters / live previews / 3D models follow
+    if (this.threeD) this.sync3D()
+    else {
+      this.syncPosters()
+      this.syncPreviews()
+    }
   }
 
   /** Frame the whole map with a margin. */

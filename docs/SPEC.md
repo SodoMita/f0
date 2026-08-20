@@ -1148,4 +1148,9 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
       opening a thread as posters also parsed every in-view GLB into the map
       (main-thread freeze) and left overflow spinners running (isAnimating
       latched → 30 fps forever).
+    - 2D thread posters are viewport-gated too (`syncPosters`). open() used
+      to getPoster() every node in the tree; a large thread froze the tab.
+      Failed posters must stop their spinner (else isAnimating latches).
+      Opening a thread unpauses the poster queue (the board may have paused
+      it mid-fling, and board.tick no longer runs to unpause).
     Guard: `bun scripts/direct3d-unit.mjs`.
