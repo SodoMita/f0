@@ -777,7 +777,9 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     cameras/textures/skins. Library pieces ship still: the writer can attach
     a TRS clip on a child node (`scripts/libglb.py`) but no name-based
     pulse/spin is authored. 2D plates stay flat — never extrude a plate
-    into a 3D counterpart.
+    into a 3D counterpart. Image plates are traced PNG→quantize→contour
+    →earcut (`scripts/trace-2d-glb.py`); triangles share z=0 (no stacked
+    layers, no z-fighting).
     Vertex colours/normals are quantized (`KHR_mesh_quantization`); Draco is
     applied only when it actually shrinks the file. Studio starts the clip
     on place and the demand loop stays awake while it plays. Posters

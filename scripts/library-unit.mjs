@@ -70,6 +70,13 @@ function inspect(bytes) {
       if (acc) vertices += acc.count ?? 0
     }
   }
+  let zmin = Infinity, zmax = -Infinity
+  // POSITION may be Draco-compressed — then we cannot read z. Only check raw float accessors.
+  const acc0 = gltf.accessors?.[0]
+  const views = gltf.bufferViews ?? []
+  if (acc0 && acc0.componentType === 5126 && acc0.type === 'VEC3' && acc0.min && acc0.max) {
+    zmin = acc0.min[2]; zmax = acc0.max[2]
+  }
   return {
     ok: true,
     meshes: (gltf.meshes ?? []).length,
@@ -77,6 +84,8 @@ function inspect(bytes) {
     textures: (gltf.textures ?? []).length,
     skins: (gltf.skins ?? []).length,
     animations: (gltf.animations ?? []).length,
+    zspan: Number.isFinite(zmin) ? zmax - zmin : 0,
+    draco: JSON.stringify(gltf).includes('KHR_draco_mesh_compression'),
   }
 }
 
@@ -94,6 +103,9 @@ for (const item of manifest) {
   if (report.ok) {
     check(`${label} has mesh + positions`, report.meshes >= 1 && report.vertices >= 3)
     check(`${label} has no textures / skins / anim`, report.textures === 0 && report.skins === 0 && report.animations === 0)
+    if (label.startsWith('2d/') && !report.draco) {
+      check(`${label} is a single plane (no stacked z)`, report.zspan < 1e-5)
+    }
   }
 }
 void files3d
