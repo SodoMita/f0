@@ -11,7 +11,6 @@ import { DynamicTexture } from '@babylonjs/core/Materials/Textures/dynamicTextur
 import { Vector3 } from '@babylonjs/core/Maths/math.vector'
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color'
 import type { AssetContainer } from '@babylonjs/core/assetContainer'
-import type { AnimationGroup } from '@babylonjs/core/Animations/animationGroup'
 import type { HighlightLayer } from '@babylonjs/core/Layers/highlightLayer'
 import '../model/gltf'
 import type { FormEngine } from '../core/engine'
@@ -25,6 +24,7 @@ import {
 import { makeSpotlightTexture, paintSpotlight, makeContactShadow, luminance } from '../core/gfx'
 import { graphics } from '../render/graphics'
 import { theme } from '../theme'
+import { TrackAnimator } from './animator'
 
 /**
  * Detail viewer: exactly one interactive model. Uses the model's own cameras
@@ -34,8 +34,8 @@ export class Viewer {
   readonly scene: Scene
   private orbit: ArcRotateCamera
   private container: AssetContainer | null = null
-  private anims: AnimationGroup[] = []
-  private active: AnimationGroup | null = null
+  /** Multi-track playback driver (tracks / timeline / stepped / dir / speed). */
+  readonly animator = new TrackAnimator()
   private imported: Camera[] = []
   private camIdx = -1 // -1 = orbit/auto
   private counts = { meshes: 0, vertices: 0 }
@@ -113,7 +113,12 @@ export class Viewer {
     setCardOpacity(gm, 0.5)
     setCardFlip(gm, 'dyn')
 
-    this.scene.onBeforeRenderObservable.add(() => this.frameBackdrop())
+    this.scene.onBeforeRenderObservable.add(() => {
+      this.frameBackdrop()
+      // no dt argument: engine.getDeltaTime() is 0 under FormEngine's
+      // demand-driven RAF loop, so the animator measures wall time itself
+      this.animator.tick()
+    })
 
     // PERF: playing animation, an in-flight load, or a camera that actually
     // moved (orbit inertia glide included).
@@ -288,7 +293,6 @@ export class Viewer {
     graphics.setShadowCasters(this.scene, container.meshes.filter((m) => m.getTotalVertices() > 0))
     this.syncHighlight()
     this.imported = container.cameras.slice()
-    this.anims = container.animationGroups
 
     let verts = 0
     for (const m of container.meshes) verts += m.getTotalVertices() || 0
@@ -301,11 +305,9 @@ export class Viewer {
     this.applyCamera(idx)
 
     this.form.kick()
-    if (this.anims.length) {
-      const a = meta.previewAnimation ?? 0
-      this.active = this.anims[Math.min(a, this.anims.length - 1)]
-      this.active.start(true)
-    }
+    // Same policy as before: the authored preview-animation (or track 0)
+    // starts playing on open — but through the manual driver.
+    this.animator.setGroups(container.animationGroups, meta.previewAnimation ?? 0, true)
   }
 
   /** True while a model is being fetched/parsed for this view. */
@@ -318,7 +320,7 @@ export class Viewer {
    */
   isAnimating(): boolean {
     if (this.pending) return true
-    if (this.active?.isPlaying) return true
+    if (this.animator.playing) return true
     const cam = this.scene.activeCamera
     if (!cam) return false
     const p = cam.position
@@ -387,17 +389,15 @@ export class Viewer {
     this.backdropDistance = Math.max(20, Math.min(dist * 6, radius * 26))
   }
 
-  isPlaying(): boolean { return !!this.active?.isPlaying }
+  isPlaying(): boolean { return this.animator.playing }
 
   toggleAnimation(): void {
-    if (!this.active && this.anims[0]) this.active = this.anims[0]
-    if (!this.active) return
-    if (this.active.isPlaying) this.active.pause()
-    else this.active.play(true)
+    this.animator.toggle()
+    this.form.kick()
   }
 
   stats(): { meshes: number; vertices: number; animations: number; cameras: number } {
-    return { ...this.counts, animations: this.anims.length, cameras: this.imported.length }
+    return { ...this.counts, animations: this.animator.count, cameras: this.imported.length }
   }
 
   clear(): void {
@@ -405,9 +405,7 @@ export class Viewer {
     this.loadToken++
     this.pending = false
     this.glow?.setEnabled(false)
-    this.active?.stop()
-    this.active = null
-    this.anims = []
+    this.animator.clear()
     this.imported = []
     this.camIdx = -1
     if (this.container) {

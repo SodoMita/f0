@@ -5,6 +5,23 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 
+- [x] **Viewer: multi-track animation rail** (agent arena, 2026-08-20):
+      models with animations get a second rail above the toolbar — a track
+      dropdown listing the GLB animation names (unnamed clips fall back to
+      "track N"), a scrubbable timeline with a frame readout, stepped playback
+      (whole-frame hold, no interpolation), direction (forward/reverse, both
+      looping), and a speed select (0.25×–4×). Driven by
+      `src/viewer/animator.ts` (TrackAnimator): the active group is started
+      once then paused, and a manual per-render `goToFrame` clock advances it —
+      Babylon's own clock cannot do stepped/reverse/scrub without restarting
+      the group. NOTE: the animator measures wall time itself; FormEngine
+      renders via its own RAF loop (not `engine.runRenderLoop`), so Babylon's
+      `engine.getDeltaTime()` is always 0 there. `,`/`.` step one frame
+      (pauses, wraps). Rail hides for trackless models. Guards:
+      `scripts/anim-unit.mjs` (bun, NullEngine) + `scripts/anim-hud.mjs`
+      (browser, dropdown/scrub/stepped/dir/speed round-trips + screenshots
+      incl. light theme and phone viewport).
+
 - [x] **Direct-3D cards: board + thread show posts as real models, toggled by
       a button** (agent arena, 2026-08-20, SPEC AMENDMENT 75): a topbar cube
       button (settings → Interface → "Show posts as 3D models", persisted,

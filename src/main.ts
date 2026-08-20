@@ -147,6 +147,13 @@ async function boot(): Promise<void> {
   const btn3d = $('btn-3d') as HTMLButtonElement
   const btnPlay = $('btn-play') as HTMLButtonElement
   const camDots = $('cam-dots')
+  const animRail = $('anim-rail')
+  const animTrack = $('anim-track') as HTMLSelectElement
+  const animTimeline = $('anim-timeline') as HTMLInputElement
+  const animFrame = $('anim-frame')
+  const animDir = $('anim-dir') as HTMLButtonElement
+  const animStepped = $('anim-stepped') as HTMLButtonElement
+  const animSpeed = $('anim-speed') as HTMLSelectElement
   const metaText = $('meta-text')
   const toast = $('toast')
 
@@ -1026,6 +1033,74 @@ async function boot(): Promise<void> {
   $('btn-prev').addEventListener('click', () => void stepViewer(-1))
   $('btn-next').addEventListener('click', () => void stepViewer(1))
   btnPlay.addEventListener('click', () => { viewer.toggleAnimation(); syncPlay() })
+
+  // ---------- animation rail (tracks / timeline / stepped / dir / speed) ----------
+  // While the user drags the timeline the animator must not fight the thumb:
+  // scrubbing pauses playback and every input event seeks + repaints.
+  animTrack.addEventListener('change', () => {
+    viewer.animator.setTrack(animTrack.selectedIndex)
+    engine.kick()
+    syncAnimRail()
+  })
+  animTimeline.addEventListener('input', () => {
+    viewer.animator.pause()
+    viewer.animator.seek(parseFloat(animTimeline.value))
+    engine.kick()
+    syncPlay()
+  })
+  animDir.addEventListener('click', () => {
+    viewer.animator.setDirection(!viewer.animator.forward)
+    syncAnimRail()
+  })
+  animStepped.addEventListener('click', () => {
+    viewer.animator.setStepped(!viewer.animator.stepped)
+    engine.kick()
+    syncAnimRail()
+  })
+  animSpeed.addEventListener('change', () => {
+    viewer.animator.setSpeed(parseFloat(animSpeed.value) || 1)
+  })
+  // Playback → HUD: the animator reports every cursor move (tick or seek);
+  // mirror it into the range thumb + frame readout unless the user is the
+  // one holding the thumb.
+  let timelineHeld = false
+  animTimeline.addEventListener('pointerdown', () => { timelineHeld = true })
+  window.addEventListener('pointerup', () => { timelineHeld = false })
+  viewer.animator.onFrame = (f) => {
+    const r = viewer.animator.range()
+    if (!r) return
+    if (!timelineHeld) animTimeline.value = String(f)
+    animFrame.textContent = `${Math.round(f - r.from)} / ${Math.round(r.to - r.from)}`
+  }
+
+  /** Rebuild the rail for the current model (or hide it when trackless). */
+  function syncAnimRail(): void {
+    const a = viewer.animator
+    animRail.hidden = a.count === 0
+    if (a.count === 0) return
+    if (animTrack.options.length !== a.count) {
+      animTrack.innerHTML = ''
+      a.names.forEach((name, i) => {
+        const o = document.createElement('option')
+        o.value = String(i)
+        o.textContent = name
+        animTrack.appendChild(o)
+      })
+    }
+    animTrack.selectedIndex = a.index
+    const r = a.range()
+    if (r) {
+      animTimeline.min = String(r.from)
+      animTimeline.max = String(r.to)
+      animTimeline.value = String(a.frame)
+      animFrame.textContent = `${Math.round(a.frame - r.from)} / ${Math.round(r.to - r.from)}`
+    }
+    animDir.classList.toggle('reverse', !a.forward)
+    animDir.title = a.forward ? 'direction: forward (click for reverse)' : 'direction: reverse (click for forward)'
+    animStepped.classList.toggle('active', a.stepped)
+    animSpeed.value = String(a.speed)
+    syncPlay()
+  }
   $('btn-thread').addEventListener('click', () => {
     if (currentMeta) router.go({ name: 'thread', rootId: currentMeta.refs.rootId ?? currentMeta.eventId })
   })
@@ -1333,6 +1408,8 @@ async function boot(): Promise<void> {
     syncDeleteButton()
     setMode('viewer')
     camDots.innerHTML = ''
+    animRail.hidden = true
+    animTrack.innerHTML = ''
     // Try to hand off the live preview pool's parsed container BEFORE the
     // loading indicator. If the post is currently animating on a card, the
     // pool already has the GLB parsed in previewScene; cloning it into
@@ -1359,7 +1436,7 @@ async function boot(): Promise<void> {
           return
         }
         renderCamDots()
-        syncPlay()
+        syncAnimRail()
         live.commit()
         return
       } catch (err) {
@@ -1387,7 +1464,7 @@ async function boot(): Promise<void> {
       await viewer.load(bytes, meta)
       if (nav !== viewerNav) return
       renderCamDots()
-      syncPlay()
+      syncAnimRail()
     } catch {
       if (nav === viewerNav) errorSheet.show(ERRORS.MODEL_PARSE(() => router.go({ name: 'board' })))
     } finally {
@@ -1615,6 +1692,9 @@ async function boot(): Promise<void> {
       case 'ArrowRight': void stepViewer(1); break
       case 'c': case 'C': viewer.cycleCamera(); renderCamDots(); break
       case 'a': case 'A': viewer.toggleAnimation(); syncPlay(); break
+      // frame stepping (pauses playback; wraps around the clip)
+      case ',': case '<': viewer.animator.step(-1); engine.kick(); syncPlay(); break
+      case '.': case '>': viewer.animator.step(1); engine.kick(); syncPlay(); break
       case 'm': case 'M': toggleDrawer(); break
       case 't': case 'T':
         if (currentMeta) router.go({ name: 'thread', rootId: currentMeta.refs.rootId ?? currentMeta.eventId })
@@ -1637,6 +1717,9 @@ async function boot(): Promise<void> {
     // which view is actually on screen (the network panel is an overlay, so
     // the route alone no longer tells you) — scripts/network-panel.mjs
     __mode: () => mode,
+    // animation rail: lets tests load a multi-track GLB straight into the
+    // viewer and rebuild the HUD without a full openViewer round-trip
+    syncAnimRail,
   }
 }
 

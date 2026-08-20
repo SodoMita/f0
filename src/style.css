@@ -222,7 +222,7 @@ body[data-theme="light"] #thread-zoom .hbtn:hover { background: rgba(0, 0, 0, 0.
 /* ---------- viewer bar ---------- */
 #viewer-bar {
   bottom: 0; left: 0; right: 0;
-  display: flex; justify-content: center;
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
   padding: 0 16px 18px;
   transition: padding-right 0.18s ease;
   padding-bottom: max(18px, env(safe-area-inset-bottom));
@@ -261,6 +261,40 @@ body[data-theme="light"] #thread-zoom .hbtn:hover { background: rgba(0, 0, 0, 0.
 /* the drawer must not cover the toolbar */
 body.drawer-open #viewer-bar { padding-right: calc(min(400px, 92vw) + 16px); }
 @media (max-width: 720px) { body.drawer-open #viewer-bar { display: none; } }
+
+/* ---------- animation rail (track / timeline / stepped / dir / speed) ---------- */
+.anim-rail {
+  align-items: center; gap: 10px;
+  padding: 8px 12px;
+}
+.anim-rail select {
+  background: rgba(255, 255, 255, 0.06); color: var(--ink);
+  font: inherit; font-size: 11px;
+  border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 8px;
+  padding: 5px 7px; max-width: 150px; text-overflow: ellipsis;
+  pointer-events: auto; cursor: pointer; flex: none;
+}
+#anim-timeline {
+  width: clamp(110px, 26vw, 260px); flex: none;
+  accent-color: var(--accent); pointer-events: auto;
+}
+.anim-frame {
+  font-size: 10px; color: var(--muted); flex: none;
+  min-width: 64px; text-align: center; font-variant-numeric: tabular-nums;
+}
+#anim-speed { max-width: 66px; }
+/* direction button shows ONE glyph for the current direction */
+#anim-dir .i-rev { display: none; }
+#anim-dir.reverse .i-fwd { display: none; }
+#anim-dir.reverse .i-rev { display: block; }
+#anim-dir .i-fwd, #anim-dir .i-rev { fill: currentColor; stroke-width: 1; }
+.anim-rail .hbtn.small.active { background: var(--accent); color: #180a06; border-color: transparent; }
+body[data-theme="light"] .anim-rail select { background: rgba(0,0,0,0.05); border-color: rgba(0,0,0,0.16); }
+body[data-theme="light"] .anim-rail .hbtn.small.active { background: var(--accent); color: #180a06; }
+@media (max-width: 560px) {
+  .anim-frame { display: none; }
+  #anim-timeline { width: clamp(90px, 30vw, 180px); }
+}
 
 /* camera dots */
 #cam-dots { display: flex; gap: 6px; padding-top: 6px; pointer-events: auto; }
