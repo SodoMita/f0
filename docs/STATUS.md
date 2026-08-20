@@ -4,6 +4,17 @@ Claim a task by moving it to **In progress** with your name/date, push, then
 move it to **Done** with a commit reference. One agent per area.
 
 ## Done
+- [x] **Cards/nodes can't paint over their own buttons** (agent arena,
+      2026-08-20, SPEC AMENDMENT 76): a board card's reply badge / play
+      button (and a thread node's reply pill / play button) could be drawn
+      over by the post itself. Babylon sorts transparent meshes by their
+      bounding-sphere center's distance to the camera, so a corner-mounted
+      button on a screen-centered card sorted BEHIND its own card and was
+      painted over wherever the post's opaque pixels reached the corner.
+      Overlays now render in renderingGroupId 1 (after group 0 =
+      cards/nodes/backdrop), so they are always on top. Guard:
+      `scripts/overlay-order.mjs`.
+
 
 - [x] **Direct-3D cards bugfix** (agent arena, 2026-08-20, SPEC AMENDMENT 76):
       the AMENDMENT 75 toggle rendered real GLBs but shipped several bugs.
@@ -734,6 +745,12 @@ move it to **Done** with a commit reference. One agent per area.
   onto main instead of rewriting again. Branch protection now blocks force
   pushes to `main`.
 ## In progress
+
+- [ ] **2D thread-open freeze (Direct-3D follow-up)** — claimed by agent arena,
+      2026-08-21. Opening a reply tree with the cube toggle OFF still hitch-
+      froze after AMENDMENT 75: `sync3D` ran every frame in 2D, `open()`
+      parsed every node's GLB, and `fit()` puts the whole tree in view so a
+      viewport gate is a no-op. Keep debugging on `arena/01a0214e-f0`.
 
 - [ ] **Per-card play/pause (animation + sound) + autoplay setting** — claimed by
       agent arena, 2026-08-20. SPEC AMENDMENT 69. Board cards and thread nodes

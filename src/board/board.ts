@@ -596,6 +596,14 @@ export class Board {
       badge.setEnabled(false)
       badge.isPickable = false
       badge.position.z = -0.05
+      // Corner-mounted overlays (badge + play) sit at the card's edge, so
+      // their bounding-sphere center is several world units off the card's
+      // center. Babylon sorts transparent meshes by that center's distance
+      // to the camera (renderingGroup.js defaultTransparentSortCompare), so a
+      // card near screen-center sorts CLOSER than its own corner buttons and
+      // paints over them whenever its opaque poster/live pixels reach the
+      // corner. Group 1 renders after group 0 (the cards/backdrop), which
+      // pins the overlays on top regardless of where the card is on screen.
       badge.renderingGroupId = 1
       const badgeMat = makeCardMaterial(this.scene)
       badge.material = badgeMat
@@ -615,7 +623,7 @@ export class Board {
       play.setEnabled(false)
       play.isPickable = true
       play.position.z = -0.06
-      play.renderingGroupId = 1
+      play.renderingGroupId = 1 // same overlay pass as the badge (see above)
       const playMat = makeCardMaterial(this.scene)
       play.material = playMat
       setCardTexture(playMat, this.playTexOff)

@@ -880,6 +880,11 @@ export class ThreadView {
       reply.scaling.set(REPLY_W / 4, REPLY_H / 4, 1)
       reply.position.set(p.x + w / 2 - REPLY_W / 2 + 0.35, p.y - h / 2 + REPLY_H * 0.28, -0.1)
       reply.isPickable = true
+      // Corner overlays (reply pill + play button) must render above the node
+      // they belong to: transparent meshes sort by bounding-sphere center
+      // distance, so a corner-mounted pill can sort behind its own node and
+      // be painted over by the node's opaque poster/live pixels. Group 1
+      // renders after group 0 (nodes/backdrop) — always on top.
       reply.renderingGroupId = 1
       reply.metadata = { treply: meta }
 
@@ -892,7 +897,7 @@ export class ThreadView {
       setCardWhite(playMat)
       setCardFlip(playMat, 'dyn')
       play.isPickable = true
-      play.renderingGroupId = 1
+      play.renderingGroupId = 1 // same overlay pass as the reply pill
       play.metadata = { tplay: meta }
 
       setCardTint(mat, meta.tint || theme.panel)
