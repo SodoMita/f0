@@ -1174,4 +1174,10 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
       Failed posters must stop their spinner (else isAnimating latches).
       Opening a thread unpauses the poster queue (the board may have paused
       it mid-fling, and board.tick no longer runs to unpause).
-    Guard: `bun scripts/direct3d-unit.mjs`.
+    - `fit()` frames the WHOLE tree, so "in view" is every node on open —
+      a viewport gate alone is a no-op. Skip postage-stamp nodes
+      (`nodeWorthTexture`, <48 CSS px tall), bind `peekPoster` instantly
+      (the board already rendered those textures), trickle at most two
+      new getPoster jobs per pass, and cancel queued posters that panned
+      off or shrank. Live previews and 3D models use the same size gate.
+    Guard: `bun scripts/direct3d-unit.mjs` + `bun scripts/thread-open-unit.mjs`.
