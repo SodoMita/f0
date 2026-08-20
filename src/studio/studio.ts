@@ -92,6 +92,11 @@ export class Studio {
   /** Mesh currently outlined by the studio highlight layer (object or paint source). */
   private highlightMesh: AbstractMesh | null = null
   private highlightLayer: HighlightLayer
+  /** Selection outline preferences (live-driven from settings.apply). */
+  private hlOn = true
+  private hlColor = '#FFFFFF'
+  /** Outline thickness as the HighlightLayer blur kernel — 1 = hairline, 8 = thick rim. */
+  private hlThickness = 2
   private freeCam: FreeCamera | null = null
   readonly paint: PaintSession
   private paintMode = false
@@ -138,14 +143,15 @@ export class Studio {
 
     // Babylon highlight layer outlines the currently-selected mesh (text / a
     // placed symbol / an imported mesh / a paint stamp's source). Outer-glow
-    // only — the inner colour tints whatever the mesh draws anyway. A tiny
-    // blur keeps the outline crisp at close-zoom and readable at far-zoom;
-    // additive blending + bright colour so the outline stays visible against
-    // any mesh tint (the accent often matches the mesh colour).
+    // only — the inner colour tints whatever the mesh draws anyway. Additive
+    // blending + bright colour so the outline stays visible against any mesh
+    // tint (the accent often matches the mesh colour). Thickness and colour
+    // are live-configurable through the settings schema (settings.selection
+    // Highlight*), see `setSelectionHighlight`.
     this.highlightLayer = new HighlightLayer('studio-highlight', this.scene, {
       mainTextureRatio: 0.5,
-      blurHorizontalSize: 1.0,
-      blurVerticalSize: 1.0,
+      blurHorizontalSize: 2.0,
+      blurVerticalSize: 2.0,
       alphaBlendingMode: 2, // ADDITIVE: outline shows on top of the mesh
     })
     this.highlightLayer.innerGlow = false
@@ -379,18 +385,55 @@ export class Studio {
     this.setHighlight(mesh)
   }
 
+  /**
+   * Live-update the selection outline (settings → Interface → Selection
+   * outline). `on=false` removes any current outline; `color`/`thickness`
+   * are applied immediately so the next selection picks them up AND any
+   * already-outlined mesh re-tints without a re-pick.
+   */
+  setSelectionHighlight(on: boolean, color: string, thickness: number): void {
+    this.hlOn = !!on
+    if (typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color)) this.hlColor = color
+    const t = Number.isFinite(thickness) ? Math.max(1, Math.min(8, Math.round(thickness))) : 2
+    this.hlThickness = t
+    // HighlightLayer thickness is the blur kernel — the larger it is, the
+    // further the glow extends past the mesh silhouette. A linear-ish
+    // mapping keeps 1 close to a hairline and 8 close to a thick rim.
+    const kernel = 0.4 + t * 0.5
+    this.highlightLayer.blurHorizontalSize = kernel
+    this.highlightLayer.blurVerticalSize = kernel
+    // Re-tint the currently-selected mesh in place so the user sees the
+    // change without re-clicking.
+    if (this.highlightMesh instanceof Mesh) {
+      try {
+        this.highlightLayer.removeMesh(this.highlightMesh)
+        if (this.hlOn) {
+          this.highlightLayer.addMesh(this.highlightMesh, Color3.FromHexString(this.hlColor))
+        }
+      } catch { /* mesh gone */ }
+    }
+    this.kick(200)
+  }
   /** Update the highlight layer outline; ignored while publishing. */
   private setHighlight(mesh: AbstractMesh | null): void {
     if (this.frozen) return
+    if (!this.hlOn) {
+      // Highlight disabled: keep the layer clean so a re-enable doesn't
+      // leave a stale mesh attached.
+      if (this.highlightMesh instanceof Mesh) {
+        try { this.highlightLayer.removeMesh(this.highlightMesh as Mesh) } catch { /* mesh gone */ }
+        this.highlightMesh = null
+      }
+      return
+    }
     if (this.highlightMesh === mesh) return
     if (this.highlightMesh instanceof Mesh) {
       try { this.highlightLayer.removeMesh(this.highlightMesh as Mesh) } catch { /* mesh gone */ }
     }
     this.highlightMesh = mesh
     if (mesh instanceof Mesh) {
-      // Highlight colour follows the studio accent: same hue as the gizmo
-      // line, so the outline reads as a single visual cue.
-      const color = Color3.FromHexString(this.tint)
+      // Highlight colour follows the studio selection palette (settings).
+      const color = Color3.FromHexString(this.hlColor)
       this.highlightLayer.addMesh(mesh, color)
     }
     this.kick(120)
