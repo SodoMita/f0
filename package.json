@@ -23,7 +23,8 @@
     "check:publish": "node --experimental-strip-types scripts/publish-unit.mjs",
     "check:hash": "bun scripts/hash-unit.mjs",
     "check:studio-error": "node scripts/studio-error-wrap.mjs",
-    "check:overflow": "node scripts/overflow-scan.mjs"
+    "check:overflow": "node scripts/overflow-scan.mjs",
+    "check:draco": "node scripts/verify-draco.mjs"
   },
   "dependencies": {
     "@babylonjs/core": "8.10.1",

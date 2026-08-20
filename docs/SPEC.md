@@ -809,3 +809,29 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
       `scripts/studio-unit.mjs` (pass-through, restore-on-remove, reset,
       publishModel content + byte-identical upload end-to-end), and
       verify-publish asserts `meta.name` on the received events.
+
+67. DRACO GLTF EXTENSION — LOCAL DECODER WIRED + CSP FIX (2026-08-20):
+    KHR_draco_mesh_compression is registered (`src/model/gltf.ts`) and the
+    decoder is configured to LOCAL Babylon assets in `src/model/draco.ts`
+    (`configureDraco()`, called at boot before any model parse, plus
+    idempotent calls in poster.ts / previewPool.ts). The mapping:
+    `wasmUrl` = draco_wasm_wrapper_gltf.js, `wasmBinaryUrl` =
+    draco_decoder_gltf.wasm, `fallbackUrl` = draco_decoder_gltf.js,
+    `numWorkers: 0` (main-thread decode — avoids blob-worker +
+    importScripts + worker-src CSP interaction; models are <= 276 meshes).
+    - **CSP FIX (the bug):** `WEB_CSP.connect-src` lacked `'self'`
+      (`https: wss: ws: blob:` only), so Babylon's DracoCodec could not XHR
+      the wasm binary from the same origin over http — every Draco model
+      failed to decode in the dev server (http://localhost:5173) and on any
+      plain-HTTP deployment. The standalone CSP already allowed `data:` and
+      was fine. Added `'self'` to `connect-src` in csp.ts (same-origin
+      fetches of the app's OWN wasm asset only — no external network).
+    - Naming in draco.ts was dangerously confusing (dracoWasmUrl was the
+      BINARY, dracoJsUrl the wasm WRAPPER); renamed to
+      dracoWasmWrapperJsUrl / dracoWasmBinaryUrl / dracoJsFallbackUrl so the
+      `wasmUrl` / `wasmBinaryUrl` / `fallbackUrl` mapping is unambiguous.
+    - **Guard:** `node scripts/verify-draco.mjs` round-trips a real quad
+      (4 points / 2 faces) through the encoder wrapper and the app's exact
+      decoder files (draco_wasm_wrapper_gltf.js + draco_decoder_gltf.wasm),
+      asserting the decoded points/faces/positions — the same module path
+      Babylon's KHR_draco_mesh_compression uses. No browser needed.

@@ -5,6 +5,21 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 
+- [x] **Draco glTF extension works end-to-end** (agent arena, 2026-08-20,
+      SPEC AMENDMENT 67): KHR_draco_mesh_compression was registered and
+      `configureDraco()` pointed at local assets, but `WEB_CSP.connect-src`
+      had no `'self'` — only `https: wss: ws: blob:` — so Babylon's
+      DracoCodec could not XHR the wasm binary from the same origin over
+      http (dev server / plain-HTTP deployments): every Draco-compressed
+      model failed to decode there. Fixed by adding `'self'` to
+      `connect-src` in csp.ts. Also renamed the confusing draco.ts imports
+      (dracoWasmUrl was the BINARY, dracoJsUrl the wasm WRAPPER) and added
+      `scripts/verify-draco.mjs`, a Node-only encode→decode round-trip
+      through the app's exact decoder assets (no browser required) —
+      `node scripts/verify-draco.mjs` / `npm run check:draco`. Verified:
+      tsc clean, both vite builds emit/ inline the three Draco assets,
+      round-trip decodes 4 points / 2 faces / positions [0,1].
+
 - [x] **Studio model info + nostr `content` carries the model name + removable
       studio additions** (agent arena, 2026-08-20, SPEC AMENDMENT 66):
       - The studio upload tab shows an info card for the imported model
