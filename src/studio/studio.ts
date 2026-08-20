@@ -144,6 +144,16 @@ export class Studio {
     // Pointer input already kicks frames while a gizmo is dragged; merely
     // having a selected mesh must not latch the demand loop on forever.
     if (this.paint.isStroking()) return true
+    for (const extra of this.extras) {
+      for (const g of extra.animationGroups) {
+        if (g.isPlaying) return true
+      }
+    }
+    if (this.container) {
+      for (const g of this.container.animationGroups) {
+        if (g.isPlaying) return true
+      }
+    }
     if (this.scene.activeCamera !== this.camera) return false
     return Math.abs(this.camera.inertialAlphaOffset) > 1e-5
       || Math.abs(this.camera.inertialBetaOffset) > 1e-5
@@ -353,6 +363,9 @@ export class Studio {
       if (mesh.material) mesh.material.backFaceCulling = false
     }
     container.addAllToScene()
+    for (const g of container.animationGroups) {
+      if (g.targetedAnimations.length) g.start(true)
+    }
     this.extras.push(container)
     this.markDirty()
     const first = container.meshes.find((m) => m.name !== '__root__' && m.getTotalVertices() > 0) ?? null
@@ -745,6 +758,9 @@ export class Studio {
     this.clearModel()
     const result = await importModelFiles(this.scene, files)
     this.container = result.container
+    for (const g of result.container.animationGroups) {
+      if (g.targetedAnimations.length) g.start(true)
+    }
     const bytes = new Uint8Array(await result.glb.arrayBuffer())
     const report = validateGLB(bytes)
     if (!report.ok) {

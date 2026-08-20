@@ -771,7 +771,13 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
 66. STUDIO SYMBOL LIBRARY (2026-08-20): the symbols tab is a drop-in set of
     low-poly 2D plates and 3D primitives (emotions, reactions, statuses,
     shapes, objects) shipped as self-contained GLBs under
-    `src/studio/library/glb/`. Clicking a cell ADDS the mesh to the studio
-    scene (it does not clear an imported model). Faces are authored CCW /
-    outward so lighting cannot invert. No cameras/textures/skins — posters
+    `src/studio/library/glb/` (traced plates in `library/2d/`). Clicking a
+    cell ADDS the mesh to the studio scene (it does not clear an imported
+    model). Faces are authored CCW / outward so lighting cannot invert. No
+    cameras/textures/skins. Every piece carries a looping TRS clip (pulse /
+    spin / bob / sway) on a child node so studio lookAt cannot overwrite it;
+    2D plates stay flat — never extrude a plate into a 3D counterpart.
+    Vertex colours/normals are quantized (`KHR_mesh_quantization`); Draco is
+    applied only when it actually shrinks the file. Studio starts the clip
+    on place and the demand loop stays awake while it plays. Posters
     auto-fit; the author can still +cam. Guard: `bun scripts/library-unit.mjs`.

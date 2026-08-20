@@ -93,7 +93,8 @@ for (const item of manifest) {
   check(`${label} is a self-contained GLB`, report.ok, report.ok ? `v=${report.vertices}` : report.reason)
   if (report.ok) {
     check(`${label} has mesh + positions`, report.meshes >= 1 && report.vertices >= 3)
-    check(`${label} has no textures / skins / anim`, report.textures === 0 && report.skins === 0 && report.animations === 0)
+    check(`${label} has no textures / skins`, report.textures === 0 && report.skins === 0)
+    check(`${label} has a looping clip`, report.animations >= 1)
   }
 }
 void files3d

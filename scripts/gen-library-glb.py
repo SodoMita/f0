@@ -14,6 +14,11 @@ import os
 import struct
 from dataclasses import dataclass, field
 
+_SCRIPTS = os.path.dirname(os.path.abspath(__file__))
+if _SCRIPTS not in __import__("sys").path:
+    __import__("sys").path.insert(0, _SCRIPTS)
+from libglb import library_anim, write_glb as write_glb  # noqa: E402
+
 OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src", "studio", "library", "glb")
 
 
@@ -559,86 +564,6 @@ def arrow3d() -> Mesh:
 # GLB writer
 # ---------------------------------------------------------------------------
 
-def write_glb(mesh: Mesh, path: str, name: str, color=(0.8, 0.8, 0.8), double_sided=True, prefer="outward") -> None:
-    mesh = mesh.finish(prefer)
-    nvert = len(mesh.v)
-    nidx = len(mesh.i)
-    # pack tightly: positions, normals, colors, indices (aligned)
-    def pad(n: int) -> int:
-        return (4 - (n % 4)) % 4
-
-    pos = b"".join(struct.pack("<fff", *p) for p in mesh.v)
-    nrm = b"".join(struct.pack("<fff", *p) for p in mesh.n)
-    col = b"".join(struct.pack("<fff", *p) for p in mesh.c)
-    idx_fmt = "<" + "H" * nidx
-    indices = struct.pack(idx_fmt, *mesh.i)
-    if nidx % 2:
-        indices += b"\x00\x00"
-
-    blobs = [pos, nrm, col, indices]
-    views = []
-    cursor = 0
-    for b in blobs:
-        views.append((cursor, len(b)))
-        cursor += len(b) + pad(len(b))
-    bin_body = b""
-    for b in blobs:
-        bin_body += b + (b"\x00" * pad(len(b)))
-
-    # min/max for POSITION (required-ish for viewers)
-    xs, ys, zs = zip(*mesh.v)
-    gltf = {
-        "asset": {"version": "2.0", "generator": "FORM/0 library"},
-        "scene": 0,
-        "scenes": [{"nodes": [0], "name": name}],
-        "nodes": [{"mesh": 0, "name": name}],
-        "meshes": [{
-            "name": name,
-            "primitives": [{
-                "attributes": {"POSITION": 0, "NORMAL": 1, "COLOR_0": 2},
-                "indices": 3,
-                "material": 0,
-                "mode": 4,
-            }],
-        }],
-        "materials": [{
-            "name": name,
-            "pbrMetallicRoughness": {
-                "baseColorFactor": [float(color[0]), float(color[1]), float(color[2]), 1.0],
-                "metallicFactor": 0.0,
-                "roughnessFactor": 0.7,
-            },
-            "doubleSided": bool(double_sided),
-        }],
-        "accessors": [
-            {"bufferView": 0, "componentType": 5126, "count": nvert, "type": "VEC3",
-             "min": [min(xs), min(ys), min(zs)], "max": [max(xs), max(ys), max(zs)]},
-            {"bufferView": 1, "componentType": 5126, "count": nvert, "type": "VEC3"},
-            {"bufferView": 2, "componentType": 5126, "count": nvert, "type": "VEC3"},
-            {"bufferView": 3, "componentType": 5123, "count": nidx, "type": "SCALAR"},
-        ],
-        "bufferViews": [
-            {"buffer": 0, "byteOffset": views[0][0], "byteLength": views[0][1], "target": 34962},
-            {"buffer": 0, "byteOffset": views[1][0], "byteLength": views[1][1], "target": 34962},
-            {"buffer": 0, "byteOffset": views[2][0], "byteLength": views[2][1], "target": 34962},
-            {"buffer": 0, "byteOffset": views[3][0], "byteLength": views[3][1], "target": 34963},
-        ],
-        "buffers": [{"byteLength": len(bin_body)}],
-    }
-    json_bytes = json.dumps(gltf, separators=(",", ":")).encode("utf-8")
-    json_bytes += b" " * pad(len(json_bytes))
-    bin_pad = pad(len(bin_body))
-    bin_body += b"\x00" * bin_pad
-
-    total = 12 + 8 + len(json_bytes) + 8 + len(bin_body)
-    header = struct.pack("<4sII", b"glTF", 2, total)
-    jchunk = struct.pack("<I4s", len(json_bytes), b"JSON") + json_bytes
-    bchunk = struct.pack("<I4s", len(bin_body), b"BIN\x00") + bin_body
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "wb") as f:
-        f.write(header + jchunk + bchunk)
-
-
 def winding_ok(mesh: Mesh, prefer: str = "outward") -> bool:
     mesh = Mesh(v=[p[:] for p in mesh.v], n=[n[:] for n in mesh.n], c=[c[:] for c in mesh.c], i=list(mesh.i)).finish(prefer)
     if not mesh.v:
@@ -740,6 +665,14 @@ def build_catalog() -> None:
 
 def write_manifest(path: str) -> None:
     rows = [{"id": name, "group": g, "dim": d} for g, d, name, _c, _m in ITEMS]
+    extras = [
+        {"id": "house", "group": "object", "dim": "2d"},
+        {"id": "lock", "group": "status", "dim": "2d"},
+    ]
+    have = {(r["id"], r["dim"]) for r in rows}
+    for extra in extras:
+        if (extra["id"], extra["dim"]) not in have:
+            rows.append(extra)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(rows, f, indent=2)
         f.write("\n")
@@ -758,7 +691,8 @@ def main() -> None:
         if not winding_ok(mesh, prefer):
             failed.append(name)
         dest = os.path.join(OUT, f"{name}.glb")
-        write_glb(mesh, dest, name, color, double_sided=(dim == "2d"), prefer=prefer)
+        write_glb(mesh, dest, name, color, double_sided=(dim == "2d"), prefer=prefer,
+                  animation=library_anim(name, dim))
         print(f"  {group:6} {dim}  {name:12}  {os.path.getsize(dest):5d} B")
     write_manifest(os.path.join(os.path.dirname(OUT), "manifest.json"))
     if failed:

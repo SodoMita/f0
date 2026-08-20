@@ -5,6 +5,16 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 
+- [x] **Studio library clips + quantized GLBs** (agent arena, 2026-08-20):
+      every 2D plate and 3D primitive now ships a looping TRS animation
+      (pulse / spin / bob / sway / blink) on a *child* node so studio
+      `lookAt` cannot overwrite it. 2D stays flat — never extruded into 3D.
+      Vertex colours are UNSIGNED_BYTE and normals BYTE via
+      `KHR_mesh_quantization`; Draco is applied only when it shrinks the
+      file (`scripts/encode-library.mjs`). Studio starts the clip on place
+      (and on import) and `isAnimating()` keeps the demand loop awake.
+      Guard: `node scripts/library-unit.mjs`. SPEC AMENDMENT 66 updated.
+
 - [x] **Studio symbol library — 2D + 3D GLBs** (agent arena, 2026-08-20,
       SPEC AMENDMENT 66): 54 self-contained low-poly pieces (faces /
       reactions / statuses / primitives / objects) in

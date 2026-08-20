@@ -132,11 +132,6 @@
   {
     "id": "lock",
     "group": "status",
-    "dim": "2d"
-  },
-  {
-    "id": "lock",
-    "group": "status",
     "dim": "3d"
   },
   {
@@ -227,11 +222,6 @@
   {
     "id": "house",
     "group": "object",
-    "dim": "2d"
-  },
-  {
-    "id": "house",
-    "group": "object",
     "dim": "3d"
   },
   {
@@ -278,5 +268,15 @@
     "id": "arrow3d",
     "group": "object",
     "dim": "3d"
+  },
+  {
+    "id": "house",
+    "group": "object",
+    "dim": "2d"
+  },
+  {
+    "id": "lock",
+    "group": "status",
+    "dim": "2d"
   }
 ]

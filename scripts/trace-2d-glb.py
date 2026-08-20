@@ -30,6 +30,7 @@ G = _load_gen()
 Mesh = G.Mesh
 disc = G.disc
 write_glb = G.write_glb
+library_anim = G.library_anim
 
 
 INK = (0.07, 0.07, 0.08)
@@ -230,7 +231,8 @@ def main() -> None:
     for name, color, fn in TRACES:
         mesh = fn()
         dest = os.path.join(OUT, name + ".glb")
-        write_glb(mesh, dest, name, color, double_sided=True, prefer="+z")
+        write_glb(mesh, dest, name, color, double_sided=True, prefer="+z",
+                  animation=library_anim(name, "2d"))
         print(f"  2d  {name:8}  {os.path.getsize(dest):5d} B  tris={len(mesh.i)//3}")
     print(f"wrote {len(TRACES)} traced plates → {OUT}")
 
