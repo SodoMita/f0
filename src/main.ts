@@ -59,7 +59,6 @@ async function boot(): Promise<void> {
     const fatal = $('fatal')
     fatal.hidden = false
     $('fatal-text').textContent = 'WebGL unavailable.'
-    bindCopyButton($('btn-fatal-copy'), () => $('fatal-text').textContent ?? '')
     $('fatal-reload').addEventListener('click', () => location.reload())
     return
   }
@@ -91,8 +90,6 @@ async function boot(): Promise<void> {
     },
   )
 
-  bindCopyButton($('btn-fatal-copy'), () => $('fatal-text').textContent ?? '')
-
   const legend = new Legend()
   const networkPanel = new NetworkPanel(pool, blossoms)
   const errorSheet = new ErrorSheet()
@@ -106,7 +103,6 @@ async function boot(): Promise<void> {
   const studioEl = $('studio')
   const studioFilename = $('studio-filename')
   const studioStatus = $('studio-status')
-  const btnStudioStatusCopy = $('btn-studio-status-copy') as HTMLButtonElement | null
   const btnStudioImport = $('btn-studio-import') as HTMLButtonElement
   const btnStudioPublish = $('btn-studio-publish') as HTMLButtonElement
   const studioText = $('studio-text') as HTMLTextAreaElement
@@ -321,9 +317,7 @@ async function boot(): Promise<void> {
   function setStudioStatus(text: string, cls = ''): void {
     studioStatus.textContent = text
     studioStatus.className = 'studio-status ' + cls
-    if (btnStudioStatusCopy) btnStudioStatusCopy.hidden = cls !== 'err' || !text
   }
-  bindCopyButton(btnStudioStatusCopy, () => studioStatus.textContent ?? '')
 
   // ---------- studio model info (AMENDMENT 66) ----------
   // The upload tab card shows the imported model's name, format, safety-scan
@@ -403,7 +397,8 @@ async function boot(): Promise<void> {
         setStudioStatus(warnCount ? `${warnCount} warning${warnCount === 1 ? '' : 's'} · ${brief}` : brief, warnCount ? 'busy' : 'ok')
       } catch (err) {
         fillModelInfo(null)
-        setStudioStatus(err instanceof Error ? err.message : 'import failed', 'err')
+        setStudioStatus('')
+        errorSheet.show(ERRORS.STUDIO_IMPORT(err instanceof Error ? err.message : 'import failed'))
       }
     }, { once: true })
     fileInput.click()
@@ -452,8 +447,10 @@ async function boot(): Promise<void> {
         if (signal.aborted) return
         if (p.stage === 'blossom') setStudioStatus('upload…', 'busy')
         else if (p.stage === 'relay') setStudioStatus('nostr…', 'busy')
-        else if (p.stage === 'done') setStudioStatus(`done · ${p.ok ?? 0}/${(p.ok ?? 0) + (p.failed ?? 0)}`, p.failed ? 'err' : 'ok')
-        else if (p.stage === 'error') setStudioStatus(p.detail ?? 'failed', 'err')
+        // Partial relay failure is a warning (amber), not an error: the post
+        // still went out and we navigate to it right after.
+        else if (p.stage === 'done') setStudioStatus(`done · ${p.ok ?? 0}/${(p.ok ?? 0) + (p.failed ?? 0)}`, p.failed ? 'busy' : 'ok')
+        else if (p.stage === 'error') errorSheet.show(ERRORS.STUDIO_PUBLISH(p.detail ?? 'publish failed'))
       }
       const result = await publishModel(
         {
@@ -487,7 +484,10 @@ async function boot(): Promise<void> {
       studioReply = null
     } catch (err) {
       if (isAbortError(err)) setStudioStatus('cancelled')
-      else setStudioStatus(err instanceof Error ? err.message : 'publish failed', 'err')
+      else {
+        setStudioStatus('')
+        errorSheet.show(ERRORS.STUDIO_PUBLISH(err instanceof Error ? err.message : 'publish failed'))
+      }
     } finally {
       publishing = false
       publishAbort = null
@@ -514,7 +514,10 @@ async function boot(): Promise<void> {
       updateTextBudget()
       setStudioStatus('additions removed · original bytes')
       studio.kick(500)
-    }).catch((err) => setStudioStatus(err instanceof Error ? err.message : 'reset failed', 'err'))
+    }).catch((err) => {
+      setStudioStatus('')
+      errorSheet.show(ERRORS.STUDIO_IMPORT(err instanceof Error ? err.message : 'reset failed'))
+    })
   })
 
   // ---- Studio card preview (format v4) ----

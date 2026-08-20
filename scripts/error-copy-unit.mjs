@@ -41,8 +41,6 @@ const selectStyles = await page.evaluate(() => {
   const cause = document.getElementById('error-cause')
   const fatalCard = document.querySelector('.fatal-card')
   const fatalText = document.getElementById('fatal-text')
-  const studioStatus = document.getElementById('studio-status')
-  studioStatus.className = 'studio-status err'
   const toast = document.getElementById('toast')
   toast.hidden = false
   const toastText = document.getElementById('toast-text')
@@ -57,8 +55,6 @@ const selectStyles = await page.evaluate(() => {
     causeUserSelect: getComputedStyle(cause).userSelect,
     fatalCardUserSelect: getComputedStyle(fatalCard).userSelect,
     fatalTextUserSelect: getComputedStyle(fatalText).userSelect,
-    studioStatusErrUserSelect: getComputedStyle(studioStatus).userSelect,
-    studioStatusErrPointer: getComputedStyle(studioStatus).pointerEvents,
     toastUserSelect: getComputedStyle(toast).userSelect,
     toastTextUserSelect: getComputedStyle(toastText).userSelect,
     miWarningsUserSelect: getComputedStyle(miWarnings).userSelect,
@@ -72,20 +68,14 @@ check('code is selectable (user-select: text)', selectStyles.codeUserSelect === 
 check('cause is selectable (user-select: text)', selectStyles.causeUserSelect === 'text', selectStyles.causeUserSelect)
 check('fatal-card is selectable (user-select: text)', selectStyles.fatalCardUserSelect === 'text', selectStyles.fatalCardUserSelect)
 check('fatal-text is selectable (user-select: text)', selectStyles.fatalTextUserSelect === 'text', selectStyles.fatalTextUserSelect)
-check('studio-status.err is selectable (user-select: text)', selectStyles.studioStatusErrUserSelect === 'text', selectStyles.studioStatusErrUserSelect)
-check('studio-status.err receives pointer events', selectStyles.studioStatusErrPointer === 'auto', selectStyles.studioStatusErrPointer)
 check('toast is selectable (user-select: text)', selectStyles.toastUserSelect === 'text', selectStyles.toastUserSelect)
 check('toast-text is selectable (user-select: text)', selectStyles.toastTextUserSelect === 'text', selectStyles.toastTextUserSelect)
 check('mi-warnings is selectable (user-select: text)', selectStyles.miWarningsUserSelect === 'text', selectStyles.miWarningsUserSelect)
 
 const extraBtns = await page.evaluate(() => ({
   toastCopy: !!document.getElementById('btn-toast-copy'),
-  studioCopy: !!document.getElementById('btn-studio-status-copy'),
-  fatalCopy: !!document.getElementById('btn-fatal-copy'),
 }))
 check('toast copy button exists', extraBtns.toastCopy)
-check('studio-status copy button exists', extraBtns.studioCopy)
-check('fatal copy button exists', extraBtns.fatalCopy)
 
 
 console.log('\n--- Checking Copy Button DOM & Layout ---')
@@ -270,6 +260,66 @@ const resetOnHide = await page.evaluate(() => {
   return !btn.classList.contains('copied')
 })
 check('copy button reset when sheet hidden', resetOnHide)
+
+console.log('\n--- Studio errors route to the error sheet (single copyable surface) ---')
+
+// Back to a desktop viewport, and make sure no overlay (legend) is up.
+await page.setViewportSize({ width: 1280, height: 800 })
+await page.evaluate(() => window.__form0?.legend?.close()).catch(() => {})
+
+// Open the studio and force a real import failure through the native file
+// chooser — the exact path a player's bad GLB takes.
+await page.evaluate(() => window.__form0.router.go({ name: 'studio' }))
+await page.waitForFunction(() => !document.getElementById('studio').hidden, { timeout: 10000 })
+await page.waitForTimeout(300)
+
+const [chooser] = await Promise.all([
+  page.waitForEvent('filechooser', { timeout: 10000 }),
+  page.click('#btn-studio-import'),
+])
+await chooser.setFiles({
+  name: 'bad.glb',
+  mimeType: 'model/gltf-binary',
+  buffer: Buffer.from('this is definitely not a glb file'),
+})
+
+await page.waitForFunction(() => !document.getElementById('error-sheet').hidden, { timeout: 10000 })
+
+const studioErr = await page.evaluate(() => {
+  const status = document.getElementById('studio-status')
+  const code = document.getElementById('error-code')
+  const cause = document.getElementById('error-cause')
+  const copyBtn = document.getElementById('btn-error-copy')
+  const r = copyBtn.getBoundingClientRect()
+  return {
+    sheetOpen: !document.getElementById('error-sheet').hidden,
+    statusClass: status.className,
+    statusText: status.textContent,
+    code: code.textContent.trim(),
+    cause: cause.textContent.trim(),
+    copyVisible: r.width >= 30 && r.height >= 30,
+  }
+})
+check('studio import failure opens the error sheet', studioErr.sheetOpen)
+check('studio status is not an error surface (no err class)', !studioErr.statusClass.includes('err'), `class="${studioErr.statusClass}"`)
+check('studio status text is cleared', studioErr.statusText === '', `"${studioErr.statusText}"`)
+check('error sheet has a copyable code', studioErr.code.startsWith('E'), studioErr.code)
+check('error sheet cause carries the import reason', studioErr.cause.length > 0, studioErr.cause.slice(0, 80))
+check('error sheet copy button is visible', studioErr.copyVisible)
+
+// Clicking copy on a studio error must copy CODE: CAUSE and change nothing else.
+await page.click('#btn-error-copy')
+await page.waitForTimeout(100)
+const studioCopied = await page.evaluate(() => ({
+  copiedClass: document.getElementById('btn-error-copy').classList.contains('copied'),
+  hash: window.location.hash,
+  mode: window.__form0.__mode(),
+}))
+check('studio error copy button activates .copied', studioCopied.copiedClass)
+check('copying the studio error did not change the route', studioCopied.hash === '#/studio', `hash=${studioCopied.hash}`)
+check('copying the studio error kept the studio as the active view', studioCopied.mode === 'studio', `mode=${studioCopied.mode}`)
+
+await page.evaluate(() => window.__form0.errorSheet.hide())
 
 await browser.close()
 if (errs.length) { console.log('pageerrors:', errs); fails.push('page error') }

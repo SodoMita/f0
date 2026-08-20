@@ -901,29 +901,18 @@ body[data-theme="light"] #btn-error-copy.copied {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.studio-status-wrap {
-  display: flex; align-items: flex-start; gap: 6px;
-  pointer-events: none;
-  max-width: min(62vw, 560px);
-}
 .studio-status { font: 11px/1 ui-monospace, monospace; color: var(--muted); min-width: 96px; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .studio-status.ok { color: var(--success); }
 .studio-status.busy { color: var(--warning); }
-/* Error messages wrap to new lines so they stay inside the studio stage
-   boundary instead of spilling out of the bar on one unbroken line
-   (pre-line keeps any explicit \n breaks in the message, too). */
+/* Genuine studio errors never live here: they surface in the error sheet
+   (CODE + CAUSE + copy button) so there is one copyable error surface. */
 .studio-status.err {
   color: var(--danger);
   white-space: pre-line;
   overflow-wrap: anywhere;
   line-height: 1.45;
   max-width: min(56vw, 520px);
-  user-select: text;
-  -webkit-user-select: text;
-  cursor: text;
-  pointer-events: auto;
 }
-.studio-status-wrap:has(.studio-status.err) { pointer-events: auto; }
 .copy-err .i-copied { display: none; }
 .copy-err.copied .i-copy { display: none; }
 .copy-err.copied .i-copied { display: block; }

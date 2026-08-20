@@ -89,9 +89,20 @@ export const ERRORS = {
     action: 'open network panel',
     onAction: openNetwork,
   }),
-  IMPORT_INVALID: (): SheetError => ({
+  /** Studio import failed — the cause is the engine's own message (invalid
+   *  GLB, oversize, missing/remote sidecar, …), so it is dynamic rather than a
+   *  fixed catalogue string. Dismiss-only: the player stays in the studio to
+   *  pick another file. */
+  STUDIO_IMPORT: (cause: string): SheetError => ({
     code: 'E301',
-    cause: 'The selected file is not a valid GLB within limits (20 MiB, magic bytes, sane JSON chunk).',
+    cause: cause || 'The selected file could not be imported.',
+    action: 'dismiss',
+    onAction: () => { /* dismiss only */ },
+  }),
+  /** Studio publish failed (every Blossom upload failed, model too big, …). */
+  STUDIO_PUBLISH: (cause: string): SheetError => ({
+    code: 'E302',
+    cause: cause || 'The post could not be published.',
     action: 'dismiss',
     onAction: () => { /* dismiss only */ },
   }),
