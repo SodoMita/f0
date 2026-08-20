@@ -5,13 +5,23 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 
+- [x] **HRTF positional post audio** (agent arena, 2026-08-20,
+      `8b5984a`): verified clips are playable directly from Babylon play/pause
+      meshes on both gallery cards and reply-tree nodes. One shared no-autoplay
+      media/object-URL player creates a dedicated MediaElementSource → HRTF
+      Panner → 0.72×0.78 clip gain → SFX/master route only on a user gesture;
+      source/listener poses follow card/node placement and each active flat
+      Babylon camera. Loading/playing/stopped/error faces, focus/output/volume
+      settings, complete node/media/URL cleanup, board/tree integration guards,
+      and visual captures are covered.
+
 - [x] **Embedded audio playback** (agent arena, 2026-08-20, SPEC AMENDMENT
       66): verified extraction of optional KHR_audio/MSFT_audio_emitter
       WAV/MP3 bufferViews with MIME/file-signature/range checks and a 256 KiB
       hard clip cap; identity/WeakMap caching; Nostr audio tag treated as a
-      hint until bytes verify. Verified clips show a vector speaker badge on
-      cards and a no-autoplay viewer control (button/S, loop, volume 0.78,
-      pending/error state, object-URL cleanup on navigation). Pass-through
+      hint until bytes verify. Verified clips first shipped with card audio
+      chrome and a no-autoplay viewer control (button/S, loop, glTF gain 0.72,
+      UI base volume 0.78, pending/error state, object-URL cleanup). Pass-through
       publish preserves the hint only for a final GLB that still verifies.
       Guards: audio-unit, audio-playback, audio-integration (real rig GLB),
       build, smoke and orient.
@@ -530,10 +540,6 @@ move it to **Done** with a commit reference. One agent per area.
   onto main instead of rewriting again. Branch protection now blocks force
   pushes to `main`.
 ## In progress
-
-- [ ] **HRTF positional post audio** — claimed by agent arena, 2026-08-20.
-      Route verified media elements through per-post WebAudio PannerNodes and
-      add in-canvas sound buttons to audio posts on the gallery and thread map.
 
 - [ ] **Paint editor (hand-writing ink)** — claimed by agent arena, 2026-08-19.
       Rebased onto main (PR #12: preview width / viewer hand-off / zoom
