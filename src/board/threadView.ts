@@ -631,10 +631,10 @@ export class ThreadView {
       n.live = null
       if (on) {
         this.setNodeOpacityNow(n, 0)
-        n.spinner.setEnabled(true)
-        // Do NOT request every node here — that filled the 6-slot budget
-        // with offscreen models and visible ones fell back to posters.
-        // sync3D() below loads only what's near the viewport.
+        n.spinner.setEnabled(false)
+        // Viewport-gated: sync3D() below loads near-camera nodes and
+        // request3D turns their spinner on. Enabling every spinner here
+        // kept the thread drawing forever (offscreen rings never stop).
       } else {
         this.setNodeOpacityNow(n, 0.16)
         this.drivePoster2D(n)
@@ -649,6 +649,7 @@ export class ThreadView {
   private drivePoster2D(n: TNode): void {
     if (!this.assets) return
     const { meta, mesh, spinner } = n
+    spinner.setEnabled(true)
     const gen = this.generation
     void this.assets.getPoster(meta).then((tex) => {
       // the map may have been cleared/reopened while the poster rendered
@@ -664,7 +665,7 @@ export class ThreadView {
 
   /** 3D mode: load this node's real model into the thread scene. */
   private request3D(n: TNode): void {
-    if (!this.assets) return
+    if (!this.threeD || !this.assets) return
     const meta = n.meta
     if (meta.hashFailed || this.assets.isHashFailed(meta.eventId)) return
     n.spinner.setEnabled(true)
@@ -706,7 +707,11 @@ export class ThreadView {
    * autoplay / ▶ gating to the direct models.
    */
   private sync3D(): void {
-    if (!this.assets) return
+    // MUST no-op in 2D. onBeforeRender used to call this every frame even
+    // with the cube toggle off, so opening a thread as posters also parsed
+    // every in-view GLB into the map (main-thread freeze) and left overflow
+    // spinners running forever (isAnimating latched → 30 fps forever).
+    if (!this.threeD || !this.assets) return
     const idle = this.pointers.size === 0
     for (const n of this.nodes.values()) {
       const id = n.meta.eventId
@@ -777,8 +782,10 @@ export class ThreadView {
         }
         this.syncPreviews()
         this.previewPool.tick(this.visibleNodeIds())
-        this.sync3D()
-        this.pool3d.tick(this.visibleNodeIds())
+        if (this.threeD) {
+          this.sync3D()
+          this.pool3d.tick(this.visibleNodeIds())
+        }
       })
       this.spinObserver = true
     }
@@ -832,6 +839,7 @@ export class ThreadView {
       spinner.position.set(p.x, p.y, -0.05)
       spinner.isPickable = false
       spinner.renderingGroupId = 1
+      spinner.setEnabled(false)
 
       // reply pill, bottom-right, floating half out of the card like the
       // board badge; pickable and routed to the studio compose flow
@@ -856,6 +864,7 @@ export class ThreadView {
       setCardWhite(playMat)
       setCardFlip(playMat, 'dyn')
       play.isPickable = true
+      play.renderingGroupId = 1
       play.metadata = { tplay: meta }
 
       setCardTint(mat, meta.tint || theme.panel)

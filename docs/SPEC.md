@@ -1143,4 +1143,9 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
       direct-3D cards never advanced (demand-driven RAF is not
       `runRenderLoop`). The viewer's TrackAnimator is unchanged (it pauses
       the group and drives `goToFrame` itself).
+    - Thread `sync3D()` / `request3D()` MUST no-op when the 3D toggle is off.
+      `onBeforeRender` used to call `sync3D()` every frame even in 2D, so
+      opening a thread as posters also parsed every in-view GLB into the map
+      (main-thread freeze) and left overflow spinners running (isAnimating
+      latched → 30 fps forever).
     Guard: `bun scripts/direct3d-unit.mjs`.
