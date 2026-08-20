@@ -15,7 +15,8 @@
 //      the camera frames ONLY the red cube: poster must be red, not a
 //      two-cube auto-fit.
 //   b  static, no camera, two cubes — auto-fit poster must show both.
-//   c  animated, no camera — auto-fit poster, live feed/tree preview.
+//   c  animated, no camera + embedded WAV — auto-fit poster, live
+//      feed/tree preview, verified card badge and viewer sound control.
 //   d  TWO cameras (cam0=red view, cam1=green view) + animation, event
 //      carries preview-camera=1 — poster uses cam0 (red), live preview
 //      must use cam1 (green).
@@ -128,6 +129,27 @@ const norm = (v) => { const l = Math.hypot(...v) || 1; return v.map((c) => c / l
 const len = (v) => Math.hypot(...v)
 const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
 
+/** Short mono PCM fixture; enough duration for play/pause checks. */
+function silentWav() {
+  const sampleRate = 8000
+  const samples = 2000
+  const out = Buffer.alloc(44 + samples * 2)
+  out.write('RIFF', 0)
+  out.writeUInt32LE(out.length - 8, 4)
+  out.write('WAVE', 8)
+  out.write('fmt ', 12)
+  out.writeUInt32LE(16, 16)
+  out.writeUInt16LE(1, 20)
+  out.writeUInt16LE(1, 22)
+  out.writeUInt32LE(sampleRate, 24)
+  out.writeUInt32LE(sampleRate * 2, 28)
+  out.writeUInt16LE(2, 32)
+  out.writeUInt16LE(16, 34)
+  out.write('data', 36)
+  out.writeUInt32LE(samples * 2, 40)
+  return out
+}
+
 /** Build one of the rig flavours. */
 function makeModel(flavour) {
   const cube = cubeData()
@@ -230,15 +252,29 @@ function makeModel(flavour) {
     nodes.push({ camera: 1, name: 'cam1', translation: [gx - 1.5, 0.6, 2.5], rotation: q1 })
   }
 
+  let audioExtension
+  if (flavour === 'c') {
+    const audioView = addView(silentWav(), 'audio')
+    audioExtension = {
+      clips: [{ name: 'rig-silence', bufferView: audioView, mimeType: 'audio/wav' }],
+      emitters: [{ name: 'rig-emitter', clips: [{ clip: 0, weight: 1 }], volume: 0.72, loop: true }],
+    }
+  }
+
   const json = {
     asset: { version: '2.0', generator: 'offline-rig' },
     scene: 0,
-    scenes: [{ nodes: nodes.map((_, i) => i) }],
+    scenes: [{
+      nodes: nodes.map((_, i) => i),
+      extensions: audioExtension ? { MSFT_audio_emitter: { emitters: [0] } } : undefined,
+    }],
     nodes, meshes, materials, accessors,
     bufferViews: views,
     buffers: [{ byteLength: align4(binParts.reduce((s, b) => s + b.length, 0)) }],
     cameras: cameras.length ? cameras : undefined,
     animations: anim ? [anim] : undefined,
+    extensionsUsed: audioExtension ? ['MSFT_audio_emitter'] : undefined,
+    extensions: audioExtension ? { MSFT_audio_emitter: audioExtension } : undefined,
   }
   const bin = Buffer.concat(binParts)
   json.bin = bin
@@ -296,6 +332,7 @@ for (let i = 0; i < N_ROOTS; i++) {
   if (['a', 'e'].includes(flavour)) tags.push(['cameras', '1'])
   if (flavour === 'd') tags.push(['cameras', '2'], ['preview-camera', '1'])
   if (['a', 'c', 'd', 'x'].includes(flavour)) tags.push(['anim', '1'])
+  if (flavour === 'c') tags.push(['audio', '1'])
   if (flavour === 'f') tags.push(['cameras', '1'])
   events.push(makeEvent(1063, tags, i))
 }
@@ -317,6 +354,7 @@ for (const [i, flavour] of ['c', 'b', 'a', 'x'].entries()) {
     ['e', i === 0 ? root1.id : replies[0].id, '', 'reply'],
   ]
   if (['a', 'c', 'x'].includes(flavour)) tags.push(['anim', '1'])
+  if (flavour === 'c') tags.push(['audio', '1'])
   if (flavour === 'a') tags.push(['cameras', '1'])
   const ev = makeEvent(1063, tags)
   events.push(ev)

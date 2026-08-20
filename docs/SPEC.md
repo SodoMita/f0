@@ -767,3 +767,25 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     (`snapshot()`). Opaque materials write alpha=1; the card shader treats
     non-black RGB as coverage. IDB keeps anim/footprint flags only (p7).
     Guard: offline-verify + verify-publish sample a one-shot snapshot.
+
+66. EMBEDDED AUDIO PLAYBACK; 256 KiB HARD CLIP CAP (2026-08-20):
+    Downloaded GLBs are inspected for `extensions.KHR_audio.audio[0]` or
+    `extensions.MSFT_audio_emitter.clips[0]`. The referenced bufferView must
+    address buffer 0 inside the GLB BIN chunk; MIME is limited to audio/wav
+    and audio/mpeg; RIFF/WAVE or MP3 signatures must match; byteLength must
+    be <=256 KiB (overrides the earlier 8 MiB audio limit). Audio metadata is
+    OPTIONAL: bad/unsupported/oversized clips are ignored and the model still
+    renders. Extraction is identity-cached for shared Uint8Array model bytes
+    and by WeakMap<Blob, Promise> for Blob callers. The kind-1063 `audio` tag
+    remains a hint only; card speaker chrome appears only after actual bytes
+    verify. The viewer feeds the extracted Blob to one HTMLAudioElement via
+    an object URL: autoplay=false, loop=true, element volume=0.78, button/S
+    gesture to start, pending spinner, play rejection handled, and pause/src
+    clear/object-URL revoke on model change or view exit. No AudioBuffer,
+    WebAudio panner, microphone, stream or positional playback is involved.
+    Contrary to the future note in item 26, do NOT register Babylon's
+    MSFT_audio_emitter loader: that would construct a second scene Sound,
+    decode twice and bypass this explicit one-player/no-autoplay lifecycle.
+    Pass-through studio publish re-emits the `audio` hint only when its final
+    GLB still contains a verified clip. Guards: audio-unit.mjs,
+    audio-playback.mjs and audio-integration.mjs (offline-rig flavour c).

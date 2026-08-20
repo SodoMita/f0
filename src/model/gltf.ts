@@ -48,3 +48,8 @@ import '@babylonjs/loaders/glTF/2.0/Extensions/KHR_animation_pointer'
 import '@babylonjs/loaders/glTF/2.0/Extensions/MSFT_lod'
 import '@babylonjs/loaders/glTF/2.0/Extensions/MSFT_minecraftMesh'
 import '@babylonjs/loaders/glTF/2.0/Extensions/MSFT_sRGBFactors'
+
+// Deliberately NOT MSFT_audio_emitter: embedded.ts verifies/caps the payload
+// and player.ts feeds it to one non-positional HTMLAudioElement. Registering
+// Babylon's extension would also construct scene Sound objects, decode the
+// same bytes again and bypass the no-autoplay/one-player lifecycle.

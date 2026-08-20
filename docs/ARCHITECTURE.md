@@ -28,6 +28,11 @@ src/
     storage.ts       IndexedDB (+in-memory fallback): model/poster cache, validated
                      settings/network config, AES-GCM owned-post envelopes + keyring
     ownedSecrets.ts  AES-256-GCM envelope codec (random IV, event-id AAD)
+  audio/
+    embedded.ts      bounded GLB KHR_audio/MSFT_audio_emitter WAV/MP3 extractor
+                     (signature + bufferView verification, 256 KiB, WeakMap cache)
+    player.ts        one no-autoplay HTMLAudioElement/object-URL viewer player
+    mixer.ts         settings/device mixer (recording and future generated audio)
   model/
     importSidecar.ts bounded/local-only GLB + glTF sidecar + OBJ import/repack
     draco.ts         local Draco decoders (data: URIs), numWorkers:0
@@ -72,6 +77,8 @@ relays ──(kind 1063 + 5)──▶ RelayPool ─▶ parseModelEvent ─▶ Th
                      ├─ AssetCache.getPoster ─▶ PosterRenderer ─▶ transparent RTT (no flip)
                      └─ PreviewPool.request ─▶ RTT (no flip) ─────▶ card shader
    tap card ─▶ #/viewer/:id ─▶ Viewer.load ─▶ authored cameras + orbit
+                    model bytes ─▶ embedded-audio verify ─▶ speaker badge
+                                                       └─▶ HTMLAudioElement (S/button; never autoplay)
    tap badge ─▶ #/thread/:id ─▶ ThreadView.open ─▶ tidy-tree 2D map
 ```
 

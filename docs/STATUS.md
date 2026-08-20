@@ -5,6 +5,17 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 
+- [x] **Embedded audio playback** (agent arena, 2026-08-20, SPEC AMENDMENT
+      66): verified extraction of optional KHR_audio/MSFT_audio_emitter
+      WAV/MP3 bufferViews with MIME/file-signature/range checks and a 256 KiB
+      hard clip cap; identity/WeakMap caching; Nostr audio tag treated as a
+      hint until bytes verify. Verified clips show a vector speaker badge on
+      cards and a no-autoplay viewer control (button/S, loop, volume 0.78,
+      pending/error state, object-URL cleanup on navigation). Pass-through
+      publish preserves the hint only for a final GLB that still verifies.
+      Guards: audio-unit, audio-playback, audio-integration (real rig GLB),
+      build, smoke and orient.
+
 - [x] **Posters render to a transparent RTT, never a PNG** (agent arena, 2026-08-19,
       SPEC AMENDMENT 65): each post gets its own transparent RenderTargetTexture
       (detached after capture). No PNG, no pixel cache, no blank-check retry —
@@ -519,11 +530,6 @@ move it to **Done** with a commit reference. One agent per area.
   onto main instead of rewriting again. Branch protection now blocks force
   pushes to `main`.
 ## In progress
-
-- [ ] **Embedded audio playback** — claimed by agent arena, 2026-08-20.
-      Extract verified WAV/MP3 payloads from optional KHR_audio /
-      MSFT_audio_emitter GLB extensions (256 KiB cap), expose a no-autoplay
-      viewer control, and mark audio-bearing cards after byte verification.
 
 - [ ] **Paint editor (hand-writing ink)** — claimed by agent arena, 2026-08-19.
       Rebased onto main (PR #12: preview width / viewer hand-off / zoom

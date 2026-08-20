@@ -22,7 +22,9 @@
     "check:paint": "bun scripts/paint-unit.mjs",
     "check:publish": "node --experimental-strip-types scripts/publish-unit.mjs",
     "check:hash": "bun scripts/hash-unit.mjs",
-    "check:audio": "bun scripts/audio-unit.mjs"
+    "check:audio": "bun scripts/audio-unit.mjs",
+    "check:audio-browser": "node scripts/audio-playback.mjs",
+    "check:audio-integration": "node scripts/audio-integration.mjs"
   },
   "dependencies": {
     "@babylonjs/core": "8.10.1",

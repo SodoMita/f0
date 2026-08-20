@@ -26,6 +26,7 @@ import { applySettings } from './settings/apply'
 import { graphics } from './render/graphics'
 import { mixer } from './audio/mixer'
 import { EmbeddedAudioPlayer, type AudioPlaybackState } from './audio/player'
+import { extractEmbeddedAudio } from './audio/embedded'
 import { Legend } from './hud/legend'
 import { NetworkPanel } from './hud/networkPanel'
 import { ErrorSheet, ERRORS } from './hud/errorSheet'
@@ -395,6 +396,9 @@ async function boot(): Promise<void> {
     try {
       setStudioStatus('export…', 'busy')
       const content = await studio.getContentForPublish()
+      // Preserve the protocol hint for pass-through GLBs that already carry a
+      // valid clip. Consumers still verify the extension + bytes themselves.
+      const embeddedAudio = await extractEmbeddedAudio(content.blob)
       if (signal.aborted) throw Object.assign(new Error('upload aborted'), { name: 'AbortError' })
       // Format v4: the studio generates NO poster at all — every client
       // renders cards locally from the model at the event's `dim`. The event
@@ -415,6 +419,7 @@ async function boot(): Promise<void> {
           tint: studio.tintColor,
           filename: content.filename,
           sourceFormat: content.sourceFormat,
+          hasAudio: !!embeddedAudio,
           role: studioReply ? 'reply' : 'root',
           rootId: studioReply?.rootId,
           parentId: studioReply?.parentId,
