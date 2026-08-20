@@ -24,7 +24,8 @@
     "check:hash": "bun scripts/hash-unit.mjs",
     "check:studio-error": "node scripts/studio-error-wrap.mjs",
     "check:overflow": "node scripts/overflow-scan.mjs",
-    "check:library": "node scripts/library-unit.mjs"
+    "check:library": "node scripts/library-unit.mjs",
+    "check:symbols": "npm run build:standalone && node scripts/repro-symbol.mjs"
   },
   "dependencies": {
     "@babylonjs/core": "8.10.1",
