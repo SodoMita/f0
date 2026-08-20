@@ -53,6 +53,8 @@ export class PaintSession {
   private pointerId = -1
   private selectedId = -1
   private canvas: HTMLCanvasElement | null = null
+  /** Stamp count at the last GPU upload — drives the incremental append path. */
+  private lastFlushedStampCount = 0
   private readonly boundDown: (e: PointerEvent) => void
   private readonly boundMove: (e: PointerEvent) => void
   private readonly boundUp: (e: PointerEvent) => void
@@ -67,7 +69,23 @@ export class PaintSession {
     this.boundDown = (e) => this.onDown(e)
     this.boundMove = (e) => this.onMove(e)
     this.boundUp = (e) => this.onUp(e)
-    scene.onBeforeRenderObservable.add(() => this.instances.flush(this.store))
+    // During a stroke, append only the new stamps since last flush (O(Δ) per
+    // frame instead of O(N)).  Structural changes (erase/undo/redo/clear) go
+    // through `requestFullRebuild()` which sets `dirty=true` and resets the
+    // append cursor so the next render does a full rebuild.
+    scene.onBeforeRenderObservable.add(() => {
+      if (this.instances.isDirty) {
+        // Full rebuild requested (structural change): flush everything, then
+        // set flushed count so subsequent appendNew sees no new stamps.
+        this.instances.flush(this.store)
+        this.lastFlushedStampCount = this.store.count
+        return
+      }
+      if (this.store.count > this.lastFlushedStampCount) {
+        this.instances.appendNew(this.store, this.lastFlushedStampCount)
+        this.lastFlushedStampCount = this.store.count
+      }
+    })
   }
 
   get count(): number { return this.store.count }
