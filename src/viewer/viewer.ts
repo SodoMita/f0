@@ -6,12 +6,13 @@ import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight'
 import { DirectionalLight } from '@babylonjs/core/Lights/directionalLight'
 import { LoadAssetContainerAsync } from '@babylonjs/core/Loading/sceneLoader'
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder'
-import type { Mesh } from '@babylonjs/core/Meshes/mesh'
+import { Mesh } from '@babylonjs/core/Meshes/mesh'
 import { DynamicTexture } from '@babylonjs/core/Materials/Textures/dynamicTexture'
 import { Vector3 } from '@babylonjs/core/Maths/math.vector'
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color'
 import type { AssetContainer } from '@babylonjs/core/assetContainer'
 import type { AnimationGroup } from '@babylonjs/core/Animations/animationGroup'
+import type { HighlightLayer } from '@babylonjs/core/Layers/highlightLayer'
 import '../model/gltf'
 import type { FormEngine } from '../core/engine'
 import type { ThreadMeta } from '../protocol/thread-index'
@@ -53,6 +54,11 @@ export class Viewer {
   private camHash = ''
   private camPrefs = { fov: 46, near: 0.01, far: 2000, inertia: 0.7, invertY: false }
   private contactStrength = 0.5
+  // Model outline (settings: Post-processing -> Model outline). The layer is
+  // created on demand so the setting costs nothing while it is off.
+  private hl: HighlightLayer | null = null
+  private hlOn = false
+  private hlColor = '#FF5C35'
 
   constructor(engine: FormEngine) {
     this.form = engine
@@ -154,6 +160,41 @@ export class Viewer {
     this.form.kick()
   }
 
+  /** The viewer's own helper meshes — graphics excludes these from glow. */
+  get overlayMeshes(): Mesh[] { return [this.backdrop, this.glow] }
+
+  /** Settings → Post-processing: rim outline around the loaded model. */
+  async setHighlight(on: boolean, colorHex: string): Promise<void> {
+    this.hlOn = on
+    if (/^#[0-9a-f]{6}$/i.test(colorHex)) this.hlColor = colorHex
+    if (on && !this.hl) {
+      try {
+        const [{ HighlightLayer }] = await Promise.all([
+          import('@babylonjs/core/Layers/highlightLayer'),
+          import('@babylonjs/core/Layers/effectLayerSceneComponent'),
+        ])
+        if (this.scene.isDisposed) return
+        this.hl ??= new HighlightLayer('viewer-hl', this.scene)
+      } catch {
+        return // no layer, no outline — the setting already round-trips
+      }
+    }
+    this.syncHighlight()
+    this.form.kick()
+  }
+
+  /** Rebuild the outline set from the CURRENT container + preference. */
+  private syncHighlight(): void {
+    const hl = this.hl
+    if (!hl) return
+    hl.removeAllMeshes()
+    if (!this.hlOn || !this.container) return
+    const color = Color3.FromHexString(this.hlColor)
+    for (const m of this.container.meshes) {
+      if (m instanceof Mesh && m.isEnabled() && m.getTotalVertices() > 0) hl.addMesh(m, color)
+    }
+  }
+
   setBackground(hex: string): void {
     this.form.kick()
     this.background = hex
@@ -245,6 +286,7 @@ export class Viewer {
     graphics.trackContainer(container)
     graphics.applyToContainer(container)
     graphics.setShadowCasters(this.scene, container.meshes.filter((m) => m.getTotalVertices() > 0))
+    this.syncHighlight()
     this.imported = container.cameras.slice()
     this.anims = container.animationGroups
 
@@ -379,6 +421,7 @@ export class Viewer {
     for (const mesh of [...this.scene.meshes]) {
       if (mesh !== this.backdrop && mesh !== this.glow) mesh.dispose()
     }
+    this.syncHighlight()
     for (const tn of [...this.scene.transformNodes]) tn.dispose()
     for (const cam of [...this.scene.cameras]) if (cam !== this.orbit) cam.dispose()
     this.scene.activeCamera = this.orbit

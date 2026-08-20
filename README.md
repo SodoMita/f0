@@ -41,7 +41,8 @@ availability copy.
 
 - **Display & resolution** — auto / scale factor (with power-of-two snapping) /
   exact pixel size with manual numeric entry, aspect-locked height, fullscreen,
-  brightness, contrast, tone mapping (Standard/ACES) and a calibration pattern.
+  brightness, contrast, tone mapping (Standard/ACES/Khronos PBR Neutral),
+  dithering, GPU power preference, and a calibration pattern.
 - **Framerate & sync** — uncapped or a numeric cap, adaptive resolution,
   "stop drawing when idle".
 - **Anti-aliasing & upscaling** — MSAA 2/4/8, FXAA, temporal AA with a sample
@@ -50,10 +51,13 @@ availability copy.
 - **Textures & materials** — PBR on/off (unlit), specular, reflections,
   anisotropic filtering, mipmaps, card/preview resolution, and a load-time
   texture guard.
-- **Lighting & shadows** — off / contact / dynamic self-shadowing with map
-  resolution and softness, SSAO or SSAO2 with strength and samples,
-  screen-space reflections, light-rig intensity.
-- **Post-processing** — bloom (strength, kernel quality, threshold), vignette,
+- **Lighting & shadows** — off / contact / dynamic / cascaded shadow maps with
+  resolution, softness, filtering (BlurESM/ESM/PCF/PCSS) and bias knobs, SSAO
+  or SSAO2 with strength and samples, screen-space reflections, light-rig
+  intensity, fog (linear/exponential with colour).
+- **Post-processing** — bloom (strength, kernel quality, threshold), depth of
+  field (aperture, focus distance, blur quality), chromatic aberration,
+  emissive glow, motion blur, surface curvature view, model outline, vignette,
   film grain.
 - **Camera** — FOV, near/far clip, inertia, invert Y.
 - **Memory & cache** — model RAM budget, resident card textures, live preview
@@ -62,7 +66,9 @@ availability copy.
   Voice/UI mixers, mono/stereo/HRTF/surround, play-when-unfocused.
 - **Interface** — background, scroll inertia, reduce motion, performance overlay.
 - **Presets** Low / Medium / High / Ultra, switching to Custom on any edit,
-  plus search and per-row "why is this unavailable" copy.
+  plus search and per-row "why is this unavailable" copy. Low is truly
+  minimal: no post-processing pipeline at all (no AA, no upscaler, no
+  bloom/grain) — just a low render scale.
 
 **Honest about the platform.** DLSS, FSR, XeSS, frame generation, hardware ray
 tracing, an HDR swapchain, a V-Sync toggle and VRAM reservation do not exist in

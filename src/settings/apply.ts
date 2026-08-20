@@ -61,6 +61,11 @@ export function applySettings(w: Wiring, v: SettingsValues, changed: string[] | 
   // --------------------------------------------- graphics pipelines
   graphics.apply(v)
 
+  // the model outline is viewer-side (it owns the HighlightLayer)
+  if (touched('highlight', 'highlightColor')) {
+    void w.viewer.setHighlight(!!v.highlight, String(v.highlightColor ?? '#FF5C35'))
+  }
+
   // ---------------------------------------------------------- limits
   if (touched('textureQuality')) {
     const cap = Number(v.textureQuality ?? 0)

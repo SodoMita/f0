@@ -42,10 +42,15 @@ async function boot(): Promise<void> {
   enforceOffline()
   configureDraco()
 
+  // Settings BEFORE the engine: the GPU power preference is a context-creation
+  // option, so boot is the only place it can take effect (settings: deferred).
+  const settings = new SettingsStore()
+  await settings.load()
+
   const canvas = $('engine') as HTMLCanvasElement
   let engine: FormEngine
   try {
-    engine = FormEngine.create(canvas)
+    engine = FormEngine.create(canvas, { powerPreference: settings.get('powerPreference') as 'default' | 'high-performance' | 'low-power' })
   } catch {
     const fatal = $('fatal')
     fatal.hidden = false
@@ -62,8 +67,6 @@ async function boot(): Promise<void> {
   const cfg = await loadNetworkConfig()
   if (cfg.relays?.length) pool.setRelays(cfg.relays)
   if (cfg.blossoms?.length) blossoms.setServers(cfg.blossoms)
-  const settings = new SettingsStore()
-  await settings.load()
 
   const board = new Board(engine, {
     onOpenModel: (meta) => router.go({ name: 'viewer', id: meta.eventId }),
@@ -853,7 +856,7 @@ async function boot(): Promise<void> {
   graphics.onError = () => settingsPanel?.refresh()
   graphics.register(board.scene, 'flat')
   graphics.register(threadView.scene, 'flat')
-  graphics.register(viewer.scene, 'viewer', () => viewer.scene.activeCamera)
+  graphics.register(viewer.scene, 'viewer', () => viewer.scene.activeCamera, { excludeFromGlow: () => viewer.overlayMeshes })
   graphics.register(studio.scene, 'studio', () => studio.scene.activeCamera)
   for (const offscreen of assets.offscreenScenes()) graphics.register(offscreen, 'offscreen')
   graphics.register(board.previewScene, 'offscreen')
