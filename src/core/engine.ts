@@ -137,7 +137,12 @@ export class FormEngine {
       canvas, true,
       {
         antialias: true,
-        stencil: false,
+        // Required by Babylon's HighlightLayer (the standard selection
+        // outline): it writes into the stencil buffer to mark which
+        // fragments to glow. The studio uses it to outline the selected
+        // symbol / stamp / imported mesh. The cost is a small per-pixel
+        // buffer, nothing on the pipeline unless something opts into it.
+        stencil: true,
         depth: true,
         alpha: false,
         premultipliedAlpha: false,

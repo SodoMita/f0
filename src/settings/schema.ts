@@ -420,8 +420,16 @@ export const SETTINGS: SettingDef[] = [
     hint: 'Cards and thread nodes start animating when they come into view. Off = everything opens paused; the ▶ button on a card is the only way to start. Sound always needs that button tap (browsers block audio without a gesture).',
   },
   { id: 'reduceMotion', label: 'Reduce motion', group: 'interface', kind: 'toggle', default: false },
-  { id: 'showFps', label: 'Show performance overlay', group: 'interface', kind: 'toggle', default: false },
-]
+{ id: 'showFps', label: 'Show performance overlay', group: 'interface', kind: 'toggle', default: false },
+
+  // --- Selection highlight in the studio (Babylon HighlightLayer under the
+  // hood; color + thickness both configurable, persisted via the normal
+  // settings pipeline so a quality preset can pick its own look).
+  { id: 'selectionHighlight', label: 'Selection outline', group: 'interface', kind: 'toggle', default: true },
+  { id: 'selectionHighlightColor', label: 'Outline colour', group: 'interface', kind: 'color', default: '#FFFFFF', showIf: (v) => !!v.selectionHighlight },
+  { id: 'selectionHighlightThickness', label: 'Outline thickness', group: 'interface', kind: 'slider', default: 2, min: 1, max: 8, step: 1, showIf: (v) => !!v.selectionHighlight,
+    hint: '1 = hairline glow, 8 = thick rim. Higher values blur further past the mesh silhouette.' },
+] 
 
 export const BY_ID: Record<string, SettingDef> = Object.fromEntries(SETTINGS.map((s) => [s.id, s]))
 

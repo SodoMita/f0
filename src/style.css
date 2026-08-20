@@ -70,7 +70,9 @@ body[data-theme="light"] .symbol-grid button,
 body[data-theme="light"] .num-grid input,
 body[data-theme="light"] .text-controls input[type=number],
 body[data-theme="light"] .text-controls input[type=text] { background: rgba(0,0,0,0.04); border-color: rgba(0,0,0,0.14); color: var(--ink); }
-body[data-theme="light"] #studio-color { border-color: rgba(0,0,0,0.14); }
+body[data-theme="light"] #studio-color,
+body[data-theme="light"] #symbol-color,
+body[data-theme="light"] #paint-color { border-color: rgba(0,0,0,0.14); }
 body[data-theme="light"] .settings-group { border-color: rgba(0,0,0,0.08); }
 body[data-theme="light"] .setting-control select,
 body[data-theme="light"] .setting-control .num { background: rgba(0,0,0,0.05); border-color: rgba(0,0,0,0.16); }
@@ -1156,7 +1158,8 @@ body[data-theme="light"] .mi-meter { background: rgba(0, 0, 0, 0.10); }
 .field { display: flex; align-items: center; gap: 8px; }
 .field input { flex: 1; background: #0b0b0c; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); padding: 9px 10px; font: 12px ui-monospace, monospace; }
 .field input:focus { outline: none; border-color: var(--accent); }
-#studio-color { width: 40px; height: 32px; padding: 0; border: 1px solid var(--line); border-radius: 8px; background: transparent; }
+#studio-color,
+#symbol-color { width: 40px; height: 32px; padding: 0; border: 1px solid var(--line); border-radius: 8px; background: transparent; }
 .hint { margin: 0; font: 11px/1.5 ui-monospace, monospace; color: var(--muted); }
 .symbol-grid { display: flex; flex-direction: column; gap: 8px; }
 .symbol-filters { display: flex; flex-wrap: wrap; gap: 4px; }

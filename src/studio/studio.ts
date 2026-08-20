@@ -51,6 +51,10 @@ import type { Material } from '@babylonjs/core/Materials/material'
 import { PointerEventTypes } from '@babylonjs/core/Events/pointerEvents'
 import { FreeCamera } from '@babylonjs/core/Cameras/freeCamera'
 import { Vector3 as V3 } from '@babylonjs/core/Maths/math.vector'
+import { HighlightLayer } from '@babylonjs/core/Layers/highlightLayer'
+// Side-effect import: registers the EffectLayerSceneComponent that every
+// HighlightLayer in the scene needs (project convention — same as `pick`).
+import '@babylonjs/core/Layers/effectLayerSceneComponent'
 
 export interface ImportedModel {
   file: File
@@ -79,12 +83,20 @@ export class Studio {
   private textColor: string = theme.accent
   private textMesh: TextMeshResult | null = null
   private textBuildToken = 0
-  private textValue = '/0'
+  private textValue = ''
   private textAlign: 'left' | 'center' | 'right' = 'center'
   private form: FormEngine
   private gizmoLayer: UtilityLayerRenderer
   private gizmos: GizmoManager
   private selection: AbstractMesh | null = null
+  /** Mesh currently outlined by the studio highlight layer (object or paint source). */
+  private highlightMesh: AbstractMesh | null = null
+  private highlightLayer: HighlightLayer
+  /** Selection outline preferences (live-driven from settings.apply). */
+  private hlOn = true
+  private hlColor = '#FFFFFF'
+  /** Outline thickness as the HighlightLayer blur kernel — 1 = hairline, 8 = thick rim. */
+  private hlThickness = 2
   private freeCam: FreeCamera | null = null
   readonly paint: PaintSession
   private paintMode = false
@@ -128,6 +140,22 @@ export class Studio {
     this.gizmos.scaleGizmoEnabled = true
     this.gizmos.usePointerToAttachGizmos = false
     ;(this.gizmos as any).onAttachedToMeshObservable?.add((m: AbstractMesh | null) => { if (m) this.kick(2000) })
+
+    // Babylon highlight layer outlines the currently-selected mesh (text / a
+    // placed symbol / an imported mesh / a paint stamp's source). Outer-glow
+    // only — the inner colour tints whatever the mesh draws anyway. Additive
+    // blending + bright colour so the outline stays visible against any mesh
+    // tint (the accent often matches the mesh colour). Thickness and colour
+    // are live-configurable through the settings schema (settings.selection
+    // Highlight*), see `setSelectionHighlight`.
+    this.highlightLayer = new HighlightLayer('studio-highlight', this.scene, {
+      mainTextureRatio: 0.5,
+      blurHorizontalSize: 2.0,
+      blurVerticalSize: 2.0,
+      alphaBlendingMode: 2, // ADDITIVE: outline shows on top of the mesh
+    })
+    this.highlightLayer.innerGlow = false
+    this.highlightLayer.outerGlow = true
     const markMoved = () => {
       // Dragging the text mesh is baked at export time — only a drag of an
       // IMPORTED mesh is a sticky edit (the bytes can no longer pass through).
@@ -139,6 +167,16 @@ export class Studio {
     this.gizmos.gizmos.scaleGizmo?.onDragEndObservable.add(markMoved)
     this.paint = new PaintSession(this.scene, (ms) => this.kick(ms), () => this.scene.activeCamera ?? this.camera)
     this.paint.onChange = () => this.notifyEdit()
+    // Paint mode's select tool picks stamps AND studio objects: while the
+    // paint tab is active the brush owns the left button, so without this
+    // hook symbols / text / imported meshes could never be selected there.
+    this.paint.onSelectObject = (x, y) => {
+      // About to highlight an object — drop any lingering stamp highlight.
+      this.highlightPaintStamp(null)
+      return this.pickObjectAt(x, y)
+    }
+    this.paint.onClearObjectSelection = () => this.select(null)
+    this.paint.onSelectStamp = (shape) => this.highlightPaintStamp(shape)
     // Tap a mesh to select it; tap empty space to deselect.
     // Paint mode owns the left button (ink / erase / pick) — don't steal taps.
     this.scene.onPointerObservable.add((info) => {
@@ -299,6 +337,26 @@ export class Studio {
     return true
   }
 
+  /**
+   * Raycast an editable (non-paint) object at screen coordinates and select
+   * it. Used by the paint select tool so symbols, text and imported meshes
+   * stay selectable while the paint tab is active (the brush otherwise owns
+   * the left button). Returns true when an object was picked.
+   */
+  pickObjectAt(clientX: number, clientY: number): boolean {
+    const canvas = this.form.engine.getRenderingCanvas()
+    if (!canvas) return false
+    const rect = canvas.getBoundingClientRect()
+    const pick = this.scene.pick(
+      clientX - rect.left,
+      clientY - rect.top,
+      (m) => this.isEditable(m) && !this.paint.isPaintMesh(m),
+    )
+    const mesh = pick?.hit ? pick.pickedMesh : null
+    this.select(mesh)
+    return mesh !== null
+  }
+
   /** Fired whenever the selection changes (the HUD color picker follows it). */
   onSelect: ((mesh: AbstractMesh | null) => void) | null = null
 
@@ -306,10 +364,80 @@ export class Studio {
     if (this.frozen && mesh) return
     this.selection = mesh
     this.gizmos.attachToMesh(mesh)
+    this.setHighlight(mesh)
     this.kick(2000)
     try { this.onSelect?.(mesh) } catch { /* HUD only */ }
   }
   get selected(): AbstractMesh | null { return this.selection }
+
+  /**
+   * Highlight a paint stamp by outlining its source mesh. Used when the
+   * paint select tool picks an individual stamp without an object
+   * selection — Babylon's HighlightLayer only outlines meshes, so two
+   * stamps of the same shape highlight together (still better than nothing).
+   */
+  highlightPaintStamp(shape: string | null): void {
+    if (!shape) {
+      this.setHighlight(null)
+      return
+    }
+    const mesh = this.paint.instances.meshes.get(shape as any) ?? null
+    this.setHighlight(mesh)
+  }
+
+  /**
+   * Live-update the selection outline (settings → Interface → Selection
+   * outline). `on=false` removes any current outline; `color`/`thickness`
+   * are applied immediately so the next selection picks them up AND any
+   * already-outlined mesh re-tints without a re-pick.
+   */
+  setSelectionHighlight(on: boolean, color: string, thickness: number): void {
+    this.hlOn = !!on
+    if (typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color)) this.hlColor = color
+    const t = Number.isFinite(thickness) ? Math.max(1, Math.min(8, Math.round(thickness))) : 2
+    this.hlThickness = t
+    // HighlightLayer thickness is the blur kernel — the larger it is, the
+    // further the glow extends past the mesh silhouette. A linear-ish
+    // mapping keeps 1 close to a hairline and 8 close to a thick rim.
+    const kernel = 0.4 + t * 0.5
+    this.highlightLayer.blurHorizontalSize = kernel
+    this.highlightLayer.blurVerticalSize = kernel
+    // Re-tint the currently-selected mesh in place so the user sees the
+    // change without re-clicking.
+    if (this.highlightMesh instanceof Mesh) {
+      try {
+        this.highlightLayer.removeMesh(this.highlightMesh)
+        if (this.hlOn) {
+          this.highlightLayer.addMesh(this.highlightMesh, Color3.FromHexString(this.hlColor))
+        }
+      } catch { /* mesh gone */ }
+    }
+    this.kick(200)
+  }
+  /** Update the highlight layer outline; ignored while publishing. */
+  private setHighlight(mesh: AbstractMesh | null): void {
+    if (this.frozen) return
+    if (!this.hlOn) {
+      // Highlight disabled: keep the layer clean so a re-enable doesn't
+      // leave a stale mesh attached.
+      if (this.highlightMesh instanceof Mesh) {
+        try { this.highlightLayer.removeMesh(this.highlightMesh as Mesh) } catch { /* mesh gone */ }
+        this.highlightMesh = null
+      }
+      return
+    }
+    if (this.highlightMesh === mesh) return
+    if (this.highlightMesh instanceof Mesh) {
+      try { this.highlightLayer.removeMesh(this.highlightMesh as Mesh) } catch { /* mesh gone */ }
+    }
+    this.highlightMesh = mesh
+    if (mesh instanceof Mesh) {
+      // Highlight colour follows the studio selection palette (settings).
+      const color = Color3.FromHexString(this.hlColor)
+      this.highlightLayer.addMesh(mesh, color)
+    }
+    this.kick(120)
+  }
 
   setTransformMode(mode: 'position' | 'rotation' | 'scale' | 'none'): void {
     if (this.frozen && mode !== 'none') return
@@ -1005,6 +1133,7 @@ export class Studio {
     this.paint.dispose()
     this.gizmos.dispose()
     this.gizmoLayer.dispose()
+    this.highlightLayer.dispose()
     if (this.freeCam) { this.freeCam.dispose(); this.freeCam = null }
     this.scene.dispose()
   }

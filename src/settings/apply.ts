@@ -134,5 +134,16 @@ export function applySettings(w: Wiring, v: SettingsValues, changed: string[] | 
   }
   if (touched('showFps')) document.body.classList.toggle('show-perf', !!v.showFps)
 
+  // ----------------------------------------------------------- studio
+  // Selection outline: live-applied, persisted through the normal schema
+  // pipeline so a quality preset can carry its own colour + thickness.
+  if (touched('selectionHighlight', 'selectionHighlightColor', 'selectionHighlightThickness')) {
+    w.studio.setSelectionHighlight(
+      !!v.selectionHighlight,
+      String(v.selectionHighlightColor ?? '#FFFFFF'),
+      Number(v.selectionHighlightThickness ?? 2),
+    )
+  }
+
   w.engine.kick()
 }
