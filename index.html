@@ -295,14 +295,10 @@
         <button id="anim-stepped" class="hbtn small" title="stepped playback (hold whole frames, no interpolation)" aria-label="stepped playback">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18h4v-4h4v-4h4V6h4"/></svg>
         </button>
-        <select id="anim-speed" title="playback speed" aria-label="playback speed">
-          <option value="0.25">0.25×</option>
-          <option value="0.5">0.5×</option>
-          <option value="1" selected>1×</option>
-          <option value="1.5">1.5×</option>
-          <option value="2">2×</option>
-          <option value="4">4×</option>
-        </select>
+        <span class="speed-ctl">
+          <input id="anim-speed" type="number" min="0.01" step="any" value="1" title="playback speed (any number)" aria-label="playback speed" />
+          <span class="speed-unit" aria-hidden="true">×</span>
+        </span>
       </div>
       <div class="rail">
         <span class="vbtn"><button id="btn-close" class="hbtn" title="close (Esc)" aria-label="close">

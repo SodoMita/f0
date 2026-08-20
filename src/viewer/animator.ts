@@ -60,7 +60,8 @@ export class TrackAnimator {
   get forward(): boolean { return this.forwardVal }
   get stepped(): boolean { return this.steppedVal }
 
-  setSpeed(x: number): void { this.speedVal = Math.max(0.01, Math.min(16, x)) }
+  /** Any positive number (0.01 floor guards against freezing/crawling playback). */
+  setSpeed(x: number): void { this.speedVal = Number.isFinite(x) ? Math.max(0.01, x) : 1 }
   setDirection(forward: boolean): void { this.forwardVal = forward }
   setStepped(on: boolean): void { this.steppedVal = on; this.lastPosed = Number.NaN; this.pose() }
 
@@ -129,8 +130,9 @@ export class TrackAnimator {
     // resumes smoothly instead of jumping ahead by the idle time.
     const dt = Math.min(dtMs > 0 ? dtMs : measured, 100) / 1000
     this.frameCursor += (this.forwardVal ? 1 : -1) * this.speedVal * fps * dt
-    while (this.frameCursor > g.to) this.frameCursor -= span
-    while (this.frameCursor < g.from) this.frameCursor += span
+    // Modulo wrap (not a decrement loop) so arbitrarily high speeds stay O(1).
+    if (this.frameCursor > g.to) this.frameCursor = g.from + ((this.frameCursor - g.from) % span)
+    else if (this.frameCursor < g.from) this.frameCursor = g.to - ((g.to - this.frameCursor) % span)
     this.pose()
   }
 
