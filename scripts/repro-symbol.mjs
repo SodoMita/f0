@@ -5,20 +5,19 @@
 //   imports the same GLB through the normal import path (the user's repro
 //   for the CSP-blocked Draco decoder).
 //
-// Needs playwright's chromium installed (`npx playwright install chromium`).
-// The standalone must exist first: `npm run build:standalone`, or point
-// TARGET_URL at a running dev/preview server. This check was the guard that
-// caught the WEB_CSP `data:` connect-src gap (library GLBs are inlined as
-// data: URIs in both builds).
-import { chromium } from 'playwright'
+// Needs a browser — playwright's chromium (`npx playwright install chromium`),
+// or the @sparticuz fallback; scripts/browser.mjs picks (see
+// docs/SANDBOX-VERIFY.md, 2026-08-20 section). The standalone must exist
+// first: `npm run build:standalone`, or point TARGET_URL at a running
+// dev/preview server. This check was the guard that caught the WEB_CSP
+// `data:` connect-src gap (library GLBs are inlined as data: URIs in both
+// builds).
+import { launchFormBrowser } from './browser.mjs'
 
 const URL = process.env.TARGET_URL || 'file:///home/user/f0/form-zero-standalone.html'
 const GLB = process.argv[2] || '/home/user/f0/src/studio/library/glb/cube.glb'
 
-const browser = await chromium.launch({
-  headless: true,
-  args: ['--no-sandbox', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--disable-dev-shm-usage'],
-})
+const browser = await launchFormBrowser()
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
 const logs = []
 const bad = []

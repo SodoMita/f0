@@ -108,6 +108,15 @@ const formStub = {
 }
 
 const studio = new Studio(formStub)
+// Headless quirk: the Studio always owns a HighlightLayer, and an
+// EffectLayer's blur/merge post-process chain can never go ready on an
+// engine that never renders real frames — scene.isReady() stays false
+// forever, and GLTF2Export starts with `await scene.whenReadyAsync()`, so
+// the first forced re-export below would wait infinitely (observed under
+// both bun and bundled-node; the real app renders continuously so it never
+// hits this). The layer is purely visual (selection outline) and irrelevant
+// to the byte-level publish assertions — drop it up front.
+for (const layer of [...studio.scene.effectLayers]) layer.dispose()
 // The Studio class seeds textValue='/0' for text-first posts; the app's
 // studio route clears it on entry — do the same here for the model flows.
 studio.setText('')

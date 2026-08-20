@@ -29,7 +29,9 @@
     "check:library": "node scripts/library-unit.mjs",
     "check:symbols": "npm run build:standalone && node scripts/repro-symbol.mjs",
     "check:error-copy": "node scripts/error-copy-unit.mjs",
-    "check:relay": "npx --yes tsx scripts/relay-pool-unit.mjs"
+    "check:relay": "npx --yes tsx scripts/relay-pool-unit.mjs",
+    "check:studio": "bun scripts/studio-unit.mjs",
+    "check:vcolor": "node scripts/vcolor-check.mjs && node scripts/vcolor-poster.mjs && node scripts/vcolor-paint.mjs"
   },
   "dependencies": {
     "@babylonjs/core": "8.10.1",

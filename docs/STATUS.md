@@ -16,6 +16,36 @@ move it to **Done** with a commit reference. One agent per area.
       worker jobs time out at 8s. Live preview GLBs stay resident (already
       capped by settings; dropping them just re-parses). Guard:
       `scripts/relay-pool-unit.mjs`.
+- [x] **Vertex colours render in view + post like in studio** (agent
+      arena, 2026-08-20, SPEC AMENDMENT 74): two independent bugs shared
+      the symptom. (1) Babylon's main-thread Draco decode
+      (`numWorkers: 0`, the app's CSP-safe inline-wasm path) dropped the
+      glTF accessor `normalized` flag that its WORKER path honours, so
+      quantized u8 `COLOR_0` buffers arrived as raw 0–255 floats and the
+      PBR viewer/poster rendered every library symbol (heart, cube, …) as
+      a uniform white slab — pixel-verified. `src/model/draco.ts` now
+      patches `decodeMeshToMeshDataAsync` to apply the same
+      `gltfNormalizedOverride` the worker pool applies (idempotent if
+      fixed upstream). (2) `bakeStamps` (studio paint) exported its
+      bake-only material with a fixed 0.55 grey emissive: the studio
+      StandardMaterial preview clamps `diffuse+emissive` before
+      multiplying vColor (saturated ink), but PBR adds `emissiveFactor`
+      UNMODULATED, so published strokes washed to pastel in view/post.
+      Bake emissive is now Black. Along the way: `scripts/studio-unit.mjs`
+      could never finish headless — the studio's always-on HighlightLayer
+      keeps `scene.isReady()` false on a NullEngine (nothing renders its
+      RTT chain) and `GLTF2Export.GLBAsync` awaits `whenReadyAsync()`, an
+      infinite poll (reproduced on unmodified sources under bun AND node);
+      the harness now disposes the studio's effect layers up front and the
+      suite is fully green (< 1 s, incl. the publish e2e) via
+      `npm run check:studio`. Guards: `npm run check:vcolor`
+      (viewer/poster/paint-through-publish render suites, driven through
+      `scripts/browser.mjs` — playwright first, `@sparticuz/chromium`
+      fallback; sandbox browser recipe recorded in
+      docs/SANDBOX-VERIFY.md); proof shots
+      `.test-shots/shot-draco-hea.png`, `.test-shots/shot-viewer-paint.png`;
+      all unit suites (paint/load/hash/search/model-info/publish/library/
+      studio) green; tsc + vite standalone/typecheck clean.
 
 - [x] **Fresh posts can't race their own upload + E101 retry really
       retries** (agent arena, 2026-08-20, SPEC AMENDMENT 72): "uploaded
