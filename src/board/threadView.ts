@@ -339,6 +339,9 @@ export class ThreadView {
    */
   private syncPreviews(): void {
     if (!this.assets) return
+    // In 3D mode the direct-model pool (sync3D) owns node rendering; a node
+    // that fell back to its poster stays a static poster, never a live RTT.
+    if (this.threeD) return
     const visible = this.visibleNodeIds()
     for (const n of this.nodes.values()) {
       const id = n.meta.eventId
