@@ -520,6 +520,11 @@ move it to **Done** with a commit reference. One agent per area.
   pushes to `main`.
 ## In progress
 
+- [ ] **Embedded audio playback** — claimed by agent arena, 2026-08-20.
+      Extract verified WAV/MP3 payloads from optional KHR_audio /
+      MSFT_audio_emitter GLB extensions (256 KiB cap), expose a no-autoplay
+      viewer control, and mark audio-bearing cards after byte verification.
+
 - [ ] **Paint editor (hand-writing ink)** — claimed by agent arena, 2026-08-19.
       Rebased onto main (PR #12: preview width / viewer hand-off / zoom
       RTTs / typing guard). SPEC AMENDMENT 54.
