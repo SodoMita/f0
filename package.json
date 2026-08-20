@@ -23,6 +23,7 @@
     "check:publish": "node --experimental-strip-types scripts/publish-unit.mjs",
     "check:hash": "bun scripts/hash-unit.mjs",
     "check:studio-error": "node scripts/studio-error-wrap.mjs",
+    "check:error-copy": "node scripts/error-copy-unit.mjs",
     "check:overflow": "node scripts/overflow-scan.mjs"
   },
   "dependencies": {
