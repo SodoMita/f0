@@ -1614,6 +1614,24 @@ async function boot(): Promise<void> {
 
   window.addEventListener('resize', () => { engine.resize(); board.resize(); threadView.resize(); viewer.resize() })
 
+  // Background tabs get their WebSockets killed and must not keep five parsed
+  // GLBs in GPU RAM overnight (the idle-OOM). Drop live previews after a short
+  // hide; wake re-requests only the active view.
+  let hiddenTimer = 0
+  document.addEventListener('visibilitychange', () => {
+    clearTimeout(hiddenTimer)
+    hiddenTimer = 0
+    if (document.hidden) {
+      hiddenTimer = window.setTimeout(() => {
+        board.detach()
+        threadView.detach()
+      }, 20_000)
+      return
+    }
+    if (mode === 'board') board.attach()
+    else if (mode === 'thread') threadView.attach()
+  })
+
   ;(window as any).__form0 = {
     engine, pool, blossoms, index, board, viewer, studio, threadView, router, assets,
     legend, networkPanel, errorSheet, settings, settingsPanel, graphics, mixer, caps,

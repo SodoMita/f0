@@ -901,6 +901,10 @@ export class ThreadView {
     canvas.addEventListener('pointerleave', this.onUp)
     canvas.addEventListener('wheel', this.onWheel, { passive: false })
     this.attached = true
+    // Hidden-tab hibernate (AMENDMENT 73) called detach(); waking must
+    // re-request live previews, not just rebind pointers.
+    this.syncPreviews()
+    this.form.kick()
   }
 
   detach(): void {

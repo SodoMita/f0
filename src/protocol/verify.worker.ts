@@ -8,15 +8,22 @@
 // its first cards.
 import { verifyEvent, type Event } from 'nostr-tools'
 
-self.onmessage = (msg: MessageEvent<{ id: number; event: Event }>) => {
-  const { id, event } = msg.data
-  let ok = false
-  try {
-    ok = verifyEvent(event)
-  } catch {
-    ok = false
+// Guard `self`: bun/tsx load this file as a normal module (Vite's
+// `?worker&inline` is the only path that wraps it in a Worker). Touching
+// `self` on the main thread / in Node throws and used to make every unit
+// script that imported the protocol fail.
+const scope = globalThis as unknown as Worker & { document?: unknown }
+if (typeof scope.postMessage === 'function' && typeof scope.document === 'undefined') {
+  scope.onmessage = (msg: MessageEvent<{ id: number; event: Event }>) => {
+    const { id, event } = msg.data
+    let ok = false
+    try {
+      ok = verifyEvent(event)
+    } catch {
+      ok = false
+    }
+    scope.postMessage({ id, ok })
   }
-  ;(self as unknown as Worker).postMessage({ id, ok })
 }
 
 // Vite's `?worker&inline` import ignores the worker entry's exports (it wraps

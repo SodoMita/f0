@@ -1,4 +1,5 @@
-import { Relay, finalizeEvent, generateSecretKey, type Event, type EventTemplate } from 'nostr-tools'
+import { finalizeEvent, generateSecretKey, type Event, type EventTemplate } from 'nostr-tools'
+import { Relay } from 'nostr-tools/relay'
 import { verifyFreshAsync } from './events'
 import { DEFAULTS, DELETE_KIND, FORM_ZERO_TAG, MODEL_KIND } from '../theme'
 
@@ -19,7 +20,8 @@ export interface RelayInfo {
 
 export class RelayPool {
   private relays = new Map<string, Relay>()
-  private subs: Array<{ close: () => void }> = []
+  /** One live REQ per URL — replaced on reconnect, never stacked. */
+  private subs = new Map<string, { close: () => void }>()
   private urls: string[] = [...DEFAULTS.relays]
   private closed = false
   private attempts = new Map<string, number>()
@@ -27,9 +29,18 @@ export class RelayPool {
   private events = new Map<string, number>()
   private changed = new Map<string, number>()
   private searchSub: { close: () => void } | null = null
+  /** In-flight open() keyed by the Relay instance, so a stale attempt cannot
+   *  clear a newer one (applyRelays mid-connect) or stack sockets. */
+  private opening = new Map<string, Relay>()
+  private retryTimers = new Map<string, ReturnType<typeof setTimeout>>()
   state = new Map<string, RelayState>()
   onEvent: ((event: Event) => void) | null = null
   onState: ((url: string, state: RelayState) => void) | null = null
+  /**
+   * Test hook: when set, reconnect uses this delay instead of exponential
+   * backoff. Production stays `null`.
+   */
+  retryDelayOverride: number | null = null
 
   setRelays(urls: string[]): void {
     const normalized = Array.from(new Set(urls.map(normalizeRelay).filter((x): x is string => !!x)))
@@ -164,8 +175,10 @@ export class RelayPool {
    */
   applyRelays(urls: string[]): void {
     this.setRelays(urls)
-    for (const s of this.subs) s.close()
-    this.subs = []
+    this.clearRetries()
+    this.opening.clear()
+    for (const s of this.subs.values()) try { s.close() } catch { /* already closed */ }
+    this.subs.clear()
     // Detach onclose BEFORE closing: the deliberate teardown must not report
     // 'offline' for every relay (websocket close events fire async, so a
     // temporal flag would race) — that false-triggered the E201 error sheet.
@@ -181,6 +194,20 @@ export class RelayPool {
       this.onState?.(url, 'offline')
     }
     this.connect()
+  }
+
+  /**
+   * Live connection accounting (tests / perf overlay). After any number of
+   * drops, `relays`/`subs`/`opening`/`retries` must stay ≤ the configured
+   * URL count — a growing number is the idle-OOM leak.
+   */
+  debugCounts(): { relays: number; opening: number; retries: number; subs: number } {
+    return {
+      relays: this.relays.size,
+      opening: this.opening.size,
+      retries: this.retryTimers.size,
+      subs: this.subs.size,
+    }
   }
 
   /**
@@ -216,23 +243,47 @@ export class RelayPool {
   }
 
   private async open(url: string): Promise<void> {
-    if (!this.urls.includes(url)) return // removed via applyRelays; don't resurrect
+    if (this.closed || !this.urls.includes(url)) return // removed via applyRelays; don't resurrect
+    if (this.opening.has(url)) return
+    const existing = this.relays.get(url)
+    if (existing?.connected) return
+
     // nostr-tools verifies every matching event ITSELF, synchronously, on the
     // main thread — on top of our own check. We verify in a worker before
     // dispatching (see events.verifyFreshAsync), so the relay's duplicate
     // check is disabled rather than paid for twice. (`verifyEvent` is private
     // in the .d.ts but settable at runtime; AbstractRelay reads it per event.)
+    this.clearRetry(url)
+    this.dropRelay(url)
     const relay = new Relay(url)
     ;(relay as unknown as { verifyEvent: (e: Event, url: string) => boolean }).verifyEvent = () => true
+    this.opening.set(url, relay)
     this.relays.set(url, relay)
+    // nostr-tools fires BOTH ws.onerror and ws.onclose (and connect() also
+    // rejects) on a single drop. Without a settled-gate those three paths
+    // each scheduled a retry AND open() built a new Relay without closing
+    // the previous one — sockets stacked until the tab OOM'd after a long
+    // idle (relays drop idle connections; background tabs get their WS killed).
+    let settled = false
     relay.onclose = () => {
       if (this.closed) return
+      if (this.relays.get(url) !== relay) return
       this.setState(url, 'offline')
+      // connect() still pending: the catch path retries once. Retrying here
+      // too was the double-timer half of the leak.
+      if (!settled) return
+      this.dropRelay(url)
       this.scheduleRetry(url)
     }
     try {
       const t0 = performance.now()
-      await relay.connect()
+      await relay.connect({ timeout: 8000 })
+      settled = true
+      if (this.closed || !this.urls.includes(url) || this.relays.get(url) !== relay || !relay.connected) {
+        this.dropRelay(url)
+        if (!this.closed && this.urls.includes(url)) this.scheduleRetry(url)
+        return
+      }
       // The handshake IS a round trip — seed the ping from it so a row shows
       // a latency immediately instead of waiting for the first explicit ping.
       this.pings.set(url, Math.round(performance.now() - t0))
@@ -241,21 +292,56 @@ export class RelayPool {
       this.subscribe(url, relay)
     } catch {
       // Spec 00 §2.5: one slow relay must never gate first paint.
+      if (this.relays.get(url) === relay) this.dropRelay(url)
       this.setState(url, 'offline')
       this.scheduleRetry(url)
+    } finally {
+      if (this.opening.get(url) === relay) this.opening.delete(url)
     }
   }
 
+  private dropRelay(url: string): void {
+    const sub = this.subs.get(url)
+    if (sub) {
+      this.subs.delete(url)
+      try { sub.close() } catch { /* already closed */ }
+    }
+    const relay = this.relays.get(url)
+    if (!relay) return
+    this.relays.delete(url)
+    relay.onclose = null
+    try { relay.close() } catch { /* already closed */ }
+  }
+
+  private clearRetry(url: string): void {
+    const t = this.retryTimers.get(url)
+    if (t === undefined) return
+    clearTimeout(t)
+    this.retryTimers.delete(url)
+  }
+
+  private clearRetries(): void {
+    for (const t of this.retryTimers.values()) clearTimeout(t)
+    this.retryTimers.clear()
+  }
+
   private scheduleRetry(url: string): void {
-    if (this.closed) return
+    if (this.closed || !this.urls.includes(url)) return
+    if (this.retryTimers.has(url)) return
+    if (this.relays.get(url)?.connected) return
     const n = (this.attempts.get(url) ?? 0) + 1
     this.attempts.set(url, n)
     const base = Math.min(30000, 1000 * 2 ** Math.min(n, 5))
-    const delay = base / 2 + Math.random() * base
-    setTimeout(() => { if (!this.closed) void this.open(url) }, delay)
+    const delay = this.retryDelayOverride ?? (base / 2 + Math.random() * base)
+    const timer = setTimeout(() => {
+      this.retryTimers.delete(url)
+      if (!this.closed) void this.open(url)
+    }, delay)
+    this.retryTimers.set(url, timer)
   }
 
   private subscribe(url: string, relay: Relay): void {
+    this.subs.get(url)?.close()
     const since = Math.floor(Date.now() / 1000) - 60 * 60 * 24 * 14
     const s = relay.subscribe(
       [
@@ -279,7 +365,7 @@ export class RelayPool {
         oneose: () => this.setState(url, 'online'),
       },
     )
-    this.subs.push({ close: () => s.close() })
+    this.subs.set(url, { close: () => { try { s.close() } catch { /* already closed */ } } })
   }
 
   async publish(template: EventTemplate, secret: Uint8Array): Promise<{ ok: string[]; failed: string[] }> {
@@ -293,9 +379,12 @@ export class RelayPool {
 
   close(): void {
     this.closed = true
-    for (const s of this.subs) s.close()
-    this.subs = []
-    for (const r of this.relays.values()) r.close()
+    this.clearRetries()
+    this.opening.clear()
+    this.cancelSearch()
+    for (const s of this.subs.values()) try { s.close() } catch { /* already closed */ }
+    this.subs.clear()
+    for (const r of this.relays.values()) { r.onclose = null; try { r.close() } catch { /* already closed */ } }
     this.relays.clear()
   }
 }
