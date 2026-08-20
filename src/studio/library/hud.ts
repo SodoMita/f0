@@ -64,7 +64,7 @@ function svgFor(id: string): string {
   return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg>`
 }
 
-export function bindLibraryHud(studio: Studio, onChange: () => void): void {
+export function bindLibraryHud(studio: Studio, onChange: () => void, onError?: (msg: string) => void): void {
   const grid = document.getElementById('symbol-grid')
   if (!grid) return
   let group: LibraryGroup | 'all' = 'all'
@@ -114,7 +114,11 @@ export function bindLibraryHud(studio: Studio, onChange: () => void): void {
       await studio.addLibraryItem(bytes, { faceCamera: item.dim === '2d' })
       onChange()
     } catch (err) {
+      // Never fail silently (AMENDMENT 68): a blocked Draco decoder, a bad
+      // fetch etc. must reach the user, not just the console.
+      const msg = err instanceof Error ? err.message : String(err)
       console.warn('library place failed', err)
+      onError?.(`${item.id}: ${msg}`)
     }
   }
 

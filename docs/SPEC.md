@@ -824,3 +824,40 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     no z-fighting); source art is not committed (regenerate via the tracer).
     Posters auto-fit; the author can still +cam.
     Guard: `node scripts/library-unit.mjs`.
+
+68. LIBRARY SYMBOLS LOAD + TINT AS TEXT (2026-08-20): two defects closed
+    together because they interacted.
+    - DEFECT A — Draco decode was CSP-blocked, so every library piece (and
+      every other Draco-compressed model) FAILED to load in both builds.
+      The GLBs ship `KHR_draco_mesh_compression` and the local decoder
+      (src/model/draco.ts, wasm + zero workers, no CDN) compiles its wasm
+      with `WebAssembly.instantiate`, which Chromium gates on the
+      `'wasm-unsafe-eval'` script-src keyword. Neither CSP had it: the web
+      build refused with a `script-src 'self'` violation and the standalone
+      with a `script-src 'unsafe-inline' data:` violation — the error an
+      upload showed as “…Refused to compile or instantiate WebAssembly
+      module… unsafe-inline…”. Both CSPs (csp.ts) now include
+      `'wasm-unsafe-eval'` (a wasm-compile permit, NOT `'unsafe-eval'`:
+      no string eval is enabled). WEB_CSP connect-src also gained `data:`
+      (the library GLBs are inlined as data: URIs in both builds) and
+      `http://localhost:* http://127.0.0.1:*` so the dev / preview servers
+      can serve the Draco wasm/js assets over plain http.
+      The symbols tab no longer fails silently: placement errors surface in
+      the studio status line like import errors do.
+    - DEFECT B — placed symbols rendered BLACK. The GLBs carry quantized
+      per-vertex COLOR_0 (VEC4); the glTF loader leaves `useVertexColors`
+      on (and sets `hasVertexAlpha` for VEC4 COLOR_0 on non-Draco loads),
+      which puts the PBR shader on a vertex-colour path that comes out
+      black (reproduced headlessly: the vertex-colour/alpha state renders
+      ~547 k black pixels where the fixed state renders ~16 k lit-gray /
+      14 k tint pixels). Symbol meshes now clear both flags and take the
+      studio accent EXACTLY like text (`emissive = tint` over a black base
+      — same recipe as buildTextMesh), so symbols share the text tool's
+      tint, re-tint live when the colour input changes, and publish the
+      tint in the event `color` tag (already wired via `studio.tintColor`).
+    - Size stays put: the library is still ~103 KiB and the standalone is
+      ~4.4 MB; the wasm decoder path is used as before (no fallback JS
+      decoder inlined as a new dependency).
+    Guards: `node scripts/library-unit.mjs` (size + GLB invariants),
+    `npx tsc --noEmit`, and a browser round trip (place → tinted render →
+    delete → publish carries the tint).

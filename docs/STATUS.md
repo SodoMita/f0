@@ -5,6 +5,27 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 
+- [x] **Library symbols load (CSP Draco fix) + tint behaves like text**
+      (agent arena, 2026-08-20, SPEC AMENDMENT 68): the whole symbol library
+      silently failed to load in both builds — the local Draco decoder's wasm
+      (`WebAssembly.instantiate`) was refused by CSP because neither policy
+      had `'wasm-unsafe-eval'` (uploads showed “…Refused to compile or
+      instantiate WebAssembly module… unsafe-inline…”). Both CSPs now carry
+      the keyword (wasm compile only — no string eval) and WEB_CSP allows
+      localhost http for dev/preview fetches. Placement errors now surface
+      in the studio status line instead of the console. Placed symbols also
+      re-tinted: they clear `useVertexColors`/`hasVertexAlpha` (the VEC4
+      COLOR_0 vertex-colour path that rendered BLACK) and take the studio
+      accent exactly like text (emissive tint over a black base), re-tint
+      live on colour change, and publish the tint via the event `color` tag.
+      Library size stays ~103 KiB; standalone ~4.4 MB. Verified in a real
+      headless Chromium (standalone file:// and web build via vite preview):
+      tsc, library-unit, `npm run check:symbols` (place cube/smile → tinted
+      render on screen, not black; live re-tint; delete; upload-as-mesh
+      imports the same GLB; no CSP violations, no CDN requests). Checks that
+      need live relays (verify-publish etc.) are noted but not runnable in
+      this sandbox.
+
 - [x] **Studio model info + nostr `content` carries the model name + removable
       studio additions** (agent arena, 2026-08-20, SPEC AMENDMENT 66):
       - The studio upload tab shows an info card for the imported model

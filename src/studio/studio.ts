@@ -46,6 +46,8 @@ import { UtilityLayerRenderer } from '@babylonjs/core/Rendering/utilityLayerRend
 import { GizmoManager } from '@babylonjs/core/Gizmos/gizmoManager'
 import type { AbstractMesh } from '@babylonjs/core/Meshes/abstractMesh'
 import { Mesh } from '@babylonjs/core/Meshes/mesh'
+import { PBRMaterial } from '@babylonjs/core/Materials/PBR/pbrMaterial'
+import type { Material } from '@babylonjs/core/Materials/material'
 import { PointerEventTypes } from '@babylonjs/core/Events/pointerEvents'
 import { FreeCamera } from '@babylonjs/core/Cameras/freeCamera'
 import { Vector3 as V3 } from '@babylonjs/core/Maths/math.vector'
@@ -161,7 +163,18 @@ export class Studio {
 
   /** Accent/tint applied to the published model's `color` tag. */
   get tintColor(): string { return this.tint }
-  setTintColor(hex: string): void { this.tint = hex }
+
+  /**
+   * Change the accent tint. Text rebuilds on its own (textTool reads this.tint
+   * at build time); library symbols re-tint live, the same way the text tool
+   * re-renders when the color input changes (AMENDMENT 68).
+   */
+  setTintColor(hex: string): void {
+    this.tint = hex
+    this.retintLibrary()
+    this.notifyEdit()
+    this.form.kick(300)
+  }
 
   /** Request a render (render-on-demand engine). */
   kick(ms?: number): void { this.form.kick(ms) }
@@ -395,9 +408,8 @@ export class Studio {
         anyRoot.lookAt(cam.globalPosition ?? cam.position)
       }
     }
-    for (const mesh of container.meshes) {
-      if (mesh.material) mesh.material.backFaceCulling = false
-    }
+    const seen = new Set<Material>()
+    for (const mesh of container.meshes) this.tintMesh(mesh, seen)
     container.addAllToScene()
     this.extras.push(container)
     this.markDirty()
@@ -405,6 +417,36 @@ export class Studio {
     if (first) this.select(first)
     this.fitSelected()
     this.form.kick(800)
+  }
+
+  /**
+   * Colour a library mesh from the studio tint exactly like the text tool
+   * (emissive tint over a black base). The library GLBs carry quantized
+   * per-vertex COLOR_0 (VEC4), which the glTF loader maps to
+   * `useVertexColors` + `hasVertexAlpha`; the alpha flag pushed the PBR
+   * shader onto a vertexColor × baseColor path that rendered BLACK, so both
+   * flags are cleared here and the tint drives the colour (AMENDMENT 68).
+   */
+  private tintMesh(mesh: AbstractMesh, seen: Set<Material>): void {
+    mesh.useVertexColors = false
+    mesh.hasVertexAlpha = false
+    const mat = mesh.material
+    if (!mat || seen.has(mat)) return
+    seen.add(mat)
+    const pbr = mat as PBRMaterial
+    pbr.albedoColor = Color3.Black()
+    pbr.emissiveColor = Color3.FromHexString(this.tint)
+    pbr.metallic = 0
+    pbr.backFaceCulling = false
+  }
+
+  /** Re-apply the tint to every placed library symbol (live color change). */
+  private retintLibrary(): void {
+    if (!this.extras.length) return
+    const seen = new Set<Material>()
+    for (const extra of this.extras) {
+      for (const mesh of extra.meshes) this.tintMesh(mesh, seen)
+    }
   }
 
   // ---- typed text tool (SPEC TEXT+ANIM: flat low-poly geometry) ----
@@ -418,8 +460,9 @@ export class Studio {
     this.form?.kick()
   }
   setTextColor(hex: string): void {
-    this.tint = hex
-    this.form?.kick()
+    // The text tool reads this.tint at build time; symbols re-tint live
+    // inside setTintColor (AMENDMENT 68).
+    this.setTintColor(hex)
   }
   setTextAlign(align: 'left' | 'center' | 'right'): void {
     this.textAlign = align

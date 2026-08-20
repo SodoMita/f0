@@ -710,6 +710,11 @@ async function boot(): Promise<void> {
   bindLibraryHud(studio, () => {
     if (!publishing) btnStudioPublish.disabled = !studio.hasContent()
     setStudioStatus(studio.libraryCount ? `${studio.libraryCount} pieces` : '')
+  }, (msg) => {
+    // The symbols tab must not fail silently: placement errors (Draco/CSP,
+    // fetch, validation) surface in the studio status line like import
+    // errors do (AMENDMENT 68).
+    setStudioStatus(msg, 'err')
   })
 
   // ---- Studio text + camera settings ----
