@@ -22,6 +22,8 @@
     "check:paint": "bun scripts/paint-unit.mjs",
     "check:publish": "node --experimental-strip-types scripts/publish-unit.mjs",
     "check:hash": "bun scripts/hash-unit.mjs",
+    "check:search": "bun scripts/search-unit.mjs",
+    "check:load": "bun scripts/load-unit.mjs",
     "check:studio-error": "node scripts/studio-error-wrap.mjs",
     "check:overflow": "node scripts/overflow-scan.mjs",
     "check:library": "node scripts/library-unit.mjs",

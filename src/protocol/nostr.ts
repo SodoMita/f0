@@ -100,10 +100,13 @@ export class RelayPool {
    * and the board just renders them. Replaces any in-flight search REQ.
    *
    * Caveat: NIP-50 matches relay-defined text indexes (nostr.band indexes
-   * event content and several tags). FORM/0 model events carry empty content
-   * with the name in a `filename` tag, so match reliability depends on
-   * nostr.band's tag indexing — this is best-effort enrichment on top of the
-   * always-on local filter, never a guarantee.
+   * event content and several tags). Since AMENDMENT 66 the model name rides
+   * in the event `content`, so relay text search finds posts by name; older
+   * posts carry the name only in the `filename` tag. Fresh posts can lag the
+   * relay's index, and your OWN posts never depend on this — they are
+   * indexed locally at publish and restored from storage at boot
+   * (AMENDMENT 70). This is best-effort enrichment on top of the always-on
+   * local filter, never a guarantee.
    */
   search(query: string, timeoutMs = 8000): void {
     this.cancelSearch()

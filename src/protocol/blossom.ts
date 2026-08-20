@@ -27,6 +27,28 @@ function magicOk(bytes: Uint8Array): boolean {
   return bytes[0] === GLB_MAGIC[0] && bytes[1] === GLB_MAGIC[1] && bytes[2] === GLB_MAGIC[2] && bytes[3] === GLB_MAGIC[3]
 }
 
+/** gzip magic (RFC 1952): 0x1f 0x8b. */
+function isGzipBytes(bytes: Uint8Array): boolean {
+  return bytes.length > 2 && bytes[0] === 0x1f && bytes[1] === 0x8b
+}
+
+/**
+ * Inflate a gzip body without a Content-Encoding header (AMENDMENT 71):
+ * some object stores serve pre-compressed bytes and the browser hands them
+ * to us raw, so SHA-256 sees gzip bytes instead of the model. Best effort —
+ * null when the stream is not actually gzip, the decompressor is missing,
+ * or the inflated result would exceed the model cap.
+ */
+async function tryInflateGzip(bytes: Uint8Array): Promise<Uint8Array<ArrayBuffer> | null> {
+  if (!isGzipBytes(bytes) || typeof DecompressionStream === 'undefined') return null
+  try {
+    const blob = new Blob([bytes.buffer as ArrayBuffer])
+    const inflated = await new Response(blob.stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer()
+    if (inflated.byteLength === 0 || inflated.byteLength > LIMITS.modelBytesHard) return null
+    return new Uint8Array(inflated)
+  } catch { return null }
+}
+
 export class BlossomClient {
   servers: string[]
   constructor(servers: string[] = []) {
@@ -69,8 +91,18 @@ export class BlossomClient {
    * skipped and the next replica is tried. Content is SHA-256-verified
    * either way, but a redirect would still hand the viewer's IP to the
    * redirect target, and the event author controls the URL already.
+   *
+   * AMENDMENT 71: every replica outcome is recorded and folded into the
+   * thrown error, so an E101 sheet can say WHICH server failed and how
+   * (HTTP status, hash mismatch with the hash it actually returned,
+   * redirect, oversize) instead of a bare "no verified replica". Bodies
+   * that look like gzip are also given one rescue attempt: some stores
+   * serve pre-compressed bytes without a Content-Encoding header, and the
+   * browser then hands us gzip bytes — hashing those fails for a body the
+   * server may still hold intact. The hash stays the arbiter either way.
    */
   async download(urls: string[], hash: string, expectedSize: number, maxBytes = LIMITS.modelBytesHard): Promise<Blob> {
+    const reasons: string[] = []
     let hashMismatch = false
     let oversize = false
     // Size is a meter + a cap, never a refuse. A stale `size` tag with a
@@ -83,9 +115,10 @@ export class BlossomClient {
       // contributing bytes and the reported speed drops, which is exactly
       // what the HUD should show.
       const xfer = transfers.track('down', expectedSize, originOf(url))
+      const host = originOf(url) || url.slice(0, 40)
       try {
         const res = await fetch(url, { credentials: 'omit', redirect: 'error', signal: AbortSignal.timeout(30000) })
-        if (!res.ok || !res.body) continue
+        if (!res.ok || !res.body) { reasons.push(`${host}: HTTP ${res.status}`); continue }
         // Prefer the server's own size when the event did not carry one.
         const declared = Number(res.headers.get('content-length') ?? '')
         if (!expectedSize && Number.isFinite(declared)) xfer.setTotal(declared)
@@ -97,10 +130,14 @@ export class BlossomClient {
           if (done) break
           total += value.length
           xfer.advance(value.length)
-          if (total > cap) throw new OversizeError()
+          if (total > cap) {
+            oversize = true
+            reasons.push(`${host}: body exceeds cap (${total} > ${cap} B)`)
+            throw new OversizeError()
+          }
           chunks.push(value)
         }
-        const bytes = new Uint8Array(total)
+        let bytes = new Uint8Array(total)
         let off = 0
         for (const c of chunks) { bytes.set(c, off); off += c.length }
         // ALWAYS hash. Hash matches `x` → accept even if the size tag is
@@ -108,23 +145,36 @@ export class BlossomClient {
         // Models MUST match the event `x` tag. An empty hash used to skip
         // the check, which let a wrong-hash replica render on the board.
         const expect = hash.toLowerCase()
-        if (!isSha256Hex(expect)) continue
-        if (isSha256Hex(expect) && (await sha256Hex(bytes)) !== expect) {
+        if (!isSha256Hex(expect)) { reasons.push(`${host}: event hash is not sha256`); continue }
+        let got = await sha256Hex(bytes)
+        if (got !== expect) {
+          // gzip rescue (AMENDMENT 71): a body the browser did not
+          // decompress itself. Re-hash the inflated bytes before giving up
+          // on this replica.
+          const plain = await tryInflateGzip(bytes)
+          if (plain && (await sha256Hex(plain)) === expect) {
+            bytes = plain
+            got = expect
+          }
+        }
+        if (got !== expect) {
           hashMismatch = true
+          reasons.push(`${host}: hash mismatch (got sha256 ${got.slice(0, 12)}…)`)
           continue
         }
-        if (!magicOk(bytes)) continue
+        if (!magicOk(bytes)) { reasons.push(`${host}: not a GLB (bad magic)`); continue }
         return bytesToBlob(bytes, 'model/gltf-binary')
       } catch (err) {
-        if (isOversize(err)) oversize = true
+        if (!isOversize(err)) reasons.push(`${host}: ${err instanceof Error ? err.message : 'network error'}`)
         /* next replica */
       } finally {
         xfer.end()
       }
     }
-    if (hashMismatch) throw new HashMismatchError()
-    if (oversize) throw new OversizeError()
-    throw new Error('No verified replica available.')
+    const detail = () => reasons.length ? ` — ${reasons.slice(0, 4).join('; ').slice(0, 300)}` : ''
+    if (hashMismatch) throw new HashMismatchError(`blob hash mismatch${detail()}`)
+    if (oversize) throw new OversizeError(`stream exceeded size cap${detail()}`)
+    throw new Error(`No verified replica available${detail()}`)
   }
 
   private auth(method: string, hash: string, secret: Uint8Array): string {

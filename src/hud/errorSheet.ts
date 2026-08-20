@@ -71,9 +71,13 @@ export async function copyToClipboard(text: string): Promise<boolean> {
 
 /** Known error catalogue — one place, so codes stay consistent. */
 export const ERRORS = {
-  MODEL_DOWNLOAD: (retry: () => void): SheetError => ({
+  // AMENDMENT 71: `detail` carries the per-replica failure reasons
+  // (server, HTTP status / hash mismatch with the hash it returned /
+  // redirect / oversize), so "no verified replica" stops being a black box.
+  MODEL_DOWNLOAD: (retry: () => void, detail = ''): SheetError => ({
     code: 'E101',
-    cause: 'No Blossom server returned a verified copy of this model (hash or size mismatch, or all replicas unreachable).',
+    cause: 'No Blossom server returned a verified copy of this model (hash or size mismatch, or all replicas unreachable).'
+      + (detail ? ` ${detail}` : ''),
     action: 'retry',
     onAction: retry,
   }),

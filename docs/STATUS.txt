@@ -10,7 +10,7 @@ tidy tree, per-node reply pills) · HTML HUD · demand-driven render loop
 + deletion UI · studio publish flow (BUD-01 + kind-1063 + ownership; merged) ·
 first-run legend · network panel · error sheets · local Draco + GLB limits ·
 standalone + GitHub Pages + mirrors (site branch / jsDelivr / githack) ·
-search by model name (topbar menu filters the board; NIP-50 nostr.band fallback reaches unloaded remote models) ·
+search by name or content (topbar menu filters the board; own posts self-index at publish, restore from storage AND load from the seeded verified snapshot with zero network, so search always finds them and they always open; fresh posts never race their own upload; E101 retry really retries with per-replica detail; NIP-50 nostr.band fallback reaches unloaded remote models) ·
 perf passes (workers, PBO, curated loader) · design passes + mirror/flip fixes ·
 sidecar import branch merged and hardened (local-only, bounded, validate-first) ·
 AES-GCM deletion-key envelopes · schema-validated persisted settings · data-URI

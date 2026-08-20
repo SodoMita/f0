@@ -39,6 +39,9 @@ if (typeof globalThis.FileReader === 'undefined') {
 
 const { Studio } = await import('../src/studio/studio.ts')
 const { publishModel } = await import('../src/protocol/publish.ts')
+const { parseModelEvent } = await import('../src/protocol/events.ts')
+const { ThreadIndex, matchesSearchQuery } = await import('../src/protocol/thread-index.ts')
+const { listOwnedPosts, ownedToMeta } = await import('../src/protocol/storage.ts')
 
 const fails = []
 const check = (name, ok, detail = '') => {
@@ -227,6 +230,34 @@ process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0' // self-signed in-process stub
     check('event content is the model name', template?.content === 'probe', JSON.stringify(template?.content))
     const x = template?.tags?.find((t) => t[0] === 'x')?.[1]
     check('event x tag is the model sha256', x === (await sha256Hex(modelBytes)))
+    // AMENDMENT 70: the signed event comes back for self-indexing, and the
+    // owned-post record persists a searchable snapshot that rebuilds the
+    // same meta (so own posts survive reloads and the live-feed window).
+    check('publishModel returns the signed event for self-indexing', !!out.event && out.event.id === out.eventId && out.event.kind === 1063,
+      JSON.stringify(out.event && { id: out.event.id?.slice(0, 8), kind: out.event.kind }))
+    const owned = await listOwnedPosts()
+    const rec = owned.find((r) => r.eventId === out.eventId)
+    const rebuilt = rec ? ownedToMeta(rec) : null
+    check('owned post persists a searchable meta snapshot', !!rebuilt && rebuilt.eventId === out.eventId && rebuilt.name === 'probe' && rebuilt.filename === 'probe.glb' && rebuilt.role === 'root',
+      JSON.stringify(rebuilt && { n: rebuilt.name, f: rebuilt.filename, r: rebuilt.role }))
+    // AMENDMENT 70 end-to-end (the exact main.ts self-index path): the signed
+    // event parses to a meta, lands in the index, and a content query finds
+    // it immediately — no relay echo involved.
+    const own = parseModelEvent(out.event)
+    check('signed event parses to the self-index meta', !!own && own.eventId === out.eventId && own.filename === 'probe.glb' && own.name === 'probe',
+      JSON.stringify(own && { f: own.filename, n: own.name }))
+    // AMENDMENT 71: the publish result carries the frozen upload snapshot so
+    // the app can seed the local caches — own posts load with no network.
+    const snap = out.bytes
+    check('publishModel returns the frozen upload snapshot (sha + bytes)', !!out.sha256 && !!snap && out.sha256 === (await sha256Hex(snap)) && Buffer.compare(Buffer.from(snap), Buffer.from(modelBytes)) === 0,
+      JSON.stringify(out.sha256?.slice(0, 8)) + ' / ' + snap?.length)
+    const idx = new ThreadIndex()
+    if (own) idx.add(own)
+    const hits = [...idx.byId.values()]
+      .filter((x) => x.role === 'root' && !x.tombstoned && !x.hashFailed)
+      .filter((x) => matchesSearchQuery(x, 'probe'))
+    check('a fresh publish is searchable by content immediately (echo not required)', hits.length === 1 && hits[0].eventId === out.eventId,
+      JSON.stringify(hits.map((h) => h.eventId.slice(0, 8))))
 
     const long = 'n'.repeat(400)
     template = null

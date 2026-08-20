@@ -50,6 +50,23 @@ export function parseThreadRefs(tags: string[][]): { role: ThreadRole; refs: { r
   return { role: 'reply', refs: { rootId, parentId } }
 }
 
+/**
+ * Board search match (AMENDMENT 70): a case-insensitive substring test over
+ * everything the user can name a post by — the published filename, its base
+ * name (extension stripped), the post's `content` (landed on `name` by
+ * AMENDMENT 66) and the event id (so older posts without a `filename` tag
+ * are still findable). A blank query matches everything.
+ */
+export function matchesSearchQuery(m: ThreadMeta, query: string): boolean {
+  const q = query.trim().toLowerCase()
+  if (!q) return true
+  const base = (m.filename || '').replace(/\.[^.]+$/, '')
+  return m.filename?.toLowerCase().includes(q) === true
+    || base.toLowerCase().includes(q)
+    || m.name?.toLowerCase().includes(q) === true
+    || m.eventId.toLowerCase().includes(q)
+}
+
 export class ThreadIndex {
   readonly byId = new Map<string, ThreadMeta>()
   readonly children = new Map<string, Set<string>>()
@@ -78,6 +95,14 @@ export class ThreadIndex {
   rejectHash(eventId: string): void {
     const m = this.byId.get(eventId)
     if (m) m.hashFailed = true
+  }
+
+  /** Undo rejectHash for a retry (AMENDMENT 72). The meta stays indexed;
+   *  clearing the flag puts the post back on the board, where a retry can
+   *  actually re-attempt the download instead of replaying E101 forever. */
+  unrejectHash(eventId: string): void {
+    const m = this.byId.get(eventId)
+    if (m) m.hashFailed = false
   }
 
   flatten(rootId: string): ThreadMeta[] {

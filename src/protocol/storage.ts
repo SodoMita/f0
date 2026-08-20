@@ -2,6 +2,8 @@ import {
   decryptOwnedSecret, encryptOwnedSecret, isOwnedSecretHex, isSecretEnvelope,
   type SecretEnvelopeV1,
 } from './ownedSecrets'
+import { LIMITS, MODEL_MIMES } from '../theme'
+import type { ThreadMeta } from './thread-index'
 
 const DB = 'form-zero'
 const VERSION = 4
@@ -140,6 +142,27 @@ export function saveSettings(s: Settings): Promise<void> {
   return put('settings', 'default', s)
 }
 
+/**
+ * Searchable snapshot of a post this browser published (AMENDMENT 70). Enough
+ * to rebuild the post's ThreadMeta at boot, so own posts stay on the board
+ * and findable by name/content even when the live feed's window (14 days /
+ * limit) no longer carries them. Every field is validated on read.
+ */
+export interface OwnedPostMeta {
+  pubkey: string
+  mime: string
+  size: number
+  tint: string
+  width: number
+  height: number
+  filename?: string
+  name?: string
+  sourceFormat?: string
+  cameraCount?: number
+  animHint?: boolean
+  hasAudio?: boolean
+}
+
 export interface OwnedPostRecord {
   eventId: string
   /** Decrypted only in memory; IndexedDB stores `secret: SecretEnvelopeV1`. */
@@ -150,6 +173,10 @@ export interface OwnedPostRecord {
   createdAt: number
   rootId?: string
   parentId?: string
+  /** The owner deleted this post (AMENDMENT 70): boot restore must skip it. */
+  tombstoned?: boolean
+  /** Searchable snapshot for boot-time reindex (AMENDMENT 70). */
+  meta?: OwnedPostMeta
 }
 
 type OwnedPostMetadata = Omit<OwnedPostRecord, 'secretKey'>
@@ -221,6 +248,36 @@ function optionalHex(value: unknown): string | undefined {
   return typeof value === 'string' && HEX64.test(value) ? value.toLowerCase() : undefined
 }
 
+function ownedMeta(value: unknown): OwnedPostMeta | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const m = value as Record<string, unknown>
+  if (typeof m.pubkey !== 'string' || !HEX64.test(m.pubkey)) return null
+  if (typeof m.mime !== 'string' || !(MODEL_MIMES as readonly string[]).includes(m.mime)) return null
+  if (typeof m.size !== 'number' || !Number.isSafeInteger(m.size) || m.size < 1 || m.size > LIMITS.modelBytesHard) return null
+  if (typeof m.tint !== 'string' || !/^#[0-9a-f]{6}$/i.test(m.tint)) return null
+  const width = typeof m.width === 'number' ? m.width : NaN
+  const height = typeof m.height === 'number' ? m.height : NaN
+  if (!Number.isFinite(width) || !Number.isFinite(height)
+    || width < LIMITS.posterDimMin || width > LIMITS.posterDimMax
+    || height < LIMITS.posterDimMin || height > LIMITS.posterDimMax) return null
+  const str = (v: unknown, max: number): string | undefined =>
+    typeof v === 'string' && v.length > 0 && v.length <= max ? v : undefined
+  return {
+    pubkey: m.pubkey.toLowerCase(),
+    mime: m.mime,
+    size: m.size,
+    tint: m.tint.toLowerCase(),
+    width,
+    height,
+    filename: str(m.filename, 120),
+    name: str(m.name, LIMITS.contentChars),
+    sourceFormat: str(m.sourceFormat, 20),
+    cameraCount: typeof m.cameraCount === 'number' && Number.isFinite(m.cameraCount) && m.cameraCount >= 0 ? m.cameraCount : undefined,
+    animHint: m.animHint === true,
+    hasAudio: m.hasAudio === true,
+  }
+}
+
 function ownedMetadata(value: unknown): OwnedPostMetadata | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const rec = value as Record<string, unknown>
@@ -237,7 +294,68 @@ function ownedMetadata(value: unknown): OwnedPostMetadata | null {
     createdAt: rec.createdAt,
     rootId,
     parentId,
+    tombstoned: rec.tombstoned === true,
+    meta: ownedMeta(rec.meta) ?? undefined,
   }
+}
+
+/**
+ * Rebuild a post's ThreadMeta from a persisted owned-post record
+ * (AMENDMENT 70). Records from before the snapshot existed (no `meta`) yield
+ * null — they rely on the live feed like any foreign post.
+ */
+export function ownedToMeta(rec: OwnedPostRecord): ThreadMeta | null {
+  const m = rec.meta
+  if (!m) return null
+  const isReply = typeof rec.parentId === 'string'
+  return {
+    eventId: rec.eventId,
+    pubkey: m.pubkey,
+    createdAt: rec.createdAt,
+    tint: m.tint,
+    sha256: rec.modelSha256,
+    size: m.size,
+    native: true,
+    mime: m.mime,
+    urls: rec.modelUrls,
+    width: m.width,
+    height: m.height,
+    role: isReply ? 'reply' : 'root',
+    refs: isReply ? { rootId: rec.rootId, parentId: rec.parentId } : {},
+    animHint: m.animHint === true,
+    cameraCount: m.cameraCount ?? 0,
+    hasAudio: m.hasAudio === true,
+    filename: m.filename,
+    name: m.name,
+    sourceFormat: m.sourceFormat,
+  }
+}
+
+/**
+ * Persist the owner's tombstone on the owned-post record so a boot-time
+ * restore cannot resurrect a post the user deleted (AMENDMENT 70).
+ * Best-effort: if the write fails the worst case is today's behaviour —
+ * hidden again as soon as the relayed kind-5 arrives.
+ */
+export async function markOwnedPostTombstoned(eventId: string): Promise<void> {
+  const db = await open()
+  if (!db) {
+    const rec = mstore('ownedPosts').get(eventId) as Record<string, unknown> | undefined
+    if (rec) mstore('ownedPosts').set(eventId, { ...rec, tombstoned: true })
+    return
+  }
+  return new Promise((resolve) => {
+    const tx = db.transaction('ownedPosts', 'readwrite')
+    const store = tx.objectStore('ownedPosts')
+    const req = store.get(eventId)
+    req.onsuccess = () => {
+      if (req.result && typeof req.result === 'object') {
+        try { store.put({ ...(req.result as object), tombstoned: true }, eventId) } catch { /* best effort */ }
+      }
+    }
+    tx.oncomplete = () => { db.close(); resolve() }
+    tx.onabort = tx.onerror = () => { db.close(); resolve() }
+  })
 }
 
 export async function saveOwnedPost(rec: OwnedPostRecord): Promise<void> {

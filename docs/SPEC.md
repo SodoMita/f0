@@ -915,3 +915,100 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
       disposes them on slot release / viewer handoff (the viewer itself never
       plays audio — its A key remains animation-only).
 
+70. SEARCH QUERIES CONTENT + OWN POSTS SELF-INDEX (2026-08-20): a published
+    post entered the local index ONLY through the relay echo, so a fresh
+    upload could be invisible to the board and to search ("uploaded bush.glb
+    twice, query 'bush' shows none"): echoes can lag or never arrive, and
+    the NIP-50 remote fallback cannot see posts a relay index has not
+    ingested yet. Fixes:
+    - The board search filter is a named, testable matcher
+      (`matchesSearchQuery` in thread-index.ts): case-insensitive substring
+      over the published `filename`, its base name, the post `content`
+      (the model name, AMENDMENT 66) and the event id. The search panel
+      advertises this ("name or content" placeholder/hint/legend) and the
+      "shown N models" hint live-updates as remote or restored results
+      stream in.
+    - `publishModel` returns the signed kind-1063 event; the app parses and
+      self-indexes it the moment the publish succeeds — the post is on the
+      board and searchable immediately, no echo dependency (the echo, when
+      it comes, re-adds the same meta harmlessly; the 8 s echo-wait before
+      routing is gone).
+    - The owned-post record persists a bounded, strictly validated meta
+      snapshot (`OwnedPostMeta`; pubkey, mime, size, tint, dim, filename,
+      content name, source format, cameras/anim/audio flags). At boot the
+      app rebuilds each own post's ThreadMeta from that snapshot
+      (`ownedToMeta`) — own posts stay on the board and findable after the
+      live feed's window (14 days / limit) drops them. Records older than
+      the snapshot (no meta) rely on the feed like any foreign post.
+    - Deletion cannot be undone by the restore: `doDelete` and relayed
+      kind-5s for own posts persist a `tombstoned` flag on the record
+      (`markOwnedPostTombstoned`), and boot restore skips tombstoned
+      records.
+    Guards: `bun scripts/search-unit.mjs` (filter semantics, snapshot
+    rebuild, tombstone persistence) + `studio-unit.mjs` publish checks
+    (signed-event return + persisted snapshot round trip); tsc, vite and
+    standalone builds clean.
+
+71. OWN POSTS LOAD FROM THE VERIFIED SNAPSHOT + E101 DIAGNOSTICS
+    (2026-08-20): a freshly published post could still fail to load with
+    E101 ("hash or size mismatch") even though the upload succeeded — the
+    load path is a download + SHA-256 verify against the Blossom replicas,
+    so a replica that serves different bytes (or none) broke the AUTHOR's
+    own view, with no hint which server failed. Fixes:
+    - `publishModel` returns the frozen upload snapshot (`sha256` +
+      `bytes` — the exact body that was PUT and that the event `x` tag
+      hashes). The app seeds the verified model caches with it
+      (`AssetCache.seedModelBytes`, hash-checked before it is accepted),
+      so the author's own post opens from local bytes with ZERO network
+      round trips — replicas that serve bad bytes, redirect, or are
+      unreachable can no longer break the author's own view. The hash
+      check still runs on every cache read (AMENDMENT 64), so a poisoned
+      seed can never reach Babylon.
+    - E101 is no longer a black box: `BlossomClient.download` records
+      every replica's outcome (server, HTTP status, hash mismatch with
+      the sha256 it actually returned, body-over-cap, redirect/network
+      error) and folds them into the thrown error; `AssetCache` keeps the
+      last failure per event and the error sheet shows it ("No verified
+      replica available — nostr.download: HTTP 404; …").
+    - gzip rescue: a body that starts with the gzip magic but does not
+      hash to `x` is inflated once (DecompressionStream, when available)
+      and re-hashed before the replica is given up on — some stores serve
+      pre-compressed bytes without a Content-Encoding header, and the
+      browser then hands the client gzip bytes for a model the server
+      holds intact. The hash remains the sole arbiter.
+    Guards: `bun scripts/load-unit.mjs` (exact/truncated/gzip/404/oversize
+    replicas, per-replica diagnostics, seeding with zero-network read) +
+    `studio-unit.mjs` snapshot check; tsc, vite and standalone builds
+    clean.
+
+72. FRESH POSTS CANNOT RACE THEIR OWN UPLOAD + E101 RETRY REALLY RETRIES
+    (2026-08-20): reported as "uploaded bush twice, they always fail to
+    load due hash or size mismatch — right after upload; old models show
+    correctly". The servers were not the story: a published post is
+    fetched by the client SECONDS after its PUT (the relay echo → board
+    card → poster render), while the blob can still be settling on the
+    CDN. ONE bad first fetch called `failHash`, and that mark was
+    permanent for the rest of the session — no code path ever cleared it
+    or re-attempted the download, so every later tap replayed E101
+    without touching the network. Old posts never race their own upload,
+    so they were never marked. Fixes:
+    - Seeding wins the race: `publishStudio` now seeds the verified
+      upload snapshot (AMENDMENT 71) BEFORE self-indexing the post
+      (`refreshBoard` → preview pool). The pool's first fetch hits the
+      local cache — own posts never touch the network at all, so the
+      CDN race cannot mark them.
+    - Failure marks are revocable and retry is real:
+      `AssetCache.unfail()` clears the event's hash-failure + failure
+      detail; `ThreadIndex.unrejectHash()` clears the meta flag; the
+      E101 sheet's action now runs `retryModel()` (clear both, re-list
+      the card, re-open and re-download) instead of just routing to the
+      board. Verified local bytes, when present, serve immediately after
+      the clear.
+    - The viewer error split is honest: download/verify failures show
+      E101 (with per-replica detail, AMENDMENT 71); E102 remains for
+      model bytes that fetched and verified but failed GLB validation
+      or the loader.
+    Guards: `bun scripts/load-unit.mjs` (marked post refuses while the
+    flag stands; unfail + retry serves the seeded cache again) +
+    `search-unit.mjs` (rejectHash/unrejectHash round trip); tsc, vite
+    and standalone builds clean.

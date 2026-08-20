@@ -5,6 +5,65 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 
+- [x] **Fresh posts can't race their own upload + E101 retry really
+      retries** (agent arena, 2026-08-20, SPEC AMENDMENT 72): "uploaded
+      bush twice, they always fail to load due hash or size mismatch —
+      right after upload; old models show correctly". Root cause was NOT
+      the Blossom API: a fresh post is fetched by the client seconds
+      after its PUT (relay echo → board card poster render) while the
+      blob can still be settling on the CDN; one bad first fetch called
+      `failHash` and that mark was permanent for the session — nothing
+      ever cleared it or re-attempted the download, so every later tap
+      replayed E101 without network. Old posts never race their upload,
+      so they were never marked. Now the publish seeds the verified
+      upload snapshot BEFORE the post becomes fetchable (own posts never
+      touch the network), failure marks are revocable (`AssetCache.unfail`
+      + `ThreadIndex.unrejectHash`), and the E101 action actually retries
+      (`retryModel`: clear marks, re-list card, re-download). The viewer
+      also splits E101 (download/verify, with per-replica detail) from
+      E102 (parse) honestly. Guards: load-unit retry checks + search-unit
+      reject/unreject round trip; tsc + vite + standalone clean.
+
+- [x] **Own posts load from the verified snapshot + E101 diagnostics**
+      (agent arena, 2026-08-20, SPEC AMENDMENT 71): fresh uploads could
+      still fail to load with E101 ("hash or size mismatch") — the load
+      path re-downloads from the Blossom replicas and re-hashes, so a
+      replica serving wrong bytes (or none) broke the author's OWN view.
+      Now `publishModel` returns the frozen upload snapshot and the app
+      seeds the verified model caches with it (`AssetCache.seedModelBytes`,
+      hash-checked on the way in), so an own post opens from local bytes
+      with zero network — replicas cannot break the author's view (the
+      hash re-check still runs on every read, so poisoned seeds never
+      reach Babylon). E101 is no longer a black box: downloads record
+      every replica's outcome (server, HTTP status, hash mismatch with
+      the sha256 it actually returned, over-cap, redirect/network) and the
+      error sheet shows it; gzip bodies served without Content-Encoding
+      get one inflate-and-re-hash rescue before the replica is abandoned.
+      Guards: `bun scripts/load-unit.mjs` (12 checks: exact/truncated/
+      gzip/404/oversize replicas, diagnostics, zero-network seeded read) +
+      `studio-unit.mjs` snapshot check; tsc + vite + standalone clean.
+
+- [x] **Search queries content + own posts self-index** (agent arena,
+      2026-08-20, SPEC AMENDMENT 70): a published post was findable only
+      through the relay echo — an upload followed by a search could show
+      nothing ("uploaded bush.glb twice, query 'bush' shows none"), because
+      the echo can lag or never arrive and the NIP-50 fallback cannot see
+      posts a relay index has not ingested yet. Now the filter matches the
+      post `content` (the model name, AMENDMENT 66) alongside filename /
+      base name / event id (`matchesSearchQuery`, thread-index.ts), and a
+      publish is **self-indexed** from the signed event the moment it
+      succeeds — no echo dependency, instant board + search hit. The
+      owned-post record also persists a bounded, validated meta snapshot
+      (`OwnedPostMeta` + `ownedToMeta`), so boot restores this browser's own
+      posts even after the live feed's window (14 days / limit) drops them;
+      records marked tombstoned at delete time (doDelete + relayed kind-5s)
+      are skipped, so deletion still hides permanently. The search panel now
+      advertises "name or content" (placeholder/hint/legend) and the hint
+      count live-updates as remote/restored results stream in. Guards:
+      `bun scripts/search-unit.mjs` (filter semantics, snapshot rebuild,
+      tombstone persistence) + extended `studio-unit.mjs` publish checks;
+      tsc + vite + standalone builds clean.
+
 - [x] **Library symbols load (CSP Draco fix) + tint behaves like text**
       (agent arena, 2026-08-20, SPEC AMENDMENT 68): the whole symbol library
       silently failed to load in both builds — the local Draco decoder's wasm
@@ -77,8 +136,9 @@ move it to **Done** with a commit reference. One agent per area.
 - [x] **Search models by name** (agent arena, 2026-08-19): a search menu
       (magnifier button in the topbar → overlay panel) filters the board by
       model name. Matching is a case-insensitive substring over the model's
-      published filename, its base name (extension stripped) and its event id,
-      so older posts without a `filename` tag are still findable. The board
+      published filename, its base name (extension stripped), its event id
+      and — since AMENDMENT 66/70 — its `content` (the model name), so older
+      posts without a `filename` tag are still findable. The board
       re-filters live as you type; a `shown N models for "…"` hint and an
       accent-highlighted search button reflect the active filter. It is an
       overlay like `#/network` — it leaves the view behind it mounted and

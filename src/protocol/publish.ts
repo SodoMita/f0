@@ -1,9 +1,9 @@
-import { finalizeEvent, generateSecretKey, type EventTemplate } from 'nostr-tools'
+import { finalizeEvent, generateSecretKey, type EventTemplate, type Event } from 'nostr-tools'
 import { BlossomClient } from './blossom'
 import { RelayPool } from './nostr'
 import { bytesToHex } from '../util/hex'
 import { FORM_ZERO_TAG, MODEL_KIND, LIMITS } from '../theme'
-import { saveOwnedPost } from './storage'
+import { saveOwnedPost, type OwnedPostMeta } from './storage'
 import { freezeBlob, throwIfAborted } from './hash'
 
 export type PublishRole = 'root' | 'reply'
@@ -35,6 +35,19 @@ export interface PublishResult {
   eventId: string
   ok: string[]
   failed: string[]
+  /** The signed kind-1063 event (AMENDMENT 70). The caller indexes it
+   *  locally so a fresh post is on the board and searchable by name/content
+   *  immediately — the relay echo is no longer a dependency (echoes can lag
+   *  or never arrive, and a NIP-50 relay index cannot see posts it has not
+   *  ingested yet). */
+  event?: Event
+  /** The frozen upload snapshot (AMENDMENT 71): the exact bytes the event
+   *  `x` tag hashes, same body that was PUT to the Blossom replicas. The
+   *  caller seeds the local verified model caches with it, so the author's
+   *  own post loads without any network round trip — replicas that serve
+   *  bad bytes (or none) cannot break the author's own view. */
+  sha256?: string
+  bytes?: Uint8Array
 }
 
 export interface PublishProgress {
@@ -136,6 +149,23 @@ export async function publishModel(
     // Persist the deletion capability before broadcasting. If the encrypted
     // record cannot be stored (quota/CryptoKey clone failure), fail closed: do
     // not publish a post this browser can no longer sign a deletion for.
+    // AMENDMENT 70: the record also carries a bounded searchable snapshot of
+    // the post, so boot can rebuild its index entry — own posts must stay
+    // findable by name/content after the live feed's window drops them.
+    const meta: OwnedPostMeta = {
+      pubkey: signed.pubkey,
+      mime: 'model/gltf-binary',
+      size: model.size,
+      tint,
+      width: input.width,
+      height: input.height,
+      filename: input.filename?.slice(0, 120),
+      name: (input.name ?? '').slice(0, LIMITS.contentChars).trim() || undefined,
+      sourceFormat: input.sourceFormat,
+      cameraCount: input.cameraCount,
+      animHint: input.hasAnimation,
+      hasAudio: input.hasAudio,
+    }
     await saveOwnedPost({
       eventId,
       secretKey: bytesToHex(secret),
@@ -145,12 +175,13 @@ export async function publishModel(
       createdAt: now,
       rootId: role === 'reply' ? input.rootId : eventId,
       parentId: role === 'reply' ? input.parentId : undefined,
+      meta,
     })
 
     deps.onProgress?.({ stage: 'relay' })
     const { ok, failed } = await deps.pool.publish(template, secret)
     deps.onProgress?.({ stage: 'done', ok: ok.length, failed: failed.length })
-    return { eventId, ok, failed }
+    return { eventId, ok, failed, event: signed, sha256: modelSha, bytes: modelSnap.bytes }
   } finally {
     secret.fill(0)
   }
