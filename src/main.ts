@@ -15,6 +15,7 @@ import { isAbortError } from './protocol/hash'
 import { configureDraco } from './model/draco'
 import { enforceOffline } from './model/offline'
 import { DEFAULTS, LIMITS, POSTER_W, POSTER_H, theme } from './theme'
+import { drawPosterPixels } from './model/poster'
 import { luminance } from './core/gfx'
 import { loadNetworkConfig } from './protocol/storage'
 import { DeletionService } from './protocol/deletion'
@@ -444,7 +445,7 @@ async function boot(): Promise<void> {
   let previewTimer = 0
   let previewBusy = false
   let previewQueued = false
-  let previewBitmap: ImageBitmap | null = null
+  let previewFrame: { pixels: Uint8Array; width: number; height: number } | null = null
 
   try { previewHidden = localStorage.getItem('f0:preview-hidden') === '1' } catch { /* private mode */ }
 
@@ -455,13 +456,9 @@ async function boot(): Promise<void> {
     btnPreviewReveal.hidden = !previewHidden || !has
   }
 
-  function drawPreviewBitmap(target: HTMLCanvasElement | null, bmp: ImageBitmap): void {
+  function drawPreviewFrame(target: HTMLCanvasElement | null, frame: { pixels: Uint8Array; width: number; height: number }): void {
     if (!target) return
-    if (target.width !== bmp.width || target.height !== bmp.height) {
-      target.width = bmp.width
-      target.height = bmp.height
-    }
-    target.getContext('2d')?.drawImage(bmp, 0, 0)
+    drawPosterPixels(target, frame.pixels, frame.width, frame.height)
   }
 
   /** Render the CURRENT studio content as a card at `dim` and paint both
@@ -472,12 +469,10 @@ async function boot(): Promise<void> {
     try {
       const content = await studio.getContentForPublish()
       const r = await assets.renderPosterFor(content.blob, previewDim.width, previewDim.height)
-      const bmp = await createImageBitmap(r.blob)
-      previewBitmap?.close()
-      previewBitmap = bmp
-      drawPreviewBitmap(previewCanvas, bmp)
+      previewFrame = { pixels: r.pixels, width: r.width, height: r.height }
+      drawPreviewFrame(previewCanvas, previewFrame)
       if (previewPageEl && !previewPageEl.hidden) {
-        drawPreviewBitmap(previewPageCanvas, bmp)
+        drawPreviewFrame(previewPageCanvas, previewFrame)
         applyPreviewFrameSize(previewDim.width, previewDim.height)
       }
     } catch {
@@ -535,10 +530,10 @@ async function boot(): Promise<void> {
   function openPreviewPage(): void {
     if (!previewPageEl) return
     previewPageEl.hidden = false
-    if (previewBitmap) {
-      drawPreviewBitmap(previewPageCanvas, previewBitmap)
-      applyPreviewFrameSize(previewBitmap.width, previewBitmap.height)
-      previewDim = { width: previewBitmap.width, height: previewBitmap.height }
+    if (previewFrame) {
+      drawPreviewFrame(previewPageCanvas, previewFrame)
+      applyPreviewFrameSize(previewFrame.width, previewFrame.height)
+      previewDim = { width: previewFrame.width, height: previewFrame.height }
     } else {
       applyPreviewFrameSize(previewDim.width, previewDim.height)
       scheduleStudioPreview(0)

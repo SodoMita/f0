@@ -5,6 +5,13 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 
+- [x] **Posters render to a transparent RTT, never a PNG** (agent arena, 2026-08-19,
+      SPEC AMENDMENT 65): each post gets its own transparent RenderTargetTexture
+      (detached after capture). No PNG, no pixel cache, no blank-check retry —
+      cards sample the RTT in place. Camera fallback is a frustum-vs-AABB test.
+      Opaque materials write alpha=1; card shader treats non-black RGB as coverage.
+      Studio/tests take one `snapshot()` readback. IDB keeps anim/footprint only.
+
 - [x] **Search models by name** (agent arena, 2026-08-19): a search menu
       (magnifier button in the topbar → overlay panel) filters the board by
       model name. Matching is a case-insensitive substring over the model's

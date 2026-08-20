@@ -79,22 +79,22 @@ await page.evaluate(() => {
 })
 
 // ------------------------------------------------------------- helpers
-const posterStats = (bytesArray) => page.evaluate(async (blobBytes) => {
-  const bmp = await createImageBitmap(new Blob([new Uint8Array(blobBytes)]))
-  const c = document.createElement('canvas')
-  c.width = bmp.width; c.height = bmp.height
-  const ctx = c.getContext('2d')
-  ctx.drawImage(bmp, 0, 0)
-  const d = ctx.getImageData(0, 0, c.width, c.height).data
+const posterStats = (pixels) => {
+  const d = pixels
   let red = 0, green = 0, opaque = 0
   for (let i = 0; i < d.length; i += 4) {
-    if (d[i + 3] < 16) continue
+    if (d[i + 3] < 16 && d[i] < 16 && d[i + 1] < 16 && d[i + 2] < 16) continue
     opaque++
     if (d[i] > 140 && d[i + 1] < 120 && d[i + 2] < 120) red++
     if (d[i] < 120 && d[i + 1] > 140 && d[i + 2] < 150) green++
   }
-  return { red: red / opaque, green: green / opaque, opaque }
-}, bytesArray)
+  return { red: opaque ? red / opaque : NaN, green: opaque ? green / opaque : NaN, opaque }
+}
+
+const renderPosterPixels = (modelBytes) => page.evaluate(async (bytes) => {
+  const res = await window.__form0.assets.renderPosterFor(new Blob([new Uint8Array(bytes)], { type: 'model/gltf-binary' }))
+  return [...res.pixels]
+}, modelBytes)
 
 const fetchModel = (name) => page.evaluate(async (u) => {
   const r = await fetch(u)
@@ -104,36 +104,24 @@ const fetchModel = (name) => page.evaluate(async (u) => {
 // -------------------------------------------- 1. poster camera policy
 {
   // a = camera framing ONLY the red cube (green cube is far off-axis)
-  const a = await posterStats(await page.evaluate(async (bytes) => {
-    const res = await window.__form0.assets.renderPosterFor(new Blob([new Uint8Array(bytes)], { type: 'model/gltf-binary' }))
-    return [...new Uint8Array(await res.blob.arrayBuffer())]
-  }, await fetchModel('a.glb')))
+  const a = posterStats(await renderPosterPixels(await fetchModel('a.glb')))
   check('poster from authored camera: red visible', a.red > 0.05, `red=${(a.red * 100).toFixed(1)}%`)
   check('poster from authored camera: green out of frame', a.green < 0.01, `green=${(a.green * 100).toFixed(2)}%`)
 
   // b = static, NO camera -> auto-fit must show both cubes
-  const b = await posterStats(await page.evaluate(async (bytes) => {
-    const res = await window.__form0.assets.renderPosterFor(new Blob([new Uint8Array(bytes)], { type: 'model/gltf-binary' }))
-    return [...new Uint8Array(await res.blob.arrayBuffer())]
-  }, await fetchModel('b.glb')))
+  const b = posterStats(await renderPosterPixels(await fetchModel('b.glb')))
   check('poster without camera auto-fits both cubes', b.red > 0.03 && b.green > 0.03,
     `red=${(b.red * 100).toFixed(1)}% green=${(b.green * 100).toFixed(1)}%`)
 
   // d = cam0 red view, cam1 green view, event advertises preview-camera=1:
   // poster (first camera) must be red; the LIVE preview must use cam1 (green)
-  const d = await posterStats(await page.evaluate(async (bytes) => {
-    const res = await window.__form0.assets.renderPosterFor(new Blob([new Uint8Array(bytes)], { type: 'model/gltf-binary' }))
-    return [...new Uint8Array(await res.blob.arrayBuffer())]
-  }, await fetchModel('d.glb')))
+  const d = posterStats(await renderPosterPixels(await fetchModel('d.glb')))
   check('two-camera model: poster uses cam0 (red)', d.red > 0.05 && d.green < 0.01,
     `red=${(d.red * 100).toFixed(1)}% green=${(d.green * 100).toFixed(2)}%`)
 
   // f = authored camera that frames NOTHING: the poster must fall back to
   // auto-fit (both cubes visible) instead of going blank -> placeholder.
-  const f = await posterStats(await page.evaluate(async (bytes) => {
-    const res = await window.__form0.assets.renderPosterFor(new Blob([new Uint8Array(bytes)], { type: 'model/gltf-binary' }))
-    return [...new Uint8Array(await res.blob.arrayBuffer())]
-  }, await fetchModel('f.glb')))
+  const f = posterStats(await renderPosterPixels(await fetchModel('f.glb')))
   check('blank authored camera falls back to auto-fit (not placeholder)',
     !Number.isNaN(f.red) && f.opaque > 1000 && f.red > 0.03 && f.green > 0.03,
     `red=${(f.red * 100).toFixed(1)}% green=${(f.green * 100).toFixed(1)}%`)

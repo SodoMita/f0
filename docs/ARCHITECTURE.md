@@ -35,9 +35,9 @@ src/
     limits.ts        validateGLB() — pre-load GLB complexity caps (crash guard)
     facing.ts        worldBox (union AABB) + dominantFacing (thin-axis / authored
                      normals) + frameDistance (aspect-aware tight fit); auto-fit math
-    poster.ts        GLB → local RGBA/PNG via scene.render() + camera.outputRenderTarget,
-                     rendered at the post's declared `dim` (default 448×280),
-                     blank-frame retry loop; format v4: never fetched, never uploaded
+    poster.ts        GLB → dedicated transparent RTT via scene.render() +
+                     camera.outputRenderTarget, rendered at the post's `dim`
+                     (default 448×280); format v4: never fetched, never a PNG
   board/
     board.ts         responsive 1–3 col grid, scroll+inertia, tap→viewer, reply badges
     cardMaterial.ts  unlit quad ShaderMaterial (tex.rgb*tint, tex.a*opacity),
@@ -69,7 +69,7 @@ relays ──(kind 1063 + 5)──▶ RelayPool ─▶ parseModelEvent ─▶ Th
                                                               ▼
                     Board ◀── setMetas/setReplyCount ──── main.ts
                      │  per card:
-                     ├─ AssetCache.getPoster ─▶ PosterRenderer ─▶ RawTexture (no flip)
+                     ├─ AssetCache.getPoster ─▶ PosterRenderer ─▶ transparent RTT (no flip)
                      └─ PreviewPool.request ─▶ RTT (no flip) ─────▶ card shader
    tap card ─▶ #/viewer/:id ─▶ Viewer.load ─▶ authored cameras + orbit
    tap badge ─▶ #/thread/:id ─▶ ThreadView.open ─▶ tidy-tree 2D map
@@ -107,7 +107,7 @@ With that camera **no texture kind needs any flip**:
 
 | Source | Storage | flip |
 |---|---|---|
-| Posters (`RawTexture`, `invertY=true` upload) | rows flipped at upload | (0,0) |
+| Posters (`RenderTargetTexture`, or cached `RawTexture` invertY=false) | GL bottom-up | (0,0) |
 | Badges / backdrops (`DynamicTexture`, `invertY` default true) | rows flipped at upload | (0,0) |
 | Live preview (`RenderTargetTexture`) | GL bottom-up | (0,0) |
 

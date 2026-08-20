@@ -49,7 +49,9 @@ function paint(ctx: CanvasRenderingContext2D): void {
 }
 
 function rawProbe(): RawTexture {
-  // top-down RGBA rows, exactly like AssetCache's poster upload
+  // top-down RGBA rows (invertY=true). Cached posters now upload GL
+  // bottom-up with invertY=false (same as an RTT); this probe still
+  // covers the invertY=true RawTexture kind.
   const data = new Uint8Array(S * S * 4)
   for (let y = 0; y < S; y++) {
     for (let x = 0; x < S; x++) {

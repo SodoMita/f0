@@ -240,8 +240,8 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     only as a fallback (WebGL1 / missing internals).
 
 29. Heavy CPU work goes to inline workers. Signature verification
-    (`protocol/verify.worker.ts`) and poster encoding
-    (`model/encode.worker.ts`) are `?worker&inline` — blob workers, which the
+    (`protocol/verify.worker.ts`) is `?worker&inline` (poster PNGs were removed
+    in AMENDMENT 65). Blob workers, which the
     CSP already allows (`worker-src 'self' blob:`) and which are verified to
     work from `file://` in the standalone build. Both have main-thread
     fallbacks. ALSO: nostr-tools' Relay verifies every matching event itself,
@@ -752,3 +752,18 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     - `validateGLBCached` is memoised by the actual `Uint8Array` identity
       (WeakMap), not the claimed sha.
     - Guard: `scripts/hash-unit.mjs` + `scripts/verify-hash.mjs`.
+
+65. POSTERS RENDER TO A TRANSPARENT RTT, NEVER A PNG (2026-08-19):
+    The card texture IS the offscreen render target. PosterRenderer allocates
+    a dedicated transparent RTT per post (`scene.clearColor = (0,0,0,0)`,
+    `refreshRate = RENDER_ONCE`, then detached from `customRenderTargets` so
+    the next poster.scene.render() cannot wipe earlier cards). No PNG, no
+    pixel cache, no blank-check retry loop: cards sample the RTT in place
+    (VRAM stays VRAM). Camera choice is a CPU frustum-vs-AABB test — an
+    authored camera that misses the model falls back to auto-fit without
+    reading the framebuffer. Pixel blank-checks were a waste: existing posts
+    are visible in the viewer anyway, and the probe burned 14 readbacks +
+    sleeps per card. `readPixels` runs only for studio preview / test probes
+    (`snapshot()`). Opaque materials write alpha=1; the card shader treats
+    non-black RGB as coverage. IDB keeps anim/footprint flags only (p7).
+    Guard: offline-verify + verify-publish sample a one-shot snapshot.

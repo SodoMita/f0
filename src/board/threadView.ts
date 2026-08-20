@@ -356,7 +356,7 @@ export class ThreadView {
   /** Show the node's poster texture (fallback after its live preview is released). */
   private showNodePoster(n: TNode): void {
     if (n.poster) {
-      this.crossfadeTo(n, n.poster, '#FFFFFF', 'raw')
+      this.crossfadeTo(n, n.poster, '#FFFFFF', 'rtt')
     } else {
       setCardTexture(n.mat, null)
       setCardTint(n.mat, n.meta.tint || theme.panel)
@@ -565,7 +565,7 @@ export class ThreadView {
         // the map may have been cleared/reopened while the poster rendered
         if (!tex || gen !== this.generation || mesh.isDisposed()) return
         node.poster = tex
-        this.crossfadeTo(node, tex, '#FFFFFF', 'raw')
+        this.crossfadeTo(node, tex, '#FFFFFF', 'rtt')
         spinner.setEnabled(false)
         this.syncPreviews()
         this.form.kick()
