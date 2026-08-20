@@ -141,7 +141,10 @@
           </section>
 
           <section class="studio-panel" data-panel="type" hidden>
-            <textarea id="studio-text" spellcheck="false" autocomplete="off" placeholder="type anything&#10;supports&#10;newlines" rows="3">/0</textarea>
+            <!-- Empty field = no text: nothing is ever seeded into the
+                 textarea, so a text-first post starts blank and typing is
+                 the only way text appears (AMEND 66 + 69). -->
+            <textarea id="studio-text" spellcheck="false" autocomplete="off" placeholder="type anything&#10;supports&#10;newlines" rows="3"></textarea>
             <div class="text-controls">
               <label>scale<input id="text-scale" type="number" step="0.05" value="1" /></label>
               <label>tracking<input id="text-tracking" type="number" step="0.5" value="0" /></label>
@@ -155,7 +158,7 @@
               </label>
               <label class="full">text color is publish tint</label>
             </div>
-            <p class="hint" id="text-budget">/0 · 0 tris</p>
+            <p class="hint" id="text-budget">0 chars · 0 tris</p>
           </section>
 
           <section class="studio-panel" data-panel="paint" hidden>
@@ -175,9 +178,9 @@
             <div class="text-controls">
               <label>size<input id="paint-size" type="number" step="0.01" value="0.25" /></label>
               <label>gap<input id="paint-spacing" type="number" step="0.05" value="0.32" /></label>
-              <label>ink
+              <label>brush
                 <span class="align-row">
-                  <input id="paint-color" type="color" value="#FF5C35" title="ink color" />
+                  <input id="paint-color" type="color" value="#FF5C35" title="brush color" />
                 </span>
               </label>
             </div>
@@ -192,6 +195,17 @@
           </section>
 
           <section class="studio-panel" data-panel="symbols" hidden>
+            <!-- Object tint: colors the NEXT symbol placed. Selecting a
+                 placed symbol loads its color here; changing it while a
+                 symbol is selected repaints only that symbol (AMEND 68/69). -->
+            <div class="text-controls">
+              <label>tint
+                <span class="align-row">
+                  <input id="symbol-color" type="color" value="#FF5C35" title="object tint — the next symbol placed takes this color" />
+                </span>
+              </label>
+              <label class="full">object tint · next symbol placed takes it</label>
+            </div>
             <div class="symbol-grid" id="symbol-grid"></div>
           </section>
 

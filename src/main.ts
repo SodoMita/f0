@@ -108,6 +108,7 @@ async function boot(): Promise<void> {
   const studioText = $('studio-text') as HTMLTextAreaElement
   const studioAlign = $('studio-align') as HTMLButtonElement
   const studioColor = $('studio-color') as HTMLInputElement
+  const symbolColor = $('symbol-color') as HTMLInputElement
   const textScale = $('text-scale') as HTMLInputElement
   const textTracking = $('text-tracking') as HTMLInputElement
   const textLeading = $('text-leading') as HTMLInputElement
@@ -704,15 +705,10 @@ async function boot(): Promise<void> {
       p.hidden = p.dataset.panel !== tab
     })
     studio.setPaintMode(tab === 'paint')
-    // Seed '/0' ONLY for a text-first post. With an imported model the empty
-    // text field must stay empty so NO text is added to the model (AMEND 66).
-    if (tab === 'type' && !studio.text && !studio.hasModel()) {
-      studio.setText('/0'); studio.rebuildText()
-      // seeding text IS content: publish must enable (it only listened to
-      // the textarea's input event, so the seeded '/0' left it dead)
-      btnStudioPublish.disabled = !studio.hasContent()
-    }
-    if (tab === 'paint') btnStudioPublish.disabled = !studio.hasContent()
+    // Empty text field = NO text (AMEND 66/69): the type tab never seeds
+    // '/0', so a blank field adds nothing and publish stays disabled until
+    // the player actually adds content (text, model, symbols or paint).
+    if (tab === 'paint' || tab === 'type') btnStudioPublish.disabled = !studio.hasContent()
     studio.kick(120)
   }
   document.querySelectorAll<HTMLButtonElement>('.rail-btn').forEach((b) =>
@@ -728,7 +724,10 @@ async function boot(): Promise<void> {
     // 2026-08-20).
     setStudioStatus(msg, 'err')
     errorSheet.show(ERRORS.STUDIO_IMPORT(msg))
-  }, () => studioColor.value)
+    // The symbols tab has its OWN tint picker (AMENDMENT 69): the next
+    // placed symbol takes the symbols tab's object tint, not the text
+    // tab's color. Both pickers mirror a selected item's color on select.
+  }, () => symbolColor.value)
 
   // ---- Studio text + camera settings ----
   const ALIGN_CYCLE: Array<'left' | 'center' | 'right'> = ['left', 'center', 'right']
@@ -737,7 +736,7 @@ async function boot(): Promise<void> {
     if (!textBudget) return
     const m = studio.scene.meshes.find((x) => x.name === 'studio-text')
     const tris = m ? m.getTotalIndices() / 2 : 0
-    const lines = studioText.value.split('\n').length
+    const lines = studioText.value ? studioText.value.split('\n').length : 0
     textBudget.textContent = `${studioText.value.length} chars · ${lines} lines · ${tris} tris`
   }
 
@@ -794,14 +793,18 @@ async function boot(): Promise<void> {
     scheduleRebuild()
   })
 
-  // Selecting a symbol or the text mesh shows its own color in the picker
-  // (AMENDMENT 68 corrected 2026-08-21): each item keeps an independent color.
+  // Selecting a symbol or the text mesh shows its own color in BOTH pickers
+  // (AMENDMENT 68 corrected 2026-08-21 + AMENDMENT 69): each item keeps an
+  // independent color, and whichever tab is open shows the truth.
   studio.onSelect = () => {
     // Only symbols and the text mesh have their own color; an imported
-    // model's selection leaves the picker alone (AMENDMENT 68 corrected
+    // model's selection leaves the pickers alone (AMENDMENT 68 corrected
     // 2026-08-21).
     const c = studio.getSelectedColor()
-    if (c !== null) studioColor.value = c
+    if (c !== null) {
+      studioColor.value = c
+      symbolColor.value = c
+    }
   }
 
   studioColor.addEventListener('input', () => {
@@ -812,6 +815,16 @@ async function boot(): Promise<void> {
     } else {
       // No selection: the picker sets the color of the NEXT placement.
       studio.setTintColor(studioColor.value)
+    }
+  })
+
+  // Object tint on the symbols tab (AMENDMENT 69): same selection-aware
+  // behavior as the text color, scoped to the symbols tab's picker.
+  symbolColor.addEventListener('input', () => {
+    if (studio.selected) {
+      studio.setSelectedColor(symbolColor.value)
+    } else {
+      studio.setTintColor(symbolColor.value)
     }
   })
 
