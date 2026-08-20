@@ -1,6 +1,6 @@
-import { LIBRARY } from './catalog'
+import { LIBRARY, type LibraryItem } from './catalog'
 
-const urls = import.meta.glob('./glb/*.glb', {
+const urls = import.meta.glob(['./2d/*.glb', './3d/*.glb', './glb/*.glb'], {
   query: '?url',
   eager: true,
   import: 'default',
@@ -8,20 +8,22 @@ const urls = import.meta.glob('./glb/*.glb', {
 
 const cache = new Map<string, Uint8Array>()
 
-export function libraryUrl(id: string): string {
-  const url = urls[`./glb/${id}.glb`]
-  if (!url) throw new Error(`unknown library item: ${id}`)
-  return url
+export function libraryUrl(item: LibraryItem): string {
+  const keyed = urls[`./${item.dim}/${item.id}.glb`]
+  if (keyed) return keyed
+  const legacy = urls[`./glb/${item.id}.glb`]
+  if (legacy) return legacy
+  throw new Error(`unknown library item: ${item.dim}/${item.id}`)
 }
 
-export async function libraryBytes(id: string): Promise<Uint8Array> {
-  const hit = cache.get(id)
+export async function libraryBytes(item: LibraryItem): Promise<Uint8Array> {
+  const key = `${item.dim}/${item.id}`
+  const hit = cache.get(key)
   if (hit) return hit
-  if (!LIBRARY.some((item) => item.id === id)) throw new Error(`unknown library item: ${id}`)
-  const res = await fetch(libraryUrl(id))
-  if (!res.ok) throw new Error(`library fetch failed: ${id}`)
+  const res = await fetch(libraryUrl(item))
+  if (!res.ok) throw new Error(`library fetch failed: ${key}`)
   const bytes = new Uint8Array(await res.arrayBuffer())
-  cache.set(id, bytes)
+  cache.set(key, bytes)
   return bytes
 }
 

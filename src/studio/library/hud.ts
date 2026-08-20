@@ -98,20 +98,20 @@ export function bindLibraryHud(studio: Studio, onChange: () => void): void {
       if (dim !== 'all' && item.dim !== dim) continue
       const b = document.createElement('button')
       b.type = 'button'
-      b.title = item.id
-      b.setAttribute('aria-label', item.id)
+      b.title = `${item.id} (${item.dim})`
+      b.setAttribute('aria-label', `${item.id} ${item.dim}`)
       b.dataset.symbol = item.id
+      b.dataset.dim = item.dim
       b.innerHTML = svgFor(item.id)
-      b.addEventListener('click', () => { void place(item.id) })
+      b.addEventListener('click', () => { void place(item) })
       cells.append(b)
     }
   }
 
-  const place = async (id: string): Promise<void> => {
+  const place = async (item: (typeof LIBRARY)[number]): Promise<void> => {
     try {
-      const bytes = await libraryBytes(id)
-      const item = LIBRARY.find((entry) => entry.id === id)
-      await studio.addLibraryItem(bytes, id + '.glb', { faceCamera: item?.dim === '2d' })
+      const bytes = await libraryBytes(item)
+      await studio.addLibraryItem(bytes, `${item.dim}-${item.id}.glb`, { faceCamera: item.dim === '2d' })
       onChange()
     } catch (err) {
       console.warn('library place failed', err)
