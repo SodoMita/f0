@@ -22,6 +22,9 @@ export class TrackAnimator {
   // Last frame actually written to the group — stepped mode holds the pose
   // on whole frames, so most ticks write nothing.
   private lastPosed = Number.NaN
+  // Own wall clock: FormEngine drives scene.render() from its own RAF loop,
+  // NOT engine.runRenderLoop, so Babylon's engine.getDeltaTime() is always 0.
+  private lastTickAt = Number.NaN
   /** HUD hook: fired whenever the cursor moves (tick or seek). */
   onFrame: ((frame: number) => void) | null = null
 
@@ -107,8 +110,16 @@ export class TrackAnimator {
     this.seek(f)
   }
 
-  /** Advance the cursor; called once per render (scene onBeforeRender). */
-  tick(dtMs: number): void {
+  /**
+   * Advance the cursor; called once per render (scene onBeforeRender).
+   * `dtMs` optional: when omitted (or 0 — FormEngine renders via its own RAF
+   * loop, not engine.runRenderLoop, so Babylon's getDeltaTime() is always 0)
+   * the driver measures wall time between its own ticks instead.
+   */
+  tick(dtMs = 0): void {
+    const now = performance.now()
+    const measured = Number.isNaN(this.lastTickAt) ? 0 : now - this.lastTickAt
+    this.lastTickAt = now
     const g = this.groups[this.idx]
     if (!g || !this.playingFlag) return
     const span = g.to - g.from
@@ -116,7 +127,7 @@ export class TrackAnimator {
     const fps = g.targetedAnimations[0]?.animation.framePerSecond || 60
     // Render-on-demand can leave long gaps between frames; a clamped dt
     // resumes smoothly instead of jumping ahead by the idle time.
-    const dt = Math.min(dtMs, 100) / 1000
+    const dt = Math.min(dtMs > 0 ? dtMs : measured, 100) / 1000
     this.frameCursor += (this.forwardVal ? 1 : -1) * this.speedVal * fps * dt
     while (this.frameCursor > g.to) this.frameCursor -= span
     while (this.frameCursor < g.from) this.frameCursor += span

@@ -1717,6 +1717,9 @@ async function boot(): Promise<void> {
     // which view is actually on screen (the network panel is an overlay, so
     // the route alone no longer tells you) — scripts/network-panel.mjs
     __mode: () => mode,
+    // animation rail: lets tests load a multi-track GLB straight into the
+    // viewer and rebuild the HUD without a full openViewer round-trip
+    syncAnimRail,
   }
 }
 

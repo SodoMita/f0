@@ -115,7 +115,9 @@ export class Viewer {
 
     this.scene.onBeforeRenderObservable.add(() => {
       this.frameBackdrop()
-      this.animator.tick(this.scene.getEngine().getDeltaTime())
+      // no dt argument: engine.getDeltaTime() is 0 under FormEngine's
+      // demand-driven RAF loop, so the animator measures wall time itself
+      this.animator.tick()
     })
 
     // PERF: playing animation, an in-flight load, or a camera that actually
