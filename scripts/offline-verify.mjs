@@ -617,6 +617,7 @@ const fetchModel = (name) => page.evaluate(async (u) => {
       paintDisabled: document.querySelector('[data-tab="paint"]')?.disabled === true,
       paintPresent: !!document.querySelector('[data-tab="paint"]'),
       symbolsDisabled: document.querySelector('[data-tab="symbols"]')?.disabled === true,
+      symbolsPresent: !!document.querySelector('[data-tab="symbols"]'),
       camCollapsed: document.querySelector('.cam-advanced')?.open === false,
     }
   })
@@ -624,7 +625,8 @@ const fetchModel = (name) => page.evaluate(async (u) => {
     tabs.active === 'upload' && tabs.importVisible, JSON.stringify(tabs))
   check('paint tab is enabled (hand-writing editor)',
     tabs.paintPresent && !tabs.paintDisabled)
-  check('symbols tab stays disabled (later milestone)', tabs.symbolsDisabled)
+  check('symbols tab is enabled (library glbs)',
+    tabs.symbolsPresent && !tabs.symbolsDisabled)
   check('camera details collapse by default (publish stays reachable)', tabs.camCollapsed)
 
   // close affordance: the rail X leaves the studio

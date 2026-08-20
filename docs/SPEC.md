@@ -809,3 +809,18 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
       `scripts/studio-unit.mjs` (pass-through, restore-on-remove, reset,
       publishModel content + byte-identical upload end-to-end), and
       verify-publish asserts `meta.name` on the received events.
+
+67. STUDIO SYMBOL LIBRARY (2026-08-20): the symbols tab is a drop-in set of
+    low-poly 2D plates and 3D primitives (emotions, reactions, statuses,
+    shapes, objects) shipped as self-contained GLBs under
+    `src/studio/library/glb/` (traced plates in `library/2d/`). Clicking a
+    cell ADDS the mesh to the studio scene (it does not clear an imported
+    model). Faces are authored CCW / outward so lighting cannot invert. No
+    cameras/textures/skins/animations. Vertex colours/normals are quantized
+    (`KHR_mesh_quantization`); Draco is applied only when it actually
+    shrinks the file. 2D plates stay flat — never extrude a plate into a 3D
+    counterpart. Image plates are traced PNG→quantize→contour→earcut
+    (`scripts/trace-2d-glb.py`); triangles share z=0 (no stacked layers,
+    no z-fighting); source art is not committed (regenerate via the tracer).
+    Posters auto-fit; the author can still +cam.
+    Guard: `node scripts/library-unit.mjs`.

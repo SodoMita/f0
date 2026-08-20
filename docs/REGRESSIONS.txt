@@ -43,9 +43,9 @@ FEATURES MISSING (old had them)
     MSFT_audio_emitter (append BIN). Arena has AudioMixer for
     playback/routing/device enumeration only; no getUserMedia/
     MediaRecorder, no in-app record/preview, no embed-into-GLB.
-11. [OPEN] 3D BUILT-IN SYMBOLS / TEMPLATES. Old templates.ts had real
-    meshes (cube, spark, heart, modeled casket with shell/lid/cross)
-    + colors/tints. Arena symbols are 8 unicode chars rendered as text.
+11. [DONE] 3D BUILT-IN SYMBOLS / TEMPLATES. Studio library ships 54
+    authored GLBs (cube/heart/star/house/tree/… plus emotion plates)
+    with vertex colours; click to drop into the scene.
 12. [OPEN] ANIMATION EDITOR: timeline, keyframes, record, camera
     fly-through authoring, real glTF animation export (quaternion sign
     guard). Listed as next task; absent.

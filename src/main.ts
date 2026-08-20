@@ -34,6 +34,7 @@ import { handoffContainer } from './core/sceneTransfer'
 import { bindPaintHud } from './studio/paintHud'
 import { formatCount, formatSize, modelNameForPublish, modelWarnings, sizeHeatColor } from './studio/modelInfo'
 import type { ImportedModel } from './studio/studio'
+import { bindLibraryHud } from './studio/library/hud'
 
 type Mode = 'boot' | 'board' | 'viewer' | 'studio' | 'thread'
 
@@ -112,7 +113,6 @@ async function boot(): Promise<void> {
   const textLeading = $('text-leading') as HTMLInputElement
   const textExtrude = $('text-extrude') as HTMLInputElement
   const textBudget = $('text-budget')
-  const symbolGrid = $('symbol-grid')
   const camTarget = (['cam-tx','cam-ty','cam-tz'] as const).map((id) => $(id) as HTMLInputElement)
   const camYaw = $('cam-yaw') as HTMLInputElement
   const camPitch = $('cam-pitch') as HTMLInputElement
@@ -707,13 +707,9 @@ async function boot(): Promise<void> {
   document.querySelectorAll<HTMLButtonElement>('.rail-btn').forEach((b) =>
     b.addEventListener('click', () => setStudioTab(b.dataset.tab as StudioTab)),
   )
-  const SYMBOLS = ['■','●','▲','◆','★','♥','♦','♣']
-  if (symbolGrid) SYMBOLS.forEach((g, i) => {
-    const b = document.createElement('button')
-    b.textContent = g
-    b.title = `symbol ${i}`
-    b.addEventListener('click', () => { studioText.value = g; studio.setText(g); studio.rebuildText(); updateTextBudget() })
-    symbolGrid.appendChild(b)
+  bindLibraryHud(studio, () => {
+    if (!publishing) btnStudioPublish.disabled = !studio.hasContent()
+    setStudioStatus(studio.libraryCount ? `${studio.libraryCount} pieces` : '')
   })
 
   // ---- Studio text + camera settings ----

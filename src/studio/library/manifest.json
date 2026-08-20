@@ -1,0 +1,282 @@
+[
+  {
+    "id": "smile",
+    "group": "face",
+    "dim": "2d"
+  },
+  {
+    "id": "grin",
+    "group": "face",
+    "dim": "2d"
+  },
+  {
+    "id": "sad",
+    "group": "face",
+    "dim": "2d"
+  },
+  {
+    "id": "angry",
+    "group": "face",
+    "dim": "2d"
+  },
+  {
+    "id": "wow",
+    "group": "face",
+    "dim": "2d"
+  },
+  {
+    "id": "wink",
+    "group": "face",
+    "dim": "2d"
+  },
+  {
+    "id": "meh",
+    "group": "face",
+    "dim": "2d"
+  },
+  {
+    "id": "love",
+    "group": "face",
+    "dim": "2d"
+  },
+  {
+    "id": "dead",
+    "group": "face",
+    "dim": "2d"
+  },
+  {
+    "id": "cool",
+    "group": "face",
+    "dim": "2d"
+  },
+  {
+    "id": "heart",
+    "group": "react",
+    "dim": "2d"
+  },
+  {
+    "id": "star",
+    "group": "react",
+    "dim": "2d"
+  },
+  {
+    "id": "plus",
+    "group": "react",
+    "dim": "2d"
+  },
+  {
+    "id": "minus",
+    "group": "react",
+    "dim": "2d"
+  },
+  {
+    "id": "check",
+    "group": "react",
+    "dim": "2d"
+  },
+  {
+    "id": "xmark",
+    "group": "react",
+    "dim": "2d"
+  },
+  {
+    "id": "question",
+    "group": "react",
+    "dim": "2d"
+  },
+  {
+    "id": "bang",
+    "group": "react",
+    "dim": "2d"
+  },
+  {
+    "id": "thumbup",
+    "group": "react",
+    "dim": "2d"
+  },
+  {
+    "id": "thumbdown",
+    "group": "react",
+    "dim": "2d"
+  },
+  {
+    "id": "spark",
+    "group": "react",
+    "dim": "2d"
+  },
+  {
+    "id": "fire",
+    "group": "react",
+    "dim": "2d"
+  },
+  {
+    "id": "arrow",
+    "group": "react",
+    "dim": "2d"
+  },
+  {
+    "id": "ok",
+    "group": "status",
+    "dim": "3d"
+  },
+  {
+    "id": "wait",
+    "group": "status",
+    "dim": "3d"
+  },
+  {
+    "id": "off",
+    "group": "status",
+    "dim": "3d"
+  },
+  {
+    "id": "lock",
+    "group": "status",
+    "dim": "3d"
+  },
+  {
+    "id": "unlock",
+    "group": "status",
+    "dim": "3d"
+  },
+  {
+    "id": "pin",
+    "group": "status",
+    "dim": "3d"
+  },
+  {
+    "id": "flag",
+    "group": "status",
+    "dim": "3d"
+  },
+  {
+    "id": "eye",
+    "group": "status",
+    "dim": "2d"
+  },
+  {
+    "id": "bell",
+    "group": "status",
+    "dim": "3d"
+  },
+  {
+    "id": "cube",
+    "group": "shape",
+    "dim": "3d"
+  },
+  {
+    "id": "sphere",
+    "group": "shape",
+    "dim": "3d"
+  },
+  {
+    "id": "cylinder",
+    "group": "shape",
+    "dim": "3d"
+  },
+  {
+    "id": "cone",
+    "group": "shape",
+    "dim": "3d"
+  },
+  {
+    "id": "tetra",
+    "group": "shape",
+    "dim": "3d"
+  },
+  {
+    "id": "pyramid",
+    "group": "shape",
+    "dim": "3d"
+  },
+  {
+    "id": "torus",
+    "group": "shape",
+    "dim": "3d"
+  },
+  {
+    "id": "capsule",
+    "group": "shape",
+    "dim": "3d"
+  },
+  {
+    "id": "hexprism",
+    "group": "shape",
+    "dim": "3d"
+  },
+  {
+    "id": "wedge",
+    "group": "shape",
+    "dim": "3d"
+  },
+  {
+    "id": "octa",
+    "group": "shape",
+    "dim": "3d"
+  },
+  {
+    "id": "plane",
+    "group": "shape",
+    "dim": "2d"
+  },
+  {
+    "id": "house",
+    "group": "object",
+    "dim": "3d"
+  },
+  {
+    "id": "tree",
+    "group": "object",
+    "dim": "3d"
+  },
+  {
+    "id": "person",
+    "group": "object",
+    "dim": "3d"
+  },
+  {
+    "id": "crate",
+    "group": "object",
+    "dim": "3d"
+  },
+  {
+    "id": "coin",
+    "group": "object",
+    "dim": "3d"
+  },
+  {
+    "id": "key",
+    "group": "object",
+    "dim": "3d"
+  },
+  {
+    "id": "sun",
+    "group": "object",
+    "dim": "2d"
+  },
+  {
+    "id": "moon",
+    "group": "object",
+    "dim": "2d"
+  },
+  {
+    "id": "speech",
+    "group": "object",
+    "dim": "2d"
+  },
+  {
+    "id": "arrow3d",
+    "group": "object",
+    "dim": "3d"
+  },
+  {
+    "id": "house",
+    "group": "object",
+    "dim": "2d"
+  },
+  {
+    "id": "lock",
+    "group": "status",
+    "dim": "2d"
+  }
+]

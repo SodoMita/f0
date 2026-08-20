@@ -35,6 +35,17 @@ move it to **Done** with a commit reference. One agent per area.
         browser scripts (verify-publish etc.) updated but runnable only on a
         machine with playwright's chromium.
 
+- [x] **Studio symbol library — 2D + 3D low-poly GLBs** (agent arena,
+      2026-08-20, SPEC AMENDMENT 67): the symbols tab is enabled with 54
+      self-contained low-poly pieces (faces / reactions / statuses /
+      primitives / objects). Clicking a cell ADDS the mesh without clearing
+      an import; 2D plates keep flat and face the orbit camera; faces are
+      CCW / outward so lighting cannot invert; no cameras/textures/skins/
+      animations. GLBs are quantized (`KHR_mesh_quantization`); Draco only
+      when it shrinks the file (56 pieces ≈ 103 KiB). Source PNGs are NOT
+      committed — regenerate 2D plates via `scripts/trace-2d-glb.py`.
+      Guard: `node scripts/library-unit.mjs`.
+
 - [x] **Posters render to a transparent RTT, never a PNG** (agent arena, 2026-08-19,
       SPEC AMENDMENT 65): each post gets its own transparent RenderTargetTexture
       (detached after capture). No PNG, no pixel cache, no blank-check retry —
