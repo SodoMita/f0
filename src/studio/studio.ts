@@ -198,17 +198,19 @@ export class Studio {
     // having a selected mesh must not latch the demand loop on forever.
     if (this.paint.isStroking()) return true
     if (this.scene.activeCamera !== this.camera) return false
-    // Inertia is only applied DURING a scene render. If the probe's threshold
-    // is tighter than one frame's worth of decay, the render-on-demand loop
-    // stalls with the offset stuck mid-glide and the camera "jumps" forward
-    // in visible chunks. The multiplicative decay (1-inertia)^N per frame
-    // means the offset shrinks fast but visibly — keep rendering while any
-    // offset is large enough to be seen (one tick ≈ 1 mrad of orbit or 1e-3
-    // of radius), and let Babylon's own zero-snap stop the glide cleanly.
+    // Babylon only applies inertia DURING a scene render, so any threshold
+    // tight enough to "stop soon" leaves the offset frozen at the threshold
+    // value once the probe flips false — the camera "jumps" forward in
+    // visible chunks (one tick ≈ the next time the user kicks the engine).
+    // The right fix is to keep rendering until the inertia is genuinely
+    // zero; the cost is ~30 extra frames during a typical 0.5–1 s glide,
+    // which is negligible compared to the input-driven burst that started
+    // it. A small absolute floor guards against runaway perpetual renders
+    // if Babylon ever hands us an underflow (extremely rare in practice).
     const cam = this.camera
-    return Math.abs(cam.inertialAlphaOffset) > 1e-3
-      || Math.abs(cam.inertialBetaOffset) > 1e-3
-      || Math.abs(cam.inertialRadiusOffset) > 5e-3
+    return cam.inertialAlphaOffset !== 0
+      || cam.inertialBetaOffset !== 0
+      || cam.inertialRadiusOffset !== 0
   }
 
   /** Accent/tint applied to the published model's `color` tag. */
