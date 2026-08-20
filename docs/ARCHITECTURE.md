@@ -50,6 +50,9 @@ src/
   viewer/
     viewer.ts        detail viewer: orbit + authored cameras, lights, camera-
                      parented spotlight backdrop, contact shadow, stats
+    animator.ts      TrackAnimator: manual goToFrame playback driver for the
+                     animation rail (track select, timeline scrub, stepped,
+                     direction, speed) — start-once-then-pause, own wall clock
   studio/
     studio.ts        import → edit → publish: gizmos, free-fly camera, stored
                      cameras, text tool; camera stays where the user composed
