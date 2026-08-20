@@ -18,3 +18,9 @@ self.onmessage = (msg: MessageEvent<{ id: number; event: Event }>) => {
   }
   ;(self as unknown as Worker).postMessage({ id, ok })
 }
+
+// Vite's `?worker&inline` import ignores the worker entry's exports (it wraps
+// the inlined blob in its own constructor class); this default exists only so
+// bare bundlers (bun running the headless unit scripts) can resolve the
+// module. Never construct it — worker startup goes through self.onmessage.
+export default class {}

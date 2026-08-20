@@ -6,7 +6,7 @@ import { Router, type Route } from './core/router'
 import { RelayPool } from './protocol/nostr'
 import { BlossomClient } from './protocol/blossom'
 import { parseModelEvent } from './protocol/events'
-import { ThreadIndex, type ThreadMeta } from './protocol/thread-index'
+import { ThreadIndex, matchesSearchQuery, type ThreadMeta } from './protocol/thread-index'
 import { Board } from './board/board'
 import { ThreadView } from './board/threadView'
 import { Viewer } from './viewer/viewer'
@@ -19,7 +19,7 @@ import { enforceOffline } from './model/offline'
 import { DEFAULTS, LIMITS, POSTER_W, POSTER_H, theme } from './theme'
 import { drawPosterPixels } from './model/poster'
 import { luminance } from './core/gfx'
-import { loadNetworkConfig } from './protocol/storage'
+import { listOwnedPosts, loadNetworkConfig, markOwnedPostTombstoned, ownedToMeta } from './protocol/storage'
 import { DeletionService } from './protocol/deletion'
 import { SettingsStore } from './settings/store'
 import { SettingsPanel } from './settings/panel'
@@ -242,19 +242,13 @@ async function boot(): Promise<void> {
       .filter((m) => matchesSearch(m))
       .sort((a, b) => b.createdAt - a.createdAt)
 
-  // Search by model name. A model's "name" is its published filename; most
-  // models also carry a stable-ish base name (minus extension). Matching is a
-  // case-insensitive substring across the name + base name + event id (so the
-  // many older posts with no filename tag are still findable by id).
+  // Search by name OR content (AMENDMENT 70). Matching is a case-insensitive
+  // substring across the published filename, its base name (extension
+  // stripped), the post's `content` (the model name, AMENDMENT 66) and the
+  // event id — see matchesSearchQuery in thread-index.ts.
   let searchQuery = ''
   function matchesSearch(m: ThreadMeta): boolean {
-    if (!searchQuery) return true
-    const q = searchQuery.toLowerCase()
-    const base = (m.filename || '').replace(/\.[^.]+$/, '')
-    return m.filename?.toLowerCase().includes(q)
-      || base.toLowerCase().includes(q)
-      || m.name?.toLowerCase().includes(q) === true
-      || m.eventId.toLowerCase().includes(q)
+    return matchesSearchQuery(m, searchQuery)
   }
 
   assets.onHashFailed = (meta) => {
@@ -266,7 +260,7 @@ async function boot(): Promise<void> {
       router.go({ name: 'board' })
     }
     if (currentMeta?.eventId === meta.eventId) {
-      errorSheet.show(ERRORS.MODEL_DOWNLOAD(() => router.go({ name: 'board' })))
+      errorSheet.show(ERRORS.MODEL_DOWNLOAD(() => retryModel(meta.eventId), assets.failureDetail(meta.eventId)))
       router.go({ name: 'board' })
     }
   }
@@ -276,7 +270,7 @@ async function boot(): Promise<void> {
   netDot.addEventListener('click', () => router.go({ name: 'network' }))
   $('btn-add').addEventListener('click', () => router.go({ name: 'studio' }))
 
-  // ---------- search models by name ----------
+  // ---------- search models by name or content ----------
   // A small overlay menu (like the network panel) that filters the board.
   // It is an overlay: opening it keeps whatever view is behind it mounted,
   // and closing returns to that view.
@@ -308,7 +302,7 @@ async function boot(): Promise<void> {
     const total = orderedRoots()
     searchHint.textContent = searchQuery
       ? `${total.length} model${total.length === 1 ? '' : 's'} shown for “${searchQuery}”`
-      : 'Type to filter the board by model name.'
+      : 'Type to filter the board by name or content.'
     refreshBoard()
     clearTimeout(searchTimer)
     const token = ++searchToken
@@ -490,14 +484,26 @@ async function boot(): Promise<void> {
         { relays: pool.relayUrls, blossoms: blossoms.servers, pool, onProgress, signal },
       )
       void deletion.refresh().then(syncDeleteButton)
-      // The new post enters the index via the relay echo. Routing to its
-      // viewer immediately races that echo: openViewer bails to the board
-      // when the meta is not in the index yet (publish -> board flash +
-      // delete button never armed). Wait briefly for the echo instead.
-      const t0 = performance.now()
-      while (!index.byId.has(result.eventId) && performance.now() - t0 < 8000) {
-        if (signal.aborted) throw Object.assign(new Error('upload aborted'), { name: 'AbortError' })
-        await new Promise((r) => setTimeout(r, 40))
+      // AMENDMENT 71/72: seed the verified model caches BEFORE the post can
+      // be fetched by anything. The relay echo and the board's preview pool
+      // can both start fetching the fresh post within milliseconds of the
+      // publish — if seeding runs first, those fetches hit the local cache
+      // and never touch the network. That matters: a seconds-old blob can
+      // still be settling on the CDN, and one bad first fetch used to mark
+      // the post hashFailed for the REST OF THE SESSION (E101 on every
+      // later tap — "uploaded bush, always fails to load"). Own posts now
+      // never race their own upload at all.
+      if (result.sha256 && result.bytes) {
+        try { await assets.seedModelBytes(result.sha256, result.bytes) } catch { /* replica fallback */ }
+      }
+      // AMENDMENT 70: self-index the event we just signed. The post must be
+      // on the board and searchable by name/content IMMEDIATELY — the relay
+      // echo is no longer a dependency (echoes can lag or never arrive, and
+      // the NIP-50 fallback cannot see posts a relay index hasn't ingested
+      // yet). The echo, when it comes, re-adds the same meta harmlessly.
+      if (result.event) {
+        const own = parseModelEvent(result.event)
+        if (own) { index.add(own); refreshBoard() }
       }
       if (studioReply) router.go({ name: 'thread', rootId: studioReply.rootId, focusId: result.eventId })
       else router.go({ name: 'viewer', id: result.eventId })
@@ -1032,6 +1038,9 @@ async function boot(): Promise<void> {
     try {
       const { ok, failed } = await deletion.delete(id)
       index.tombstone(id)
+      // AMENDMENT 70: the owned-post record must remember the tombstone,
+      // otherwise the next boot restores the deleted post from storage.
+      void markOwnedPostTombstoned(id)
       board.setMetas(orderedRoots())
       showToast(ok.length ? `deleted · ${ok.length}/${ok.length + failed.length} relays` : 'delete failed on all relays')
       if (ok.length) router.go({ name: 'board' })
@@ -1291,7 +1300,7 @@ async function boot(): Promise<void> {
     const meta = index.byId.get(id)
     if (!meta || meta.hashFailed || assets.isHashFailed(id)) {
       if (meta?.hashFailed || assets.isHashFailed(id ?? '')) {
-        errorSheet.show(ERRORS.MODEL_DOWNLOAD(() => router.go({ name: 'board' })))
+        errorSheet.show(ERRORS.MODEL_DOWNLOAD(() => retryModel(id), assets.failureDetail(id)))
       }
       setMode('board')
       return
@@ -1341,9 +1350,17 @@ async function boot(): Promise<void> {
     }
     setLoading('model', true, 'loading model')
     try {
-      const bytes = await assets.getModelBytes(meta)
+      let bytes: Uint8Array | undefined
+      try {
+        bytes = await assets.getModelBytes(meta)
+      } catch {
+        // download/verify failure — falls through to the E101 sheet below
+      }
       if (nav !== viewerNav) return
-      if (!bytes) { errorSheet.show(ERRORS.MODEL_DOWNLOAD(() => void openViewer(id))); return }
+      if (!bytes) {
+        errorSheet.show(ERRORS.MODEL_DOWNLOAD(() => retryModel(id), assets.failureDetail(id)))
+        return
+      }
       await viewer.load(bytes, meta)
       if (nav !== viewerNav) return
       renderCamDots()
@@ -1353,6 +1370,19 @@ async function boot(): Promise<void> {
     } finally {
       if (nav === viewerNav) setLoading('model', false)
     }
+  }
+
+  // AMENDMENT 72: a failed fetch marks the post hashFailed and the board
+  // drops its card, but that failure can be TRANSIENT (a fresh blob racing
+  // its own upload on the CDN). Retry must actually retry: clear the marks,
+  // re-list the card, and re-attempt the download — instead of replaying
+  // E101 on every tap forever. Own posts typically do not even need the
+  // network: the publish already seeded their verified bytes locally.
+  function retryModel(id: string): void {
+    assets.unfail(id)
+    index.unrejectHash(id)
+    refreshBoard()
+    void openViewer(id)
   }
 
   // The network panel is an OVERLAY, not a page. `#/network` used to force
@@ -1434,6 +1464,12 @@ async function boot(): Promise<void> {
       const roots = orderedRoots()
       board.setMetas(roots)
       for (const m of roots) board.setReplyCount(m.eventId, index.childCount(m.eventId))
+      // Keep the "shown N models" hint live while a query is active: NIP-50
+      // results and restored/self-indexed posts stream in after the first
+      // keystroke, so the count would otherwise sit stale.
+      if (searchQuery) {
+        searchHint.textContent = `${roots.length} model${roots.length === 1 ? '' : 's'} shown for “${searchQuery}”`
+      }
     })
   }
 
@@ -1442,7 +1478,13 @@ async function boot(): Promise<void> {
       for (const t of event.tags) {
         if (t[0] !== 'e') continue
         const target = index.byId.get(t[1])
-        if (target && target.pubkey === event.pubkey) index.tombstone(t[1])
+        if (target && target.pubkey === event.pubkey) {
+          index.tombstone(t[1])
+          // AMENDMENT 70: an own deletion (echoed here, or made in another
+          // tab) must persist on the owned-post record or boot restore
+          // resurrects the post.
+          if (deletion.owned.has(t[1])) void markOwnedPostTombstoned(t[1])
+        }
       }
       refreshBoard()
       return
@@ -1471,6 +1513,23 @@ async function boot(): Promise<void> {
     }
     if (online > 0) warnedOffline = false
   }
+
+  // AMENDMENT 70: rebuild this browser's OWN posts from storage at boot. The
+  // live feed only carries a recent window (14 days / limit), so without
+  // this your posts can drop off the board and out of search entirely even
+  // though they still live on the relays. Tombstoned (deleted) records stay
+  // out, and records older than the snapshot (no meta) rely on the feed.
+  void listOwnedPosts().then((records) => {
+    let restored = 0
+    for (const rec of records) {
+      if (rec.tombstoned || index.byId.has(rec.eventId)) continue
+      const meta = ownedToMeta(rec)
+      if (!meta) continue
+      index.add(meta)
+      restored++
+    }
+    if (restored) { setLoading('feed', false); refreshBoard() }
+  })
 
   pool.connect()
 

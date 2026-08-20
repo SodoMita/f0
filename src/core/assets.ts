@@ -2,9 +2,10 @@ import { Texture } from '@babylonjs/core/Materials/Textures/texture'
 import { Scene } from '@babylonjs/core/scene'
 import { clearStore, del, get, put } from '../protocol/storage'
 import { BlossomClient } from '../protocol/blossom'
-import { blobMatchesHash, blobToBytes, isHashMismatch, isSha256Hex, sha256Hex } from '../protocol/hash'
+import { blobMatchesHash, blobToBytes, bytesToBlob, isHashMismatch, isSha256Hex, sha256Hex } from '../protocol/hash'
 import type { ThreadMeta } from '../protocol/thread-index'
 import { PosterRenderer, POSTER_W, POSTER_H, type Footprint, type PosterResult } from '../model/poster'
+import { LIMITS } from '../theme'
 
 // Metadata only (anim / footprint). The card texture is the live RTT —
 // we do not cache pixels (that was VRAM→RAM→VRAM).
@@ -36,6 +37,8 @@ export class AssetCache {
   private active = 0
   private paused = false
   private poster: PosterRenderer
+  /** Last per-replica download failure per event — feeds the E101 detail. */
+  private lastFailure = new Map<string, string>()
   /** Fired once per post when downloaded/cached bytes do not match `x`. */
   onHashFailed: ((meta: ThreadMeta) => void) | null = null
 
@@ -44,6 +47,19 @@ export class AssetCache {
   }
 
   isHashFailed(eventId: string): boolean { return this.hashFailed.has(eventId) }
+
+  /**
+   * Clear the failure marks for an event so a retry REALLY re-attempts the
+   * download (AMENDMENT 72). A failed fetch used to mark the post for the
+   * rest of the session with no way back — one transient bad fetch of a
+   * seconds-old blob (a fresh upload racing its own CDN propagation) turned
+   * into E101 on every later tap, forever. Verified local bytes, when
+   * present (seeded at publish), serve immediately after this.
+   */
+  unfail(eventId: string): void {
+    this.hashFailed.delete(eventId)
+    this.lastFailure.delete(eventId)
+  }
 
   private failHash(meta: ThreadMeta): void {
     if (this.hashFailed.has(meta.eventId)) return
@@ -85,6 +101,37 @@ export class AssetCache {
     // author picked, not blindly camera 0. (The field is named cameraIndex
     // here to match PreviewModel — it IS meta.previewCamera.)
     return bytes ? { bytes, sha256: meta.sha256, cameraIndex: meta.previewCamera } : undefined
+  }
+
+  /**
+   * Seed the verified model caches with bytes we already hold (AMENDMENT
+   * 71) — publishModel's frozen upload snapshot. The event `x` tag IS the
+   * hash of exactly these bytes, so a fresh own post loads from here with
+   * no network round trip at all: replicas that serve bad bytes, redirect,
+   * or are simply unreachable cannot break the author's own view. The hash
+   * check still runs on every cache read (matchesClaimed), so a poisoned
+   * seed can never reach Babylon — it falls back to the replicas instead.
+   * Returns false when the bytes do not hash to `sha256`.
+   */
+  async seedModelBytes(sha256: string, bytes: Uint8Array): Promise<boolean> {
+    const sha = sha256.toLowerCase()
+    if (!isSha256Hex(sha) || bytes.length === 0 || bytes.length > LIMITS.modelBytesHard) return false
+    try {
+      if ((await sha256Hex(bytes)) !== sha) return false
+    } catch { return false }
+    const blob = bytesToBlob(bytes, 'model/gltf-binary')
+    this.verified.set(bytes, sha)
+    this.verified.set(blob, sha)
+    this.modelBytes.set(sha, bytes)
+    this.modelBlobs.set(sha, blob)
+    this.evictModels()
+    void put('modelCache', sha, blob)
+    return true
+  }
+
+  /** Per-replica failure detail of the last failed download (E101 sheet). */
+  failureDetail(eventId: string): string {
+    return this.lastFailure.get(eventId) ?? ''
   }
 
   /**
@@ -321,10 +368,13 @@ export class AssetCache {
         } catch (err) {
           // A hash mismatch is permanent for this post (hide the card); a
           // network / oversize failure is not — the caller may retry.
+          // AMENDMENT 71: keep the per-replica detail for the E101 sheet.
+          this.lastFailure.set(meta.eventId, err instanceof Error ? err.message : String(err))
           if (isHashMismatch(err)) this.failHash(meta)
           throw err
         }
         if (!(await this.matchesClaimed(blob, meta.sha256))) {
+          this.lastFailure.set(meta.eventId, `replica bytes did not hash to ${meta.sha256.slice(0, 12)}…`)
           this.failHash(meta)
           return undefined
         }

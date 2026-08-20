@@ -31,7 +31,7 @@
            while bytes are moving. -->
       <span id="net-rate" class="net-rate" hidden></span>
       <button id="net-dot" class="net-dot" title="network relays" aria-label="network relays"></button>
-      <button id="btn-search" class="hbtn" title="search models by name" aria-label="search models by name">
+      <button id="btn-search" class="hbtn" title="search models by name or content" aria-label="search models by name or content">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.5"/><path d="M14.8 14.8 20 20"/></svg>
       </button>
       <button id="btn-shuffle" class="hbtn" title="shuffle" aria-label="shuffle">
@@ -57,9 +57,9 @@
       </span>
     </div>
 
-    <!-- Search menu: filters the board by model name. It is an OVERLAY on
-         top of whatever view is active — like the network panel, it leaves
-         the view behind it mounted and returns to it on close. -->
+    <!-- Search menu: filters the board by model name or content. It is an
+         OVERLAY on top of whatever view is active — like the network panel,
+         it leaves the view behind it mounted and returns to it on close. -->
     <div id="search-panel" class="hud" hidden>
       <div class="search-card" role="dialog" aria-label="search models">
         <div class="drawer-head">
@@ -70,9 +70,9 @@
         </div>
         <div class="search-field">
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.5"/><path d="M14.8 14.8 20 20"/></svg>
-          <input id="search-input" type="text" placeholder="type a model name…" spellcheck="false" autocomplete="off" />
+          <input id="search-input" type="text" placeholder="type a name or content…" spellcheck="false" autocomplete="off" />
         </div>
-        <p class="search-hint" id="search-hint">Type to filter the board by model name.</p>
+        <p class="search-hint" id="search-hint">Type to filter the board by name or content.</p>
       </div>
     </div>
 
@@ -342,7 +342,7 @@
           <div class="legend-row"><span class="legend-glyph"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 5.5v13l10-6.5z"/></svg></span><span>viewer — orbit with the pointer; A plays, C cycles the model's own cameras.</span></div>
           <div class="legend-row"><span class="legend-glyph"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg></span><span>create — import a GLB model and post it.</span></div>
           <div class="legend-row"><span class="legend-glyph"><span class="net-dot legend-dot"></span></span><span>relays — grey none, amber partial, green all connected. Tap for the network panel.</span></div>
-          <div class="legend-row"><span class="legend-glyph"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.5"/><path d="M14.8 14.8 20 20"/></svg></span><span>search — type a model name to filter the board.</span></div>
+          <div class="legend-row"><span class="legend-glyph"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.5"/><path d="M14.8 14.8 20 20"/></svg></span><span>search — type a name or content to filter the board.</span></div>
           <div class="legend-row"><span class="legend-glyph"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v10m0 0 4.5-4.5M12 14l-4.5-4.5"/><path d="M5 19h14"/></svg></span><span>save — download the original GLB bytes of the open model.</span></div>
         </div>
         <button id="btn-legend-ok" class="legend-ok">OK</button>
