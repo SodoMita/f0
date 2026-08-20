@@ -1305,29 +1305,6 @@ export class Board {
     this.layout()
   }
 
-  /**
-   * Pause the feed: drop live GLBs so the viewer is the only resident model
-   * (SPEC RUNTIME "viewer = 1 model + paused feed") and a hidden tab does
-   * not keep five parsed containers in GPU RAM overnight.
-   */
-  detach(): void {
-    this.previewPool.releaseAll()
-    this.previewPool.prune()
-    for (const slot of this.cards) {
-      if (!slot.live) continue
-      slot.live = null
-      this.showPoster(slot)
-      this.positionExtras(slot)
-    }
-  }
-
-  /** Resume live previews for on-screen cards after detach() / tab wake. */
-  attach(): void {
-    this.lastSyncScroll = Number.NEGATIVE_INFINITY
-    this.refreshVisibility()
-    this.form.kick()
-  }
-
   dispose(): void {
     for (const c of this.cards) this.release(c)
     for (const l of this.seps) l.dispose()

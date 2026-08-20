@@ -13,8 +13,8 @@ move it to **Done** with a commit reference. One agent per area.
       closing the previous one, so sockets + REQ subs grew without bound.
       Now: one in-flight open per URL, drop the previous socket before
       reconnecting, idempotent retry timer, 8s handshake timeout, verify-
-      worker jobs time out at 8s, board live-preview GLBs release when the
-      board leaves the screen and after 20s in a hidden tab. Guard:
+      worker jobs time out at 8s. Live preview GLBs stay resident (already
+      capped by settings; dropping them just re-parses). Guard:
       `scripts/relay-pool-unit.mjs`.
 
 - [x] **Fresh posts can't race their own upload + E101 retry really

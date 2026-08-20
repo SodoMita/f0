@@ -1030,9 +1030,9 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
       socket forever.
     - Verify-worker jobs time out at 8s (a stuck worker used to pin
       every event in `jobs` forever while relays kept sending).
-    - Board live-preview GLBs are released when the board leaves the
-      screen (SPEC "viewer = 1 model + paused feed") and after 20s in a
-      hidden tab; wake re-requests only the active view.
-    Guard: `node --experimental-strip-types scripts/relay-pool-unit.mjs`
+    Live preview GLBs are NOT dropped on idle or on hide — they are
+    small, already capped by settings (livePreviews / keepOffscreen /
+    modelRamBudget), and dropping them just re-parses on wake.
+    Guard: `npx tsx scripts/relay-pool-unit.mjs`
     (failed handshake retries once, eight remote drops stay at 1 live
     socket, close() stops the loop, applyRelays/connect are idempotent).
