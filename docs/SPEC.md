@@ -1248,3 +1248,25 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     67…300% zoom, that the buffer tracks the device ratio (sharpness), that
     studio ortho follows four window sizes plus a route re-entry, and that
     manual mode letterboxes instead of stretching.
+80. SQUARE/TRIANGLE PAINT BRUSHES + RUNTIME MODEL ICONS (2026-08-21):
+    the paint editor's plate brush is player-facing `square` (shape id 4,
+    replacing the old technical `quad` name) and gains a `triangle` plate
+    (shape id 5). Both face local +Z and use the writing-surface orientation;
+    they travel through the same packed store, thin-instance renderer,
+    picking and export bake as every other brush. `paint/shapes.ts` is the
+    canonical mesh factory used by BOTH the editor and its icons, so an icon
+    cannot drift away from the geometry it paints.
+    Paint buttons and every cell in the Shapes library must show the real
+    model, not Unicode glyphs or hand-authored SVG approximations.
+    `RuntimeModelIcons` owns one transparent offscreen Scene on the EXISTING
+    Engine/context. It serializes 96×96 captures through
+    `camera.outputRenderTarget` + `scene.render()`, force-compiles the material
+    before the one-shot RTT (otherwise the first icon is blank), reads the
+    texture once, and supplies the HUD with a transparent PNG object URL.
+    Library GLBs are validated before Babylon loads them; their thumbnails
+    render lazily through IntersectionObserver and cache for the session.
+    No second Engine, WebGL context, visible canvas or network asset exists.
+    Guards: `bun scripts/paint-unit.mjs` and
+    `TARGET_URL=http://localhost:5173/ bun run check:paint-icons` (asserts the
+    square/triangle source geometry, selection, packed-store round-trip,
+    ≥42px targets, no SVGs, and non-zero alpha in every runtime texture).

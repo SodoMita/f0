@@ -22,6 +22,14 @@ move it to **Done** with a commit reference. One agent per area.
       manual resolution with `aspectLock` off now LETTERBOXES the canvas
       instead of stretching a mismatched buffer to fill the window.
       Guard: `node scripts/zoom.mjs`.
+- [x] **Square/triangle paint brushes + runtime model thumbnails** (agent arena,
+      2026-08-21, SPEC AMENDMENT 80, commit cd91f2e): the paint editor now has
+      named square and triangle plate brushes. Paint buttons and every Shapes
+      library cell show a transparent RTT capture of the exact mesh/GLB they
+      use instead of a font glyph or hand-drawn SVG. Library captures are
+      lazy and all jobs share one offscreen scene on the existing Engine.
+      Guards: `bun scripts/paint-unit.mjs` + `TARGET_URL=… bun run
+      check:paint-icons` (visible-pixel checks included).
 
 - [x] **Studio left the board clickable** (agent arena, 2026-08-21, SPEC
       AMENDMENT 78): opening the studio left board-only topbar controls
@@ -788,11 +796,6 @@ move it to **Done** with a commit reference. One agent per area.
   onto main instead of rewriting again. Branch protection now blocks force
   pushes to `main`.
 ## In progress
-
-- [ ] **Runtime model thumbnails + square/triangle paint brushes** — claimed by
-      agent arena, 2026-08-21. Paint stamp buttons and the Shapes library use
-      thumbnails rendered from their real meshes at runtime, not glyph/SVG
-      approximations.
 
 - [ ] **Per-card play/pause (animation + sound) + autoplay setting** — claimed by
       agent arena, 2026-08-20. SPEC AMENDMENT 69. Board cards and thread nodes
