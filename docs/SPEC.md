@@ -1307,3 +1307,29 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     orphan nodes, a tap on a 3D card must still open the viewer, a
     camera-less post must be the SAME size in 2D and 3D, and a settled 3D
     board must render ZERO frames while still animating with autoplay on).
+
+80. EMPTY NODES POISONED EVERY FIT (2026-08-21): `model/facing.ts`'s
+    `worldBox` / `worldBounds` / `worldCenter` / `worldRadius` unioned the
+    bounding box of EVERY mesh in the container — including Babylon's
+    `__root__` (the empty mesh its glTF loader inserts to convert
+    right-handed → left-handed) and any empty group node the author left
+    behind. An empty mesh's bounding box is a ZERO-SIZE BOX AT ITS OWN
+    POSITION, usually the world origin, so a model authored FAR from the
+    origin had its box stretched all the way back to (0,0,0): the fit framed
+    that whole empty span and the model rendered as an invisible speck in
+    the middle of the card. This hit the POSTER and LIVE-PREVIEW pipelines
+    (both call worldBox/frameDistance) as much as the 3D cards — a
+    "why is this post blank?" bug, not a 3D-mode bug. Fix: every fit
+    iterates `drawable(container)` = meshes with `getTotalVertices() > 0`.
+    Measured on a 3×4 plate parked at (100000, -50000, 20000): frame
+    distance 111177 → 6.37, i.e. the same framing as the identical model at
+    the origin (guard asserts the two land within 2% of each other).
+    Guard: `bun scripts/framing-edge-unit.mjs` — the framing math against
+    the models real relays actually carry: flat plates (which must never
+    come out MIRRORED: the guard compares the signed area of an asymmetric
+    outline in the model's own front view against the card), dust-sized
+    (0.0005 u) and kilometre-sized (4000 u) models, geometry 100k units off
+    the origin, degenerate zero-size meshes, a camera INSIDE the model, a
+    macro close-up, and extreme cell shapes (6×20, 40×3). Every case must
+    produce a finite transform, a visible model and a back plane in front of
+    the backdrop.

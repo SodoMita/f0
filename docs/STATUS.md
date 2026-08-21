@@ -4,6 +4,17 @@ Claim a task by moving it to **In progress** with your name/date, push, then
 move it to **Done** with a commit reference. One agent per area.
 
 ## Done
+- [x] **Empty nodes poisoned every model fit** (agent arena, 2026-08-21, SPEC
+      AMENDMENT 80): `model/facing.ts` unioned the bounding box of every mesh
+      including Babylon's empty `__root__`, whose box is a zero-size box at
+      the ORIGIN. Any model authored far from the origin was framed together
+      with the empty space back to (0,0,0) and rendered as an invisible speck
+      — posters and live previews too, not just 3D cards. Fits now skip
+      vertex-less meshes. Guard: `bun scripts/framing-edge-unit.mjs` (flat
+      plates + a mirror check, dust/kilometre scales, a 100k-unit offset,
+      degenerate meshes, a camera inside the model, macro close-ups, extreme
+      cell shapes).
+
 - [x] **3D mode now really shows the model's MAIN CAMERA view** (agent arena,
       2026-08-21, SPEC AMENDMENT 79): with "Show posts as 3D models" on, a
       board card / thread node applied only the authored camera's ROTATION

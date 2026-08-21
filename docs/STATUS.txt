@@ -29,6 +29,12 @@ was also un-rotted: its two "poster from authored camera" checks predated
 AMENDMENT 6 (posters ALWAYS auto-fit) and had been red on every run — the
 whole suite is green again (43/43), so a real regression is now visible.
 
+EMPTY-NODE FIT BUG FIXED (2026-08-21, AMENDMENT 80): model/facing.ts fits
+counted Babylon's empty __root__ mesh (zero-size box AT THE ORIGIN), so a
+model authored far from the origin was framed with all the empty space back
+to (0,0,0) — an invisible speck, in posters and live previews as much as in
+3D cards. Fits now skip vertex-less meshes. Guard: framing-edge-unit.mjs.
+
 INCIDENT LOG: Pages had a 503 outage (artifact fine, re-run); main was once
 force-pushed away and restored — unlanded work kept on salvage/dev-rewrite
 (publish.ts, textMesh.ts, gui experiments); CHERRY-PICK from there, don't

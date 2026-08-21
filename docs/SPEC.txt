@@ -84,3 +84,14 @@ recurse, so orient/fit nodes piled up on every 2D<->3D toggle), and the
 contact shadow follows the model's REAL footprint in the cell instead of a
 fixed ellipse in the middle of the card.
 Guards: bun scripts/direct3d-camera-unit.mjs · node scripts/direct3d-camera.mjs.
+80 EMPTY NODES POISONED EVERY FIT: worldBox/worldBounds/worldCenter/
+worldRadius unioned EVERY mesh, including Babylon's empty __root__ (the
+RH->LH conversion node) whose bounding box is a zero-size box AT THE ORIGIN.
+A model authored far from the origin was therefore framed together with all
+the empty space back to (0,0,0) and rendered as an invisible speck — in
+POSTERS and LIVE PREVIEWS as much as in 3D cards. Fits now skip meshes with
+no vertices (drawable()). A 3x4 plate at (100000,-50000,20000): frame
+distance 111177 -> 6.37, identical to the same model at the origin.
+Guard: bun scripts/framing-edge-unit.mjs (flat plates + mirror check, dust
+and kilometre scales, 100k offset, degenerate meshes, camera inside the
+model, macro close-up, extreme cell shapes).
