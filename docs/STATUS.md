@@ -770,6 +770,14 @@ move it to **Done** with a commit reference. One agent per area.
   pushes to `main`.
 ## In progress
 
+- [ ] **Page zoom stretches / softens 3D content** — claimed by agent arena,
+      2026-08-21. SPEC AMENDMENT 79. Zooming the page (or moving the window to
+      a different-DPI screen) leaves the drawing buffer at the OLD device
+      pixel ratio, so the browser upscales the 3D over the new CSS box until
+      the page is reloaded. Plus: manual resolution with `aspectLock` off
+      stretches non-uniformly, and the studio's ortho frustum is never
+      recomputed after a resize. Guard: `node scripts/zoom.mjs`.
+
 - [ ] **Per-card play/pause (animation + sound) + autoplay setting** — claimed by
       agent arena, 2026-08-20. SPEC AMENDMENT 69. Board cards and thread nodes
       get a ▶/⏸ button (Babylon mesh, bottom-left corner, opposite the reply
