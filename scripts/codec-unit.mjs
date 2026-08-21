@@ -57,7 +57,7 @@ const dracoCodec = {
 }
 
 // ---- GLB fixtures ---------------------------------------------------------
-/** Pack arrays into a BIN + views/accessors. Returns {json, bin}. */
+/** Synthetic GLB fixture: grid mesh with pos/nrm/byte-color/uv + options. */
 function makeModel({ grid = 48, interleave = false, withTexture = false, withAnimation = false, withSkin = false, withMorph = false, tiny = false, alreadyDraco = false, shareView = false } = {}) {
   const n = tiny ? 3 : grid + 1
   const verts = n * n
@@ -69,48 +69,31 @@ function makeModel({ grid = 48, interleave = false, withTexture = false, withAni
     for (let x = 0; x < (tiny ? 3 : n); x++) {
       const i = y * n + x
       const u = tiny ? x / 2 : x / grid, v = tiny ? 0 : y / grid
-      positions[i * 3] = u * 4 - 2
-      positions[i * 3 + 1] = v * 4 - 2
-      positions[i * 3 + 2] = Math.sin(u * 12.9898 + v * 78.233) * 0.6
+      positions.set([u * 4 - 2, v * 4 - 2, Math.sin(u * 12.9898 + v * 78.233) * 0.6], i * 3)
       const len = Math.hypot(1, 1, Math.cos(u * 6.28) * 2)
-      normals[i * 3] = 1 / len
-      normals[i * 3 + 1] = 1 / len
-      normals[i * 3 + 2] = (Math.cos(u * 6.28) * 2) / len
-      colors[i * 4] = (x * 255) / grid | 0
-      colors[i * 4 + 1] = (y * 255) / grid | 0
-      colors[i * 4 + 2] = ((x + y) * 255) / (2 * grid) | 0
-      colors[i * 4 + 3] = 255
-      uvs[i * 2] = u
-      uvs[i * 2 + 1] = v
+      normals.set([1 / len, 1 / len, (Math.cos(u * 6.28) * 2) / len], i * 3)
+      colors.set([(x * 255) / grid | 0, (y * 255) / grid | 0, ((x + y) * 255) / (2 * grid) | 0, 255], i * 4)
+      uvs.set([u, v], i * 2)
     }
   }
-  let indices
-  if (tiny) {
-    indices = new Uint32Array([0, 1, 2])
-  } else {
-    indices = new Uint32Array(grid * grid * 6)
-    let t = 0
-    for (let y = 0; y < grid; y++) {
-      for (let x = 0; x < grid; x++) {
-        const a = y * n + x, b = a + 1, c = a + n, d = c + 1
-        indices[t++] = a; indices[t++] = c; indices[t++] = b
-        indices[t++] = b; indices[t++] = c; indices[t++] = d
-      }
-    }
+  const indices = new Uint32Array(tiny ? [0, 1, 2] : grid * grid * 6)
+  if (!tiny) for (let y = 0, t = 0; y < grid; y++) for (let x = 0; x < grid; x++) {
+    const a = y * n + x, b = a + 1, c = a + n, d = c + 1
+    indices.set([a, c, b, b, c, d], (t += 6) - 6)
   }
 
-  const bin = []
-  const views = []
-  const accessors = []
-  const push = (bytes, extra = {}) => {
-    const offset = align4(bin.reduce((n, b) => n + b.length, 0))
-    while (bin.reduce((n, b) => n + b.length, 0) < offset) bin.push(new Uint8Array(1))
-    bin.push(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)))
-    views.push({ buffer: 0, byteOffset: offset, byteLength: bytes.byteLength, ...extra })
+  const chunks = [], views = [], accessors = []
+  let binLen = 0
+  const push = (arr, extra = {}) => {
+    const bytes = arr instanceof Uint8Array ? arr : new Uint8Array(arr.buffer.slice(arr.byteOffset, arr.byteOffset + arr.byteLength))
+    const offset = align4(binLen)
+    chunks.push([offset, bytes])
+    binLen = offset + bytes.length
+    views.push({ buffer: 0, byteOffset: offset, byteLength: bytes.length, ...extra })
     return views.length - 1
   }
-  const acc = (view, componentType, count, type, min, max, extra = {}) => {
-    accessors.push({ bufferView: view, componentType, count, type, min, max, ...extra })
+  const acc = (view, componentType, count, type, extra = {}) => {
+    accessors.push({ bufferView: view, componentType, count, type, ...extra })
     return accessors.length - 1
   }
 
@@ -129,16 +112,16 @@ function makeModel({ grid = 48, interleave = false, withTexture = false, withAni
     }
     const v = push(packed, { byteStride: stride })
     attrs = {
-      POSITION: acc(v, 5126, verts, 'VEC3', [-2, -2, -1], [2, 2, 1]),
-      NORMAL: acc(v, 5126, verts, 'VEC3', undefined, undefined, { byteOffset: 12 }),
-      COLOR_0: acc(v, 5121, verts, 'VEC4', undefined, undefined, { byteOffset: 24, normalized: true }),
-      TEXCOORD_0: acc(v, 5126, verts, 'VEC2', undefined, undefined, { byteOffset: 28 }),
+      POSITION: acc(v, 5126, verts, 'VEC3', { min: [-2, -2, -1], max: [2, 2, 1] }),
+      NORMAL: acc(v, 5126, verts, 'VEC3', { byteOffset: 12 }),
+      COLOR_0: acc(v, 5121, verts, 'VEC4', { byteOffset: 24, normalized: true }),
+      TEXCOORD_0: acc(v, 5126, verts, 'VEC2', { byteOffset: 28 }),
     }
   } else {
     attrs = {
-      POSITION: acc(push(positions), 5126, verts, 'VEC3', [-2, -2, -1], [2, 2, 1]),
+      POSITION: acc(push(positions), 5126, verts, 'VEC3', { min: [-2, -2, -1], max: [2, 2, 1] }),
       NORMAL: acc(push(normals), 5126, verts, 'VEC3'),
-      COLOR_0: acc(push(colors), 5121, verts, 'VEC4', undefined, undefined, { normalized: true }),
+      COLOR_0: acc(push(colors), 5121, verts, 'VEC4', { normalized: true }),
       TEXCOORD_0: acc(push(uvs), 5126, verts, 'VEC2'),
     }
   }
@@ -147,69 +130,52 @@ function makeModel({ grid = 48, interleave = false, withTexture = false, withAni
   const prim = { attributes: attrs, indices: idxAcc, mode: 4, material: 0 }
   const meshes = [{ primitives: [prim] }]
   const materials = [{ pbrMetallicRoughness: { baseColorFactor: [1, 1, 1, 1], metallicFactor: 0, roughnessFactor: 1 } }]
-  const images = []
-  const textures = []
+  const images = [], textures = []
+  let animations, skins
 
-  if (withTexture) {
-    // minimal-but-real PNG header (IHDR 16×16 RGB) + filler ≥ 64 bytes
+  if (withTexture) { // minimal-but-real PNG header (IHDR 16×16 RGB) + filler
     const ihdr = new Uint8Array(8 + 25 + 200)
     const dv = new DataView(ihdr.buffer)
     ihdr.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0)
-    ihdr.set([0, 0, 0, 13], 8); ihdr.set([0x49, 0x48, 0x44, 0x52], 12)
+    ihdr.set([0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52], 8)
     dv.setUint32(16, 16); dv.setUint32(20, 16); ihdr[24] = 8; ihdr[25] = 2
-    const v = push(ihdr)
-    images.push({ mimeType: 'image/png', bufferView: v })
+    images.push({ mimeType: 'image/png', bufferView: push(ihdr) })
     textures.push({ source: 0, sampler: 0 })
     materials[0].pbrMetallicRoughness.baseColorTexture = { index: 0 }
   }
-  let animations
   if (withAnimation) {
-    const times = new Float32Array([0, 1, 2])
-    const values = new Float32Array([0, 1, 2, 3, 4, 5, 6, 7, 8])
-    const tin = acc(push(times), 5126, 3, 'SCALAR')
-    const val = acc(push(values), 5126, 3, 'VEC3')
-    animations = [{ channels: [{ sampler: 0, target: { node: 0, path: 'translation' } }], samplers: [{ input: tin, output: val, interpolation: 'LINEAR' }] }]
+    animations = [{
+      channels: [{ sampler: 0, target: { node: 0, path: 'translation' } }],
+      samplers: [{ input: acc(push(new Float32Array([0, 1, 2])), 5126, 3, 'SCALAR'), output: acc(push(new Float32Array([0, 1, 2, 3, 4, 5, 6, 7, 8])), 5126, 3, 'VEC3'), interpolation: 'LINEAR' }],
+    }]
   }
-  let skins
-  if (withSkin) {
-    const mats = new Float32Array(16)
-    skins = [{ joints: [0], inverseBindMatrices: acc(push(mats), 5126, 1, 'MAT4') }]
-  }
+  if (withSkin) skins = [{ joints: [0], inverseBindMatrices: acc(push(new Float32Array(16)), 5126, 1, 'MAT4') }]
   if (withMorph) {
-    const targets = new Float32Array(verts * 3).fill(0.1)
-    prim.targets = [{ POSITION: acc(push(targets), 5126, verts, 'VEC3') }]
+    prim.targets = [{ POSITION: acc(push(new Float32Array(verts * 3).fill(0.1)), 5126, verts, 'VEC3') }]
     meshes[0].weights = [0]
   }
-  if (alreadyDraco) {
-    const payload = new Uint8Array(64).fill(7)
-    prim.extensions = { KHR_draco_mesh_compression: { bufferView: push(payload), attributes: { POSITION: 0 } } }
-  }
+  if (alreadyDraco) prim.extensions = { KHR_draco_mesh_compression: { bufferView: push(new Uint8Array(64).fill(7)), attributes: { POSITION: 0 } } }
   if (shareView) {
-    // second mesh reading the SAME position view. It carries a CUSTOM_*
-    // attribute, so draco skips it and it stays raw — the shared position
-    // view MUST survive for it.
-    const custom = acc(push(colors), 5121, verts, 'VEC4', undefined, undefined, { normalized: true })
+    // second raw mesh reading the SAME position view (a CUSTOM_* attribute
+    // makes draco skip it) — the shared view must survive.
+    const custom = acc(push(colors), 5121, verts, 'VEC4', { normalized: true })
     meshes.push({ primitives: [{ attributes: { POSITION: attrs.POSITION, CUSTOM_FOO: custom }, indices: idxAcc, mode: 4, material: 0 }] })
   }
 
+  const binBytes = new Uint8Array(binLen)
+  for (const [offset, bytes] of chunks) binBytes.set(bytes, offset)
   const json = {
     asset: { version: '2.0', generator: 'codec-unit' },
     scene: 0,
     scenes: [{ nodes: [0] }],
     nodes: [{ mesh: 0, ...(withSkin ? { skin: 0 } : {}) }],
-    meshes,
-    materials,
-    accessors,
+    meshes, materials, accessors,
     bufferViews: views,
-    buffers: [],
+    buffers: [{ byteLength: binLen }],
   }
   if (images.length) { json.images = images; json.textures = textures; json.samplers = [{ magFilter: 1, minFilter: 1 }] }
   if (animations) json.animations = animations
   if (skins) json.skins = skins
-  const binBytes = new Uint8Array(bin.reduce((n, b) => n + b.length, 0))
-  let cur = 0
-  for (const b of bin) { binBytes.set(b, cur); cur += b.length }
-  json.buffers = [{ byteLength: binBytes.length }]
   return buildGLB(json, binBytes)
 }
 

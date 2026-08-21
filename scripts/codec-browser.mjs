@@ -231,19 +231,16 @@ check('editing while reviewed closes the review', reviewGone === true)
     const { compressGLB } = await import('/src/model/compressGlb.ts')
     const { webpCodec } = await import('/src/model/webpEncode.ts')
     const { validateGLB } = await import('/src/model/limits.ts')
-    // 1024×1024 gradient png
+    const { buildGLB } = await import('/src/model/glbContainer.ts')
+    // 1024×1024 gradient png with confetti
     const canvas = document.createElement('canvas')
     canvas.width = 1024; canvas.height = 1024
     const ctx = canvas.getContext('2d')
     const grad = ctx.createLinearGradient(0, 0, 1024, 1024)
     grad.addColorStop(0, '#ff2d55'); grad.addColorStop(0.5, '#2dffb5'); grad.addColorStop(1, '#2d55ff')
     ctx.fillStyle = grad; ctx.fillRect(0, 0, 1024, 1024)
-    for (let i = 0; i < 60; i++) {
-      ctx.fillStyle = `hsl(${i * 6}, 90%, 60%)`
-      ctx.fillRect((i * 97) % 1000, (i * 173) % 1000, 40, 40)
-    }
-    const pngBlob = await new Promise((r) => canvas.toBlob(r, 'image/png'))
-    const png = new Uint8Array(await pngBlob.arrayBuffer())
+    for (let i = 0; i < 60; i++) { ctx.fillStyle = `hsl(${i * 6}, 90%, 60%)`; ctx.fillRect((i * 97) % 1000, (i * 173) % 1000, 40, 40) }
+    const png = new Uint8Array(await (await new Promise((r) => canvas.toBlob(r, 'image/png'))).arrayBuffer())
     // 96×96 grid mesh + uv
     const n = 97, verts = n * n
     const positions = new Float32Array(verts * 3), normals = new Float32Array(verts * 3), uvs = new Float32Array(verts * 2)
@@ -257,51 +254,35 @@ check('editing while reviewed closes the review', reviewGone === true)
     }
     for (let y = 0; y < 96; y++) for (let x = 0; x < 96; x++) {
       const a = y * n + x, b = a + 1, c = a + n, d = c + 1
-      indices[t++] = a; indices[t++] = c; indices[t++] = b; indices[t++] = b; indices[t++] = c; indices[t++] = d
+      indices.set([a, c, b, b, c, d], (t += 6) - 6)
     }
-    const chunks = []
-    const views = [], accessors = []
-    let cursor = 0
+    // pack BIN + accessors through the app's own GLB builder
+    const chunks = [], views = [], accessors = []
+    let binLen = 0
     const push = (arr) => {
       const bytes = arr instanceof Uint8Array ? arr : new Uint8Array(arr.buffer.slice(arr.byteOffset, arr.byteOffset + arr.byteLength))
-      while (cursor % 4) { chunks.push(new Uint8Array(1)); cursor++ }
-      const offset = cursor
-      chunks.push(bytes); cursor += bytes.length
+      const offset = binLen + ((4 - (binLen % 4)) % 4)
+      chunks.push([offset, bytes]); binLen = offset + bytes.length
       views.push({ buffer: 0, byteOffset: offset, byteLength: bytes.length })
       return views.length - 1
     }
-    const acc = (v, ct, count, ty) => { accessors.push({ bufferView: v, componentType: ct, count, type: ty }); return accessors.length - 1 }
+    const acc = (v, ct, count, ty) => (accessors.push({ bufferView: v, componentType: ct, count, type: ty }), accessors.length - 1)
     const attrs = { POSITION: acc(push(positions), 5126, verts, 'VEC3'), NORMAL: acc(push(normals), 5126, verts, 'VEC3'), TEXCOORD_0: acc(push(uvs), 5126, verts, 'VEC2') }
+    const idxAcc = acc(push(indices), 5125, indices.length, 'SCALAR')
+    const pngView = push(png) // last push — the bin is assembled after
+    const bin = new Uint8Array(binLen)
+    for (const [o, b] of chunks) bin.set(b, o)
     const json = {
       asset: { version: '2.0', generator: 'codec-browser' }, scene: 0,
       scenes: [{ nodes: [0] }], nodes: [{ mesh: 0, name: 'textured' }],
-      meshes: [{ primitives: [{ attributes: attrs, indices: acc(push(indices), 5125, indices.length, 'SCALAR'), mode: 4, material: 0 }] }],
+      meshes: [{ primitives: [{ attributes: attrs, indices: idxAcc, mode: 4, material: 0 }] }],
       materials: [{ pbrMetallicRoughness: { baseColorTexture: { index: 0 }, metallicFactor: 0, roughnessFactor: 1 }, doubleSided: true }],
-      accessors, bufferViews: views,
-      images: [{ mimeType: 'image/png', bufferView: push(png) }],
+      accessors, bufferViews: views, buffers: [{ byteLength: binLen }],
+      images: [{ mimeType: 'image/png', bufferView: pngView }],
       textures: [{ source: 0 }],
     }
-    let binLen = cursor
-    const bin = new Uint8Array(binLen)
-    let cur = 0
-    for (const c of chunks) { bin.set(c, cur); cur += c.length }
-    json.buffers = [{ byteLength: bin.length }]
-    const enc = new TextEncoder()
-    const jsonBytes = enc.encode(JSON.stringify(json))
-    const jsonPad = (4 - (jsonBytes.length % 4)) % 4
-    const binPad = (4 - (bin.length % 4)) % 4
-    const total = 12 + 8 + jsonBytes.length + jsonPad + 8 + bin.length + binPad
-    const out = new Uint8Array(total)
-    const dv = new DataView(out.buffer)
-    dv.setUint32(0, 0x46546c67, true); dv.setUint32(4, 2, true); dv.setUint32(8, total, true)
-    dv.setUint32(12, jsonBytes.length + jsonPad, true); dv.setUint32(16, 0x4e4f534a, true)
-    out.set(jsonBytes, 20)
-    for (let i = 0; i < jsonPad; i++) out[20 + jsonBytes.length + i] = 0x20 // JSON padding must be spaces
-    const binStart = 20 + jsonBytes.length + jsonPad
-    dv.setUint32(binStart, bin.length + binPad, true); dv.setUint32(binStart + 4, 0x004e4942, true)
-    out.set(bin, binStart + 8)
+    const out = buildGLB(json, bin)
     const { bytes: compressed, report } = await compressGLB(out, { webp: webpCodec })
-    const valid = validateGLB(compressed).ok
     const f = window.__form0
     const asBlob = (b) => new Blob([b], { type: 'model/gltf-binary' })
     const posterRaw = await f.assets.renderPosterFor(asBlob(out))
@@ -312,7 +293,7 @@ check('editing while reviewed closes the review', reviewGone === true)
       if (posterWebp.pixels[i] + posterWebp.pixels[i + 1] + posterWebp.pixels[i + 2] > 90) lit++
     }
     return {
-      inLen: out.length, outLen: compressed.length, images: report.webp.images, valid,
+      inLen: out.length, outLen: compressed.length, images: report.webp.images, valid: validateGLB(compressed).ok,
       meanDiff: diff / (posterRaw.pixels.length / 4), litRatio: lit / (posterRaw.pixels.length / 4),
     }
   })

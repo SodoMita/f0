@@ -613,10 +613,8 @@ async function boot(): Promise<void> {
   function codecNote(report: CompressReport | null, before?: GLBExportInfo, after?: GLBExportInfo): string {
     if (!report) return ''
     const parts: string[] = []
-    if (report.draco.prims) {
-      const b = DRACO_PRESETS[dracoPreset]
-      parts.push(`draco ${report.draco.prims} mesh${report.draco.prims === 1 ? '' : 'es'} ${formatSize(report.draco.bytesBefore)} → ${formatSize(report.draco.bytesAfter)} · pos ${b.POSITION}/nrm ${b.NORMAL}/uv ${b.TEX_COORD}/col ${b.COLOR} bits`)
-    }
+    const b = DRACO_PRESETS[dracoPreset]
+    if (report.draco.prims) parts.push(`draco ${report.draco.prims} mesh${report.draco.prims === 1 ? '' : 'es'} ${formatSize(report.draco.bytesBefore)} → ${formatSize(report.draco.bytesAfter)} · pos ${b.POSITION}/nrm ${b.NORMAL}/uv ${b.TEX_COORD}/col ${b.COLOR} bits`)
     if (report.webp.images) parts.push(`webp ${report.webp.images} texture${report.webp.images === 1 ? '' : 's'} q${Math.round(webpQuality.valueAsNumber)}% ${formatSize(report.webp.bytesBefore)} → ${formatSize(report.webp.bytesAfter)}`)
     if (before && after && !report.keptOriginal) parts.push(`file ${formatSize(before.bytes)} → ${formatSize(after.bytes)} · −${Math.round((1 - after.bytes / before.bytes) * 100)}%`)
     const reasons = [...new Set([...report.draco.reasons, ...report.webp.reasons])]
@@ -625,32 +623,29 @@ async function boot(): Promise<void> {
   }
 
   function syncCodecButtons(): void {
-    const anyCodec = dracoOn === true || webpOn === true
-    exportCodecs.hidden = !anyCodec
-    // Fine settings only make sense while their (lossy) codec is active.
-    dracoQualityRow.hidden = !(codecChoice.geometry === 'draco' && dracoOn === true)
-    webpQualityRow.hidden = !(codecChoice.texture === 'webp' && webpOn === true)
-    exportCodecSettings.hidden = dracoQualityRow.hidden && webpQualityRow.hidden
-    for (const btn of Array.from(dracoQuality.querySelectorAll('button[data-v]'))) {
-      ;(btn as HTMLElement).classList.toggle('on', (btn as HTMLElement).dataset.v === dracoPreset)
-    }
-    const setOption = (group: HTMLElement, available: boolean, current: 'none' | 'draco' | 'webp'): 'none' | 'draco' | 'webp' => {
-      for (const el of Array.from(group.querySelectorAll('button[data-v]'))) {
-        const btn = el as HTMLButtonElement
+    // An option shows only when its encoder works; an unavailable selection
+    // resets to none. Fine settings show only while their codec is active.
+    const sync = (group: HTMLElement, available: boolean, current: string): string => {
+      for (const btn of Array.from(group.querySelectorAll<HTMLButtonElement>('button[data-v]'))) {
         const v = btn.dataset.v ?? 'none'
         btn.hidden = v !== 'none' && !available
         btn.classList.toggle('on', v === current)
       }
       return current !== 'none' && !available ? 'none' : current
     }
-    codecChoice.geometry = setOption(codecGeometry, dracoOn === true, codecChoice.geometry) as 'none' | 'draco'
-    codecChoice.texture = setOption(codecTexture, webpOn === true, codecChoice.texture) as 'none' | 'webp'
+    codecChoice.geometry = sync(codecGeometry, dracoOn === true, codecChoice.geometry) as typeof codecChoice.geometry
+    codecChoice.texture = sync(codecTexture, webpOn === true, codecChoice.texture) as typeof codecChoice.texture
+    for (const btn of Array.from(dracoQuality.querySelectorAll<HTMLButtonElement>("button[data-v]"))) btn.classList.toggle("on", btn.dataset.v === dracoPreset)
+    exportCodecs.hidden = !(dracoOn === true || webpOn === true)
+    dracoQualityRow.hidden = !(codecChoice.geometry === 'draco' && dracoOn === true)
+    webpQualityRow.hidden = !(codecChoice.texture === 'webp' && webpOn === true)
+    exportCodecSettings.hidden = dracoQualityRow.hidden && webpQualityRow.hidden
   }
 
   function setExportCodecBusy(busy: boolean): void {
     exportCodecBusy = busy
-    // Codec controls stay clickable (a click while busy is queued, not
-    // swallowed); only the byte-consuming actions lock during a derive.
+    // Controls stay clickable (a click while busy queues); only the
+    // byte-consuming actions lock during a derive.
     exportCodecs.classList.toggle('busy', busy)
     exportCodecSettings.classList.toggle('busy', busy)
     btnExportDownload.disabled = busy
@@ -672,44 +667,33 @@ async function boot(): Promise<void> {
     return sum / (n / 4) / 3
   }
 
-  /** The lossy preview (AMENDMENT 85): render the exact reviewed bytes through
-   * the same card pipeline the board uses, next to the raw export. Tokenled:
-   * a slow render from an older codec pass must never overwrite newer UI. */
+  /** The lossy preview (AMENDMENT 85): the exact reviewed bytes through the
+   * board's card pipeline beside the raw export. Tokenled so a slow render
+   * from an older codec pass cannot overwrite newer UI. Best-effort — the
+   * sizes/note stay authoritative. */
   async function renderExportPreview(token: number, blob: Blob, label: string): Promise<void> {
-    // Raw baseline first (cached per pristine export).
-    if (!rawPreview) {
-      try {
-        const r = await assets.renderPosterFor(pristineExport!.blob, previewDim.width, previewDim.height)
-        rawPreview = { pixels: r.pixels, width: r.width, height: r.height }
-      } catch { /* keep null — diff line just says unavailable */ }
-      if (token !== exportCodecToken) return
+    const render = async (b: Blob) => {
+      const r = await assets.renderPosterFor(b, previewDim.width, previewDim.height)
+      return { pixels: r.pixels, width: r.width, height: r.height }
     }
+    try { rawPreview ??= await render(pristineExport!.blob) } catch { /* diff line just goes quiet */ }
+    if (token !== exportCodecToken) return
     if (rawPreview) drawPosterPixels(exportPreviewRaw, rawPreview.pixels, rawPreview.width, rawPreview.height)
-    let frame: { pixels: Uint8Array; width: number; height: number } | null = null
-    try {
-      const r = await assets.renderPosterFor(blob, previewDim.width, previewDim.height)
-      frame = { pixels: r.pixels, width: r.width, height: r.height }
-    } catch { /* preview is best-effort; sizes/note stay authoritative */ }
+    let frame: Awaited<ReturnType<typeof render>> | null = null
+    try { frame = await render(blob) } catch { /* best-effort */ }
     if (token !== exportCodecToken) return
     exportPreviewCodecLabel.textContent = label
-    if (!frame) {
-      exportPreviewDiff.textContent = 'preview unavailable'
-      exportPreview.hidden = false
-      return
-    }
-    drawPosterPixels(exportPreviewCodec, frame.pixels, frame.width, frame.height)
-    if (rawPreview && rawPreview.width === frame.width && rawPreview.height === frame.height) {
-      const d = meanPixelDiff(rawPreview.pixels, frame.pixels)
-      exportPreviewDiff.textContent = Number.isFinite(d)
-        ? d === 0 ? 'identical pixels' : `mean pixel difference ${d.toFixed(1)} / 255 (lossy preview of the exact bytes)`
-        : ''
-    } else exportPreviewDiff.textContent = ''
     exportPreview.hidden = false
+    if (!frame) { exportPreviewDiff.textContent = 'preview unavailable'; return }
+    drawPosterPixels(exportPreviewCodec, frame.pixels, frame.width, frame.height)
+    const d = rawPreview && rawPreview.width === frame.width && rawPreview.height === frame.height ? meanPixelDiff(rawPreview.pixels, frame.pixels) : Number.NaN
+    exportPreviewDiff.textContent = d === 0 ? 'identical pixels'
+      : Number.isFinite(d) ? `mean pixel difference ${d.toFixed(1)} / 255 (lossy preview of the exact bytes)`
+      : ''
   }
 
   /** Re-derive the reviewed export from the PRISTINE bytes with the current
-   * codec choice + fine settings. The result is re-validated before it can be
-   * published, and its exact bytes are what the lossy preview renders. */
+   * codec choice + fine settings; re-validated before it can be published. */
   async function applyCodecs(): Promise<void> {
     if (!pristineExport) return
     const token = ++exportCodecToken
@@ -740,8 +724,7 @@ async function boot(): Promise<void> {
       })
       if (token !== exportCodecToken) return
       if (report.keptOriginal) {
-        // Nothing shrank: the review keeps the exact serializer bytes.
-        fallback()
+        fallback() // nothing shrank — keep the exact serializer bytes
         exportCodecNote.textContent = codecNote(report)
         return
       }
