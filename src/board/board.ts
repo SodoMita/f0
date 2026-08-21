@@ -20,7 +20,7 @@ import type { AssetCache } from '../core/assets'
 import { PreviewPool } from './previewPool'
 import { Direct3DPool, type Place3D } from './modelCard3d'
 import {
-  makeCardMaterial, setCardTexture, setCardTexture2, setCardTint, setCardTint2, setCardWhite,
+  makeCardMaterial, makeOverlayMaterial, setCardTexture, setCardTexture2, setCardTint, setCardTint2, setCardWhite,
   setCardFlip, setCardOpacity, setCardBlend, type CardTextureKind,
 } from './cardMaterial'
 import type { ShaderMaterial } from '@babylonjs/core/Materials/shaderMaterial'
@@ -610,7 +610,7 @@ export class Board {
       spinner.isPickable = false
       spinner.position.z = -0.02
       spinner.renderingGroupId = 1
-      const spinnerMat = makeCardMaterial(this.scene)
+      const spinnerMat = makeOverlayMaterial(this.scene)
       spinner.material = spinnerMat
       setCardTexture(spinnerMat, this.spinnerTex)
       setCardTint(spinnerMat, theme.ink)
@@ -630,7 +630,7 @@ export class Board {
       // corner. Group 1 renders after group 0 (the cards/backdrop), which
       // pins the overlays on top regardless of where the card is on screen.
       badge.renderingGroupId = 1
-      const badgeMat = makeCardMaterial(this.scene)
+      const badgeMat = makeOverlayMaterial(this.scene)
       badge.material = badgeMat
       // No mipmaps: a badge is drawn at ~1:1 and every repaint would
       // otherwise re-upload AND regenerate the whole mip chain.
@@ -649,7 +649,7 @@ export class Board {
       play.isPickable = true
       play.position.z = -0.06
       play.renderingGroupId = 1 // same overlay pass as the badge (see above)
-      const playMat = makeCardMaterial(this.scene)
+      const playMat = makeOverlayMaterial(this.scene)
       play.material = playMat
       setCardTexture(playMat, this.playTexOff)
       setCardWhite(playMat)
@@ -1371,6 +1371,10 @@ export class Board {
     if (meta.hashFailed || assets.isHashFailed(meta.eventId)) return
     // Hide the placeholder plate; the model renders in its place.
     this.setOpacityNow(slot, 0)
+    // The pool downloads by event id: register the meta first, or a card that
+    // scrolled in while 3D was on has nothing to download (the poster path is
+    // what used to register it) and would latch back to 2D.
+    assets.noteMeta(meta)
     const ok = this.pool3d.request(meta.eventId, this.placeFor(slot), this.visiblePosts)
     if (!ok) {
       // Rejected (bad bytes / over-cap): fall back to the poster. A capacity

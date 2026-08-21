@@ -1,3 +1,4 @@
+import { Constants } from '@babylonjs/core/Engines/constants'
 import { Effect } from '@babylonjs/core/Materials/effect'
 import { ShaderMaterial } from '@babylonjs/core/Materials/shaderMaterial'
 import { DynamicTexture } from '@babylonjs/core/Materials/Textures/dynamicTexture'
@@ -135,6 +136,23 @@ function getWhite(scene: Scene): DynamicTexture {
   tex.update()
   whiteByScene.set(scene, tex)
   return tex
+}
+
+/**
+ * Pin an overlay (reply badge, ▶ button, loading ring) ON TOP of its card.
+ *
+ * `renderingGroupId = 1` alone only fixes the transparent SORT order — the
+ * depth TEST still runs against group 0, and depth is deliberately not
+ * cleared between the groups. A direct-3D model sticking out of the card
+ * toward the camera therefore won a depth test against the button on top of
+ * it (a real model has depth; a poster never did). Overlays never write
+ * depth, so letting them ignore it as well is what AMENDMENT 76 always
+ * meant by "always on top".
+ */
+export function makeOverlayMaterial(scene: Scene): ShaderMaterial {
+  const mat = makeCardMaterial(scene)
+  mat.depthFunction = Constants.ALWAYS
+  return mat
 }
 
 export function setCardTexture(mat: ShaderMaterial, tex: TextureT | null): void {
