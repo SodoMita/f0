@@ -9,8 +9,6 @@ import { Vector3 } from '@babylonjs/core/Maths/math.vector'
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color'
 import { PointerEventTypes, PointerInfo } from '@babylonjs/core/Events/pointerEvents'
 import { KeyboardEventTypes } from '@babylonjs/core/Events/keyboardEvents'
-// Side-effect import: scene.pick uses createPickingRay, which throws
-// _WarnImport("Ray") unless the Ray module is loaded (spec 00 §3.7).
 import '@babylonjs/core/Culling/ray'
 import type { Mesh } from '@babylonjs/core/Meshes/mesh'
 import type { LinesMesh } from '@babylonjs/core/Meshes/linesMesh'
@@ -20,76 +18,48 @@ import type { AssetCache } from '../core/assets'
 import { PreviewPool } from './previewPool'
 import { Direct3DPool, type Place3D } from './modelCard3d'
 import {
-  makeCardMaterial, setCardTexture, setCardTexture2, setCardTint, setCardTint2, setCardWhite,
-  setCardFlip, setCardOpacity, setCardBlend, type CardTextureKind,
+  makeCardMaterial, setCardTexture, setCardTexture2, setCardTint, setCardTint2, setCardWhite, setCardFlip, setCardOpacity, type CardTextureKind,
 } from './cardMaterial'
-import type { ShaderMaterial } from '@babylonjs/core/Materials/shaderMaterial'
 import type { Texture as TextureT } from '@babylonjs/core/Materials/Textures/texture'
+import type { ShaderMaterial } from '@babylonjs/core/Materials/shaderMaterial'
 import {
   flatCamera, makeBackdropTexture, paintBackdrop, makeContactShadow, makeSpinnerTexture,
-  roundRect, paintPlayButtons, luminance, shade,
+  paintPlayButtons, luminance, shade,
 } from '../core/gfx'
 import { theme, LIMITS } from '../theme'
+import { type CardFade, fadeInit, finishFade, setOpacityNow, crossfadeTo, fadeOpacityTo, tickFade, showPoster } from './cardFade'
+import { PlayIntent, playVisible } from './playIntent'
+import { OVERLAY_GROUP, disableOverlayAutoClear, makeQuad, bindDyn, makePlayTextures, paintGlassPill, strokeReplyArrow, inkFor } from './overlays'
 
 export interface BoardCallbacks {
   onOpenModel: (meta: ThreadMeta) => void
   onOpenThread: (meta: ThreadMeta) => void
 }
 
-interface CardSlot {
+interface CardSlot extends CardFade {
   meta?: ThreadMeta
   mesh: Mesh
   mat: ShaderMaterial
-  /** current card quad size (from the bound post's `dim` aspect) */
   w: number
   h: number
   poster: Texture | null
   live: RenderTargetTexture | null
-  /** poster already requested for the CURRENT meta (avoids re-queueing) */
   requested: boolean
-  /** the row this recycled slot currently shows */
   row: Row | null
-  /** poster unavailable (too big / render failed) — no ring, quiet plate */
   failed: boolean
-  /** when the loading ring started (rings are not allowed to spin forever) */
   spinSince: number
-  // soft elliptical contact shadow under the model (models float on the
-  // backdrop now that cards are transparent — the shadow gives them ground).
-  // Placed from the poster's measured footprint, not guessed.
   shadow: Mesh
   shadowMat: ShaderMaterial
   footprint: { cx: number; bottom: number; w: number } | null
-  // spinning ring shown until the poster (or live preview) arrives
   spinner: Mesh
   spinnerMat: ShaderMaterial
-  // reply badge (Babylon — same space as the cards): "↩ N" pill -> thread
   badge: Mesh
   badgeMat: ShaderMaterial
   badgeTex: DynamicTexture
   replyCount: number
-  /** last count painted into badgeTex (avoids needless canvas + upload) */
   badgeDrawn: number
-  // ▶/⏸ play button (Babylon, bottom-left corner, mirroring the reply
-  // badge): toggles the live preview animation AND its embedded sound.
-  // Hidden for posts that cannot animate (see positionExtras).
   play: Mesh
   playMat: ShaderMaterial
-  // 120ms two-texture crossfade between card states (plate -> poster ->
-  // live, SPEC CARD "Crossfade 120ms"): the card shader mixes tex/tex2 by
-  // `blend`, so the transition is a real crossfade in one quad, not a hard
-  // texture swap (hard swaps were the black-flicker regression). The opacity
-  // ramp (plate alpha) runs on the same clock. Driven by tick() below.
-  opacity: number
-  fadeFrom: number
-  fadeTo: number
-  fadeStart: number
-  blend: number
-  fadeFromBlend: number
-  fadeToBlend: number
-  /** texture + tint + flip kind to adopt when the crossfade completes */
-  fadeTex2: TextureT | null
-  fadeTint2Hex: string
-  fadeFlip: CardTextureKind
 }
 
 interface Row {
@@ -189,17 +159,8 @@ export class Board {
   private contactStrength = 0.55
   /** False while another view owns the canvas — cards must not steal taps. */
   private interactive = true
-  /**
-   * Autoplay (settings → Interface → "Autoplay animations"): when ON, live
-   * previews start as cards come into view (the historical feed behaviour);
-   * when OFF everything opens on its poster and the ▶ button is the only way
-   * to start. Sound NEVER auto-plays — it starts only from the button tap.
-   */
-  autoplay = true
-  /** posts the user started with the ▶ button (kept playing, even w/ autoplay off) */
-  private manualPlay = new Set<string>()
-  /** posts the user explicitly paused (autoplay must not re-start them) */
-  private pausedByUser = new Set<string>()
+  private intent = new PlayIntent()
+  get autoplay(): boolean { return this.intent.autoplay }
 
   constructor(engine: FormEngine, cb: BoardCallbacks) {
     const isMobile = /Mobi|Android/i.test(navigator.userAgent)
@@ -208,12 +169,8 @@ export class Board {
     this.scene = new Scene(engine.engine)
     this.scene.clearColor = Color3.FromHexString(this.background).toColor4(1)
     this.scene.skipPointerMovePicking = true
-    // nothing here casts shadows / needs collision or offline caching
     this.scene.blockMaterialDirtyMechanism = true
-    // Overlay group (badge / play / spinner): rendered AFTER group 0
-    // (cards + 3D models) so a post can never paint over its buttons.
-    // Don't clear color/depth or group 1 would wipe the board.
-    this.scene.setRenderingAutoClearDepthStencil(1, false)
+    disableOverlayAutoClear(this.scene)
 
     // Ortho camera parked at -Z (see core/gfx.flatCamera): world +X is screen
     // right and card planes are seen from the front, so nothing is mirrored.
@@ -234,11 +191,9 @@ export class Board {
 
     this.shadowTex = makeContactShadow(this.scene, 'card-shadow-tex')
     this.spinnerTex = makeSpinnerTexture(this.scene, 'card-spinner-tex')
-    this.playTexOff = new DynamicTexture('card-play-off', { width: 128, height: 128 }, this.scene, false, Texture.BILINEAR_SAMPLINGMODE)
-    this.playTexOff.hasAlpha = true
-    this.playTexOn = new DynamicTexture('card-play-on', { width: 128, height: 128 }, this.scene, false, Texture.BILINEAR_SAMPLINGMODE)
-    this.playTexOn.hasAlpha = true
-    paintPlayButtons(this.playTexOff, this.playTexOn, this.isDark, theme.ink)
+    const playTex = makePlayTextures(this.scene, 'card-play', this.isDark)
+    this.playTexOff = playTex.off
+    this.playTexOn = playTex.on
 
     this.cb = cb
     this.previewPool = new PreviewPool(
@@ -413,9 +368,7 @@ export class Board {
     }))
     // Drop play-intent bookkeeping for posts that left the feed (a slot
     // recycle never clears it — the user's choice should survive scrolling).
-    const live = new Set(this.rows.map((r) => r.meta.eventId))
-    for (const id of [...this.manualPlay]) if (!live.has(id)) this.manualPlay.delete(id)
-    for (const id of [...this.pausedByUser]) if (!live.has(id)) this.pausedByUser.delete(id)
+    this.intent.prune(new Set(this.rows.map((r) => r.meta.eventId)))
     this.layout()
   }
 
@@ -496,36 +449,13 @@ export class Board {
    * keep running; the user's explicit pause choice is always respected.
    */
   setAutoplay(on: boolean): void {
-    if (this.autoplay === on) return
-    this.autoplay = on
-    if (this.threeD) {
-      // Direct-3D models follow the same preference: ON resumes auto-paused
-      // models (except ones the user paused by hand), OFF freezes them.
-      for (const slot of this.cards) {
-        const id = slot.meta?.eventId
-        if (!id || !this.pool3d.isLive(id) || !this.pool3d.hasAnims(id)) continue
-        if (on && !this.pausedByUser.has(id) && !this.pool3d.isPlaying(id)) this.pool3d.play(id)
-        else if (!on && !this.manualPlay.has(id) && this.pool3d.isPlaying(id)) this.pool3d.pause(id)
-      }
-      for (const slot of this.cards) if (slot.meta) this.positionExtras(slot)
-      this.invalidate(2)
-      return
-    }
-    if (on) {
-      // resume auto-paused slots (except the ones the user paused by hand)
-      for (const slot of this.cards) {
-        const id = slot.meta?.eventId
-        if (!id || !slot.live || this.pausedByUser.has(id)) continue
-        if (!this.previewPool.isPlaying(id)) this.previewPool.resume(id)
-      }
-    } else {
-      for (const slot of this.cards) {
-        const id = slot.meta?.eventId
-        if (!id || !slot.live || this.manualPlay.has(id)) continue
-        if (this.previewPool.isPlaying(id)) this.previewPool.pause(id)
-      }
-    }
-    // ⏸↔▶ icons follow the pause/resume above
+    const ids = this.cards.map((s) => s.meta?.eventId).filter((id): id is string => !!id)
+    const changed = this.threeD
+      ? this.intent.setAutoplay(on, ids.filter((id) => this.pool3d.isLive(id) && this.pool3d.hasAnims(id)),
+        (id) => this.pool3d.isPlaying(id), (id) => this.pool3d.play(id), (id) => this.pool3d.pause(id))
+      : this.intent.setAutoplay(on, ids.filter((id) => this.cards.some((s) => s.meta?.eventId === id && s.live)),
+        (id) => this.previewPool.isPlaying(id), (id) => this.previewPool.resume(id), (id) => this.previewPool.pause(id))
+    if (!changed) return
     for (const slot of this.cards) if (slot.meta) this.positionExtras(slot)
     this.invalidate(2)
   }
@@ -586,82 +516,22 @@ export class Board {
 
   private buildPool(): void {
     for (let i = 0; i < this.pool; i++) {
-      // contact shadow (behind the card plane, still visible through it)
-      const shadow = MeshBuilder.CreatePlane(`shadow-${i}`, { width: 4, height: 4 }, this.scene)
-      shadow.setEnabled(false)
-      shadow.isPickable = false
-      shadow.position.z = 0.5
-      const shadowMat = makeCardMaterial(this.scene)
-      shadow.material = shadowMat
-      setCardTexture(shadowMat, this.shadowTex)
-      setCardTint(shadowMat, '#000000')
-      setCardOpacity(shadowMat, this.contactStrength)
-      setCardFlip(shadowMat, 'dyn')
-
-      const mesh = MeshBuilder.CreatePlane(`card-${i}`, { width: 4, height: 4 }, this.scene)
-      mesh.setEnabled(false)
-      mesh.isPickable = false
-      mesh.position.z = 0
-      const mat = makeCardMaterial(this.scene)
-      mesh.material = mat
-
-      const spinner = MeshBuilder.CreatePlane(`spinner-${i}`, { width: 4, height: 4 }, this.scene)
-      spinner.setEnabled(false)
-      spinner.isPickable = false
-      spinner.position.z = -0.02
-      spinner.renderingGroupId = 1
-      const spinnerMat = makeCardMaterial(this.scene)
-      spinner.material = spinnerMat
-      setCardTexture(spinnerMat, this.spinnerTex)
-      setCardTint(spinnerMat, theme.ink)
-      setCardOpacity(spinnerMat, 0.75)
-      setCardFlip(spinnerMat, 'dyn')
-
-      const badge = MeshBuilder.CreatePlane(`badge-${i}`, { width: 4, height: 4 }, this.scene)
-      badge.setEnabled(false)
-      badge.isPickable = false
-      badge.position.z = -0.05
-      // Corner-mounted overlays (badge + play) sit at the card's edge, so
-      // their bounding-sphere center is several world units off the card's
-      // center. Babylon sorts transparent meshes by that center's distance
-      // to the camera (renderingGroup.js defaultTransparentSortCompare), so a
-      // card near screen-center sorts CLOSER than its own corner buttons and
-      // paints over them whenever its opaque poster/live pixels reach the
-      // corner. Group 1 renders after group 0 (the cards/backdrop), which
-      // pins the overlays on top regardless of where the card is on screen.
-      badge.renderingGroupId = 1
-      const badgeMat = makeCardMaterial(this.scene)
-      badge.material = badgeMat
-      // No mipmaps: a badge is drawn at ~1:1 and every repaint would
-      // otherwise re-upload AND regenerate the whole mip chain.
+      const { mesh: shadow, mat: shadowMat } = makeQuad(this.scene, `shadow-${i}`, { z: 0.5 })
+      bindDyn(shadowMat, this.shadowTex, '#000000', this.contactStrength)
+      const { mesh, mat } = makeQuad(this.scene, `card-${i}`, { z: 0 })
+      const { mesh: spinner, mat: spinnerMat } = makeQuad(this.scene, `spinner-${i}`, { z: -0.02, group: OVERLAY_GROUP })
+      bindDyn(spinnerMat, this.spinnerTex, theme.ink, 0.75)
+      const { mesh: badge, mat: badgeMat } = makeQuad(this.scene, `badge-${i}`, { z: -0.05, group: OVERLAY_GROUP })
       const badgeTex = new DynamicTexture(`badge-tex-${i}`, { width: 320, height: 118 }, this.scene, false, Texture.BILINEAR_SAMPLINGMODE)
-      badgeTex.hasAlpha = true // pill shape comes from canvas alpha
-      setCardTexture(badgeMat, badgeTex)
-      setCardWhite(badgeMat)
-      setCardFlip(badgeMat, 'dyn')
-
-      // ▶/⏸ play button (bottom-left; the badge owns bottom-right). Vector
-      // strokes, never font glyphs (same rule as the badge arrow — "⏸"/"▶"
-      // fall back to a blurry substitute face). Both textures are shared
-      // across all cards; toggling swaps the handle, not a repaint.
-      const play = MeshBuilder.CreatePlane(`play-${i}`, { width: 4, height: 4 }, this.scene)
-      play.setEnabled(false)
-      play.isPickable = true
-      play.position.z = -0.06
-      play.renderingGroupId = 1 // same overlay pass as the badge (see above)
-      const playMat = makeCardMaterial(this.scene)
-      play.material = playMat
-      setCardTexture(playMat, this.playTexOff)
-      setCardWhite(playMat)
-      setCardFlip(playMat, 'dyn')
-
+      badgeTex.hasAlpha = true
+      bindDyn(badgeMat, badgeTex)
+      const { mesh: play, mat: playMat } = makeQuad(this.scene, `play-${i}`, { z: -0.06, group: OVERLAY_GROUP, pickable: true })
+      bindDyn(playMat, this.playTexOff)
       const slot: CardSlot = {
         mesh, mat, w: CARD_W, h: CARD_H_REF, poster: null, live: null, requested: false, row: null, failed: false, spinSince: 0,
         shadow, shadowMat, spinner, spinnerMat,
         badge, badgeMat, badgeTex, replyCount: 0, badgeDrawn: -1, footprint: null,
-        play, playMat,
-        opacity: 0, fadeFrom: 0, fadeTo: 0, fadeStart: 0,
-        blend: 0, fadeFromBlend: 0, fadeToBlend: 1, fadeTex2: null, fadeTint2Hex: '#FFFFFF', fadeFlip: 'raw',
+        play, playMat, ...fadeInit(),
       }
       this.cards.push(slot)
       mesh.metadata = { card: slot }
@@ -670,11 +540,6 @@ export class Board {
     }
   }
 
-  /**
-   * Reply badge. The arrow is drawn as vector strokes, never a font glyph:
-   * "↩" is missing from most default UI fonts, so the old badge fell back to
-   * a blurry substitute glyph (or a tofu box) at a different baseline.
-   */
   private drawBadge(slot: CardSlot): void {
     if (slot.badgeDrawn === slot.replyCount) return
     slot.badgeDrawn = slot.replyCount
@@ -686,38 +551,15 @@ export class Board {
       slot.badge.setEnabled(false)
       return
     }
-    const dark = this.isDark
     const pad = Math.round(h * 0.07)
-    const bw = w - pad * 2
-    const bh = h - pad * 2
-    ctx.fillStyle = dark ? 'rgba(12,12,14,0.62)' : 'rgba(250,250,252,0.72)'
-    ctx.strokeStyle = dark ? 'rgba(255,255,255,0.30)' : 'rgba(0,0,0,0.28)'
-    ctx.lineWidth = Math.max(2, h * 0.028)
-    roundRect(ctx, pad, pad, bw, bh, bh / 2)
-    ctx.fill()
-    ctx.stroke()
-
-    const ink = dark ? theme.ink : '#101014'
-    // ↩ arrow, vector-drawn
-    const cy = h / 2
-    const ax = pad + bh * 0.52
-    const s = bh * 0.30
+    paintGlassPill(ctx, pad, pad, w - pad * 2, h - pad * 2, this.isDark)
+    const ink = inkFor(this.isDark)
+    const cy = h / 2, ax = pad + (h - pad * 2) * 0.52, s = (h - pad * 2) * 0.30
     ctx.strokeStyle = ink
     ctx.lineWidth = Math.max(2.5, h * 0.045)
     ctx.lineCap = 'round'
     ctx.lineJoin = 'round'
-    ctx.beginPath()
-    ctx.moveTo(ax + s, cy - s * 0.85)
-    ctx.lineTo(ax + s * 0.15, cy - s * 0.85)
-    ctx.quadraticCurveTo(ax - s * 0.75, cy - s * 0.85, ax - s * 0.75, cy + s * 0.05)
-    ctx.lineTo(ax - s * 0.75, cy + s * 0.5)
-    ctx.stroke()
-    ctx.beginPath()
-    ctx.moveTo(ax - s * 0.75 - s * 0.5, cy + s * 0.05)
-    ctx.lineTo(ax - s * 0.75, cy + s * 0.6)
-    ctx.lineTo(ax - s * 0.75 + s * 0.5, cy + s * 0.05)
-    ctx.stroke()
-
+    strokeReplyArrow(ctx, ax, cy, s)
     ctx.fillStyle = ink
     ctx.font = `600 ${Math.round(h * 0.42)}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`
     ctx.textAlign = 'left'
@@ -952,10 +794,9 @@ export class Board {
           // user-started post keeps its sound, a user-paused post stays
           // paused until ▶ is pressed again.
           if (modelLive && this.pool3d.hasAnims(id)) {
-            const manual = this.manualPlay.has(id)
-            const auto = this.autoplay && !this.pausedByUser.has(id)
-            if ((auto || manual) && !this.pool3d.isPlaying(id)) this.pool3d.play(id, manual)
-            else if (!(auto || manual) && this.pool3d.isPlaying(id)) this.pool3d.pause(id)
+            const want = this.intent.wantsPlay(id)
+            if (want && !this.pool3d.isPlaying(id)) this.pool3d.play(id, this.intent.isManual(id))
+            else if (!want && this.pool3d.isPlaying(id)) this.pool3d.pause(id)
           }
         } else if (!slot.requested) {
           slot.requested = true
@@ -974,9 +815,7 @@ export class Board {
             // (the historical behaviour); a post the user started with the ▶
             // button keeps playing with its sound, and a post the user
             // paused stays paused until they press ▶ again.
-            const manual = this.manualPlay.has(id)
-            const auto = this.autoplay && !this.pausedByUser.has(id)
-            if (auto || manual) this.previewPool.request(id, this.visiblePosts, manual)
+            if (this.intent.wantsPlay(id)) this.previewPool.request(id, this.visiblePosts, this.intent.isManual(id))
           }
         }
       } else if (Math.abs(y) >= near) {
@@ -1002,15 +841,11 @@ export class Board {
   private playButtonVisible(slot: CardSlot): boolean {
     const meta = slot.meta
     if (!meta) return false
-    if (this.threeD) {
-      // Only animated direct models can play (static ones just show).
-      return this.pool3d.isLive(meta.eventId) && this.pool3d.hasAnims(meta.eventId)
-    }
-    if (!slot.poster) return false
-    if (this.previewPool.isRejected(meta.eventId)) return false
-    if (this.previewPool.opts.maxSlots <= 0) return false
-    const animated = this.assets?.isAnimated(meta)
-    return animated === true || (animated === undefined && (meta.animHint || meta.cameraCount > 0))
+    return playVisible(
+      this.threeD, this.pool3d.isLive(meta.eventId), this.pool3d.hasAnims(meta.eventId),
+      !!slot.poster, this.previewPool.isRejected(meta.eventId), this.previewPool.opts.maxSlots,
+      this.assets?.isAnimated(meta), !!(meta.animHint || meta.cameraCount > 0),
+    )
   }
 
   private positionExtras(slot: CardSlot): void {
@@ -1157,19 +992,8 @@ export class Board {
     }
     this.previewPool.tick(this.visiblePosts)
     this.pool3d.tick(this.visiblePosts)
-    // Drive the 120ms card crossfades (SPEC CARD "Crossfade 120ms"): the
-    // same clock ramps the plate opacity AND the tex->tex2 blend; when the
-    // ramp completes the card adopts tex2 as its texture and resets.
     const now = performance.now()
-    for (const slot of this.cards) {
-      if (!slot.fadeStart) continue
-      const t = Math.min(1, (now - slot.fadeStart) / 120)
-      slot.opacity = slot.fadeFrom + (slot.fadeTo - slot.fadeFrom) * t
-      setCardOpacity(slot.mat, slot.opacity)
-      slot.blend = slot.fadeFromBlend + (slot.fadeToBlend - slot.fadeFromBlend) * t
-      setCardBlend(slot.mat, slot.blend)
-      if (t >= 1) this.finishFade(slot)
-    }
+    for (const slot of this.cards) tickFade(slot, slot.mat, now)
     // spin the loading rings (stepped, like the HTML one)
     const step = (Math.PI * 2) / 12
     const phase = Math.floor(performance.now() / SPIN_STEP_MS) * step
@@ -1254,39 +1078,19 @@ export class Board {
     else this.cb.onOpenModel(best.slot.meta)
   }
 
-  /**
-   * The ▶/⏸ button: toggle the post's live preview. Start = animation AND
-   * the model's embedded sound (a user gesture, so audio may start); the
-   * user's choice is remembered per post (manualPlay / pausedByUser) so
-   * scrolling away and back keeps their intent.
-   */
   private togglePlay(slot: CardSlot): void {
-    const meta = slot.meta
-    if (!meta) return
-    const id = meta.eventId
+    const id = slot.meta?.eventId
+    if (!id) return
+    const playing = this.threeD ? this.pool3d.isPlaying(id) : !!(slot.live && this.previewPool.isPlaying(id))
+    const start = this.intent.toggle(id, playing)
     if (this.threeD) {
-      if (this.pool3d.isPlaying(id)) {
-        this.pool3d.pause(id)
-        this.pausedByUser.add(id)
-        this.manualPlay.delete(id)
-      } else {
-        this.pausedByUser.delete(id)
-        this.manualPlay.add(id)
-        this.pool3d.play(id, true)
-      }
-      this.positionExtras(slot)
-      this.invalidate(2)
-      return
-    }
-    if (slot.live && this.previewPool.isPlaying(id)) {
-      this.previewPool.pause(id)
-      this.pausedByUser.add(id)
-      this.manualPlay.delete(id)
-    } else {
-      this.pausedByUser.delete(id)
-      this.manualPlay.add(id)
+      if (start) this.pool3d.play(id, true)
+      else this.pool3d.pause(id)
+    } else if (start) {
       if (slot.live) this.previewPool.resume(id, true)
       else this.previewPool.request(id, this.visiblePosts, true)
+    } else {
+      this.previewPool.pause(id)
     }
     this.positionExtras(slot)
     this.invalidate(2)
@@ -1380,89 +1184,20 @@ export class Board {
       if (!this.threeD && (animated ?? (meta.animHint || meta.cameraCount > 0)) && !this.previewPool.isRejected(meta.eventId) && this.visiblePosts.has(meta.eventId)) {
         // autoplay gate (AMENDMENT 69): silent auto-start, or a user-started
         // post with its sound; never re-start a post the user paused.
-        const manual = this.manualPlay.has(meta.eventId)
-        const auto = this.autoplay && !this.pausedByUser.has(meta.eventId)
-        if (auto || manual) this.previewPool.request(meta.eventId, this.visiblePosts, manual)
+        if (this.intent.wantsPlay(meta.eventId)) this.previewPool.request(meta.eventId, this.visiblePosts, this.intent.isManual(meta.eventId))
       }
     })
   }
 
-  /** Snap the card to its current crossfade target (mid-fade interrupt). */
-  private finishFade(slot: CardSlot): void {
-    slot.fadeStart = 0
-    slot.opacity = slot.fadeTo
-    setCardOpacity(slot.mat, slot.opacity)
-    slot.blend = 0
-    // The material uniform must be reset too: the last interpolated frame
-    // left blend ≈ 1, which sampled the WHITE fallback texture (that was
-    // the all-white-card regression after the crossfade landed).
-    setCardBlend(slot.mat, 0)
-    if (slot.fadeTex2) {
-      setCardTexture(slot.mat, slot.fadeTex2)
-      setCardTint(slot.mat, slot.fadeTint2Hex)
-      setCardTexture2(slot.mat, null)
-      setCardTint2(slot.mat, '#FFFFFF')
-      setCardFlip(slot.mat, slot.fadeFlip)
-      slot.fadeTex2 = null
-    }
+  private finishFade(slot: CardSlot): void { finishFade(slot, slot.mat) }
+  private setOpacityNow(slot: CardSlot, v: number): void { setOpacityNow(slot, slot.mat, v) }
+  private crossfadeTo(slot: CardSlot, tex2: TextureT | null, tint: string, flip: CardTextureKind, to = 1): void {
+    crossfadeTo(slot, slot.mat, tex2, tint, flip, to); this.invalidate()
   }
-
-  /** Set the card state right now, dropping any in-flight crossfade. */
-  private setOpacityNow(slot: CardSlot, v: number): void {
-    slot.opacity = v
-    slot.fadeStart = 0
-    slot.blend = 0
-    setCardBlend(slot.mat, 0)
-    if (slot.fadeTex2) {
-      setCardTexture2(slot.mat, null)
-      setCardTint2(slot.mat, '#FFFFFF')
-      slot.fadeTex2 = null
-    }
-    setCardOpacity(slot.mat, v)
-  }
-
-  /**
-   * Crossfade the card to a NEW texture over 120ms (the SPEC CARD crossfade):
-   * tex2 + tint2 are blended in by `blend`, and the card adopts them as its
-   * primary texture when the ramp completes.
-   */
-  private crossfadeTo(slot: CardSlot, tex2: TextureT | null, tint2Hex: string, flip: CardTextureKind, toOpacity = 1): void {
-    if (slot.fadeStart) this.finishFade(slot)
-    setCardTexture2(slot.mat, tex2)
-    setCardTint2(slot.mat, tint2Hex)
-    slot.fadeTex2 = tex2
-    slot.fadeTint2Hex = tint2Hex
-    slot.fadeFlip = flip
-    slot.fadeFrom = slot.opacity
-    slot.fadeTo = toOpacity
-    slot.fadeFromBlend = 0
-    slot.fadeToBlend = 1
-    slot.fadeStart = performance.now()
-    this.invalidate()
-  }
-
-  /** Opacity-only ramp (no texture change; the quiet failed-plate case). */
-  private fadeOpacityTo(slot: CardSlot, v: number): void {
-    if (slot.fadeStart === 0 && slot.opacity === v) return
-    slot.fadeFrom = slot.opacity
-    slot.fadeTo = v
-    slot.fadeFromBlend = 0
-    slot.fadeToBlend = 0
-    slot.fadeStart = performance.now()
-    this.invalidate()
-  }
-
-  /** Show the card's poster texture (fallback after a live preview is released). */
+  private fadeOpacityTo(slot: CardSlot, v: number): void { fadeOpacityTo(slot, slot.mat, v); this.invalidate() }
   private showPoster(slot: CardSlot): void {
-    if (this.threeD) { this.setOpacityNow(slot, 0); return }
-    if (slot.poster) {
-      this.crossfadeTo(slot, slot.poster, '#FFFFFF', 'rtt')
-    } else {
-      setCardTexture(slot.mat, null)
-      setCardTint(slot.mat, slot.meta?.tint || theme.panel)
-      setCardFlip(slot.mat, 'raw')
-      this.fadeOpacityTo(slot, 0.14)
-    }
+    showPoster(slot, slot.mat, slot.poster, slot.meta?.tint || theme.panel, this.threeD)
+    this.invalidate()
   }
 
   private release(slot: CardSlot): void {

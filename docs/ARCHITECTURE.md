@@ -40,6 +40,9 @@ src/
                      (default 448×280); format v4: never fetched, never a PNG
   board/
     board.ts         responsive 1–3 col grid, scroll+inertia, tap→viewer, reply badges
+    cardFade.ts      120 ms two-texture crossfade (board + thread)
+    playIntent.ts    ▶/⏸ autoplay vs manual vs paused (board + thread)
+    overlays.ts      overlay group, glass pill, vector ↩, play textures
     cardMaterial.ts  unlit quad ShaderMaterial (tex.rgb*tint, tex.a*opacity),
                      needAlphaBlending OPTION, deterministic zero flips
     previewPool.ts   bounded live-preview RTT slots (REUSED, evicted when

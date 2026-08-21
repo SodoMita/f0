@@ -4,6 +4,13 @@ Claim a task by moving it to **In progress** with your name/date, push, then
 move it to **Done** with a commit reference. One agent per area.
 
 ## Done
+- [x] **Shorter board/thread + audit** (agent arena, 2026-08-21): extracted shared
+      `cardFade` / `playIntent` / `overlays` so board and thread no longer each
+      own a copy of the 120 ms crossfade, ▶/⏸ intent, and glass-pill drawing
+      (the class of bug that produced the all-white-card regression in one
+      viewport). PreviewPool now un-cancels an in-flight load on scroll-back
+      (parity with Direct3DPool). Audit: `docs/AUDIT.md`. tsc clean.
+
 - [x] **Page zoom stretched / softened 3D content** (agent arena, 2026-08-21,
       SPEC AMENDMENT 79): zooming the page left the drawing buffer at the
       device pixel ratio sampled at boot — `FormEngine.resize()` re-read the

@@ -268,7 +268,14 @@ export class PreviewPool {
    * browser's autoplay policy AND the SPEC "no autoplay" audio line).
    */
   request(postId: string, visible?: ReadonlySet<string>, sound = false): boolean {
-    if (this.byPost.has(postId) || this.loading.has(postId) || this.cancelled.has(postId)) return true
+    if (this.byPost.has(postId)) return true
+    // Scroll-back while a parse is in flight: un-cancel so the result is kept
+    // (Direct3DPool does this; leaving cancelled discarded a still-wanted load).
+    if (this.loading.has(postId)) {
+      this.cancelled.delete(postId)
+      return true
+    }
+    if (this.cancelled.has(postId)) return true
     if (this.rejected.has(postId)) return false
     // Reuse a released slot first — the old code counted spent slots against
     // the budget forever, so past the first screenful NOTHING could animate.
