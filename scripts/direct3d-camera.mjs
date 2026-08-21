@@ -77,6 +77,26 @@ const rects = await page.evaluate(() => {
 })
 check('board has live 3D cards', rects.length > 0, `${rects.length} cards`)
 
+/** Pixel bounds of the MODEL inside a crop: saturated pixels only, so the
+ *  greyscale HUD chrome (play button, reply pill, backdrop) is ignored. */
+function modelBounds(width, height, data) {
+  let x0 = 1e9, x1 = -1, y0 = 1e9, y1 = -1
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4
+      const r = data[i], g = data[i + 1], b = data[i + 2]
+      const mx = Math.max(r, g, b), mn = Math.min(r, g, b)
+      if (mx > 60 && mx - mn > 30) {
+        if (x < x0) x0 = x
+        if (x > x1) x1 = x
+        if (y < y0) y0 = y
+        if (y > y1) y1 = y
+      }
+    }
+  }
+  return x1 < 0 ? null : { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, w: x1 - x0, h: y1 - y0 }
+}
+
 /** Colour census of a screen rect: fraction of red / green model pixels. */
 async function census(rect, name) {
   const clip = {
@@ -92,7 +112,7 @@ async function census(rect, name) {
     if (r > 70 && r > g * 1.6 && r > b * 1.6) red++
     else if (g > 60 && g > r * 1.5 && g > b * 1.5) green++
   }
-  return { red: red / total, green: green / total, total }
+  return { red: red / total, green: green / total, total, width, height, model: modelBounds(width, height, data) }
 }
 
 const camCards = rects.filter((r) => r.file === 'a.glb')
@@ -107,12 +127,79 @@ if (camCards.length) {
   check('3D board card is FILLED by the model (not a postage stamp)',
     c.red > 0.18, `red=${(c.red * 100).toFixed(1)}%`)
 }
+// The model must stay GLUED to its card while the feed scrolls: the fit and
+// the crop follow the cell, they are not baked at load time.
+{
+  await page.mouse.move(640, 500)
+  await page.mouse.wheel(0, 90)
+  await page.waitForTimeout(2500)
+  const moved = await page.evaluate(() => {
+    const b = window.__form0.board
+    const eng = b.scene.getEngine()
+    const cssW = eng.getRenderWidth() * eng.getHardwareScalingLevel()
+    const cssH = eng.getRenderHeight() * eng.getHardwareScalingLevel()
+    // the live 3D card nearest the middle of the viewport, fully on screen
+    const fits = b.cards.filter((c) => c.meta && c.mesh.isEnabled() && b.pool3d.isLive(c.meta.eventId) &&
+      Math.abs(c.mesh.position.y) + c.h / 2 <= b.halfH)
+    fits.sort((p, q) => Math.abs(p.mesh.position.y) - Math.abs(q.mesh.position.y))
+    const c = fits[0]
+    if (!c) return null
+    const x = cssW / 2 + c.mesh.position.x * b.pxPerUnit
+    const y = ((b.halfH - c.mesh.position.y) / (2 * b.halfH)) * cssH
+    return {
+      file: c.meta.filename, scrolled: +b.scrollY.toFixed(1),
+      x: x - (c.w * b.pxPerUnit) / 2, y: y - (c.h * b.pxPerUnit) / 2,
+      w: c.w * b.pxPerUnit, h: c.h * b.pxPerUnit,
+    }
+  })
+  if (!moved || moved.scrolled <= 0) {
+    check('the board scrolled with a live 3D card on screen', false, JSON.stringify(moved))
+  } else {
+    const c = await census(moved, 'board3d-card-scrolled')
+    const off = c.model ? Math.max(Math.abs(c.model.cx - c.width / 2), Math.abs(c.model.cy - c.height / 2)) : Infinity
+    check(`after scrolling, the model is still centred in its card (${moved.file})`,
+      off < 0.04 * c.height, `offset=${Number.isFinite(off) ? off.toFixed(1) : 'no model'}px of ${c.height}px`)
+    check('after scrolling, the model is still cropped to its card',
+      !!c.model && c.model.w <= c.width && c.model.h <= c.height,
+      c.model ? `${c.model.w}x${c.model.h} in ${c.width}x${c.height}` : 'no model')
+  }
+}
+
+// preview-camera=1 (rig flavour `d`): the SECOND authored camera frames the
+// green cube. Filter the board down to that flavour so a card is on screen.
+if (!twoCamCards.length) {
+  await page.evaluate(() => window.__form0.setSearchQuery('d.glb'))
+  await page.waitForFunction(() => {
+    const b = window.__form0.board
+    return b.cards.some((c) => c.meta && c.meta.filename === 'd.glb' && b.pool3d.isLive(c.meta.eventId))
+  }, { timeout: 60000 }).catch(() => {})
+  await page.waitForTimeout(2500)
+  const more = await page.evaluate(() => {
+    const b = window.__form0.board
+    const eng = b.scene.getEngine()
+    const cssW = eng.getRenderWidth() * eng.getHardwareScalingLevel()
+    const cssH = eng.getRenderHeight() * eng.getHardwareScalingLevel()
+    const out = []
+    for (const c of b.cards) {
+      if (!c.meta || !c.mesh.isEnabled() || c.meta.filename !== 'd.glb') continue
+      if (!b.pool3d.isLive(c.meta.eventId)) continue
+      const x = cssW / 2 + c.mesh.position.x * b.pxPerUnit
+      const y = ((b.halfH - c.mesh.position.y) / (2 * b.halfH)) * cssH
+      out.push({ file: c.meta.filename, x: x - (c.w * b.pxPerUnit) / 2, y: y - (c.h * b.pxPerUnit) / 2, w: c.w * b.pxPerUnit, h: c.h * b.pxPerUnit })
+    }
+    return out
+  })
+  twoCamCards.push(...more)
+}
+check('a preview-camera card (d.glb) is on screen', twoCamCards.length > 0, `${twoCamCards.length}`)
 if (twoCamCards.length) {
   const c = await census(twoCamCards[0], 'board3d-card-d')
   console.log(`      d.glb card: red=${(c.red * 100).toFixed(1)}%  green=${(c.green * 100).toFixed(1)}%`)
-  check('3D board card honours preview-camera=1 (green view)',
+  check('3D board card honours preview-camera=1 (the GREEN camera, not cam 0)',
     c.green > 0.10 && c.red < 0.01, `red=${(c.red * 100).toFixed(1)}% green=${(c.green * 100).toFixed(1)}%`)
 }
+await page.evaluate(() => window.__form0.setSearchQuery(''))
+await page.waitForTimeout(1500)
 
 // --------------------------------------------------------------- thread 3D
 // Root #1 of the rig owns the reply tree; its replies cycle c/b/a/x, so the
