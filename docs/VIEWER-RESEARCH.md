@@ -301,58 +301,75 @@ pixels — all available in `limits.ts` stats but not shown).
 
 ## 6. Prioritized recommendations
 
+Status: ✅ done in AMENDMENT 84 · ⏸ deferred by decision (2026-08-21 — keep
+the codebase essential while there is a lot to optimize/polish/debug) ·
+➖ not needed now (per decision).
+
 **P0 — interaction correctness**
-1. Make the authored camera navigable: attach the orbit camera seeded from
-   the authored pose (position + direction + fov), or attach controls that
-   orbit around the authored target; keep the dot as "snap back to authored
-   framing". Update the legend line to match.
-2. Interpolate camera switches (α/β/radius/position tween, ~0.4 s, skippable
-   by input).
-3. Fix the near plane: `lowerRadiusLimit = max(0.05, radius·0.1, minZ + 0.1·
-   partRadius)` (or recompute minZ per target distance) so close-ups never
-   slice.
-4. Add a reset/re-frame control (F key + dot) that works for camera-less
-   models; "N of M" next to prev/next.
-5. `setSpeed(parseFloat(v) || 1)` → handle 0 and empty explicitly.
+1. ✅ Make the authored camera navigable: the orbit is seeded from the
+   authored pose (position + fov, pivot on the authored forward ray — the
+   composition is preserved exactly); the dot re-frames to it; the legend
+   line was updated.
+2. ➖ Interpolate camera switches (α/β/radius tween, ~0.4 s, skippable by
+   input). Decided a minor optional improvement, not currently needed.
+3. ✅ Fix the near plane: implemented as `minZ = 10% of the camera's live
+   distance to the model AABB` (floored by the user's near setting), updated
+   per rendered frame — close-ups of parts smaller than the whole never
+   slice, and zooming into a part can no longer hit a void.
+4. ✅ Reset/re-frame: F key + fit button, works for camera-less models and
+   for authored mode; "N of M" next to prev/next. Re-framing also kills the
+   orbit's residual inertial offsets (a frozen mid-glide used to drag the
+   re-framed pose off — see AMENDMENT 84).
+5. ✅ `setSpeed(parseFloat(v) || 1)` → only NaN (empty field) falls back to
+   1; 0 (freeze pose) is reachable.
 
 **P1 — parity with the reference viewers**
-6. Screenshot button (render frame → PBO readback, same async pattern as
-   posters; `screenshotTools` or manual readPixels in the same RAF).
-7. Auto-rotate/turntable toggle (orbit behaviour + animation source, so
+6. ⏸ Screenshot button (render frame → PBO readback, same async pattern as
+   posters; or manual `toDataURL` in the same task as a `scene.render()`).
+7. ⏸ Auto-rotate/turntable toggle (orbit behaviour + animation source, so
    render-on-demand keeps working; respect reduced motion).
-8. Viewer model audio: claim sounds in `adopt()` (and clone them in
-   `handoffContainer`), start on the same user gesture that opened the
-   viewer, add the spec'd `S` mute/unmute + a HUD sound dot.
-9. Title + author line (from `meta.name` / `meta.pubkey` — even a shortened
-   pubkey with an explorer link).
-10. Share/copy-link button (URL already carries the model).
-11. Respect `autoplayAnimations` (and reduced motion) in viewer autoplay.
-12. Fix `loadFromContainer`'s silent-return (throw, or actually fall back).
+8. ✅ Viewer model audio: `adopt()` claims the sounds (PAUSED — spec: sound
+   always needs a tap, same as the board's ▶), `S` key + sound button
+   toggle, and `handoffContainer` transfers the sounds to the viewer scene
+   so a model audible on its card is not silenced by the hand-off.
+9. ➖ Title + author line — metadata/labels are fine as-is per decision.
+10. ⏸ Share/copy-link button (URL already carries the model).
+11. ✅ Respect `autoplayAnimations` (and reduced motion) in viewer autoplay
+    (was hard-coded play on open).
+12. ✅ Fix `loadFromContainer`'s silent-return — it now throws, so the
+    caller rolls the preview slot back and falls back to the bytes path
+    instead of committing it and leaving a blank viewer.
 
-**P2 — presentation**
-13. Environment-lighting option (neutral/studio/dark PMREM presets via
+**P2 — presentation (all ⏸ — revisit once the essential work settles)**
+13. ⏸ Environment-lighting option (neutral/studio/dark PMREM presets via
     per-material `reflectionTexture`), fixing the black-PBR driver issue
-    properly; optional skybox.
-14. Inspection toggles: wireframe, matcap/flat, (later) measurement.
-15. Loop control (loop / play-once) on the animation rail.
-16. Drawer upgrades: links, per-field copy, triangles/materials/textures/
-    audio stats.
-17. Camera fly-through: surface glTF camera animations as tracks; when the
-    active camera is an authored one, allow playback of camera-animation
-    groups on it.
+    properly; optional skybox. (Largest remaining *visual-quality* gap:
+    metallic PBR looks flat next to Sketchfab's HDRi rooms.)
+14. ⏸ Inspection toggles: wireframe, matcap/flat, (later) measurement.
+15. ⏸ Loop control (loop / play-once) on the animation rail (TrackAnimator
+    currently always wraps).
+16. ➖ Drawer upgrades (links, per-field copy, stats) — metadata is fine
+    as-is per decision.
+17. ⏸ Camera fly-through: surface glTF camera animations as tracks; when
+    the active camera is an authored one, allow playback of
+    camera-animation groups on it.
 
-**P3 — XR (the planned big ticket)**
-18. VR (AMENDMENT 41): `WebXRExperienceHelper` on the existing engine/canvas,
-    enter-VR action hidden when unsupported, error sheet on failed entry.
-19. AR: `immersive-ar` session (or Quick Look on iOS) at 1:1 scale.
-20. First-person / fly mode (WASD + look), as Sketchfab offers.
+**P3 — XR (the planned big ticket, all ⏸)**
+18. ⏸ VR (AMENDMENT 41, already on the STATUS board):
+    `WebXRExperienceHelper` on the existing engine/canvas, enter-VR action
+    hidden when unsupported, error sheet on failed entry.
+19. ⏸ AR: `immersive-ar` session (or Quick Look on iOS) at 1:1 scale.
+20. ⏸ First-person / fly mode (WASD + look), as Sketchfab offers.
 
 ## 7. Evidence appendix
 
-- Live probe: `scripts/viewer-research.mjs` (offline rig + headless
-  SwiftShader; prints camera states, wheel/drag response, speed-0 attempt,
-  HUD button census). Screenshots: `/tmp/vr-1-viewer-orbit.png` (authored
-  cam, frozen), `/tmp/vr-3-viewer-zoomed-in.png` (near-plane void at forced
+- Guard suite (supersedes the research probe): `scripts/viewer.mjs` — 24
+  checks (offline rig + headless SwiftShader): navigable authored camera,
+  composition preserved, near plane, re-frame incl. residual inertia,
+  N of M, speed 0, audio claim/S-toggle/hand-off transfer, autoplay
+  respect, no-camera path, no page errors.
+- Research-era screenshots: `/tmp/vr-1-viewer-orbit.png` (authored cam,
+  frozen), `/tmp/vr-3-viewer-zoomed-in.png` (near-plane void at forced
   radius), `/tmp/vr-deep.png` (camera parent/pose dump).
 - Measurements: authored `FreeCamera` parented to `cam0` at
   `[-1.5, 0.5, 2.5]`, `orbitAttached=false`, camera unmoved after wheel +

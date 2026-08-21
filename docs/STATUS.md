@@ -942,10 +942,30 @@ move it to **Done** with a commit reference. One agent per area.
       inverse(main-cam rotation); thread camera is only a position). Center a
       node -> thread view == model's main-camera view. Fall back to auto-fit
       when no camera. Load models only near viewport (same pipeline as board).
+- [ ] **Viewer: remaining fixes from the AMENDMENT 84 research**
+      (docs/VIEWER-RESEARCH.md §6 — deferred by decision 2026-08-21 to keep
+      the codebase essential while there is a lot to optimize/polish/debug;
+      pick in this order, extend scripts/viewer.mjs per feature):
+      (1) screenshot button — render frame then read back in the SAME task
+      (PBO fence like posters, or `toDataURL` right after `scene.render()`;
+      `preserveDrawingBuffer` is false by design); (2) auto-rotate/turntable
+      toggle — orbit behaviour + a registered animation source so
+      render-on-demand keeps working, off under reduce motion; (3)
+      share/copy-link button (the `#/viewer/<id>` URL already carries the
+      model); (4) camera-pose tween on camera switches (~0.4 s, skippable by
+      input) — decided "minor optional", last of the group; (5) P2
+      presentation: environment-lighting presets via per-material
+      `reflectionTexture` (fixes the black-PBR driver issue properly — the
+      largest remaining visual-quality gap), wireframe/matcap inspection,
+      loop / play-once control on the animation rail, camera fly-through
+      (glTF camera animations as playable tracks). Out of scope per decision:
+      title/author line, metadata-drawer upgrades (labels are fine as-is).
 - [ ] **VR support** (AMENDMENT 41): WebXR immersive viewing in the viewer —
       `WebXRExperienceHelper`, xrCompatible canvas (same engine/canvas), 6-DOF
       tracking, enter-VR action hidden when unsupported, error sheet on failed
-      entry, reduced-motion respected.
+      entry, reduced-motion respected. AR (`immersive-ar` / Quick Look at 1:1)
+      and first-person fly mode are the other research-deferred viewer items
+      (docs/VIEWER-RESEARCH.md §6 P3).
 - [ ] **New settings entries** (AMENDMENT 42): the settings system already
       exists (`src/settings/schema.ts`, ~50 settings, 11 groups). Add the NEW
       tunables to it — thread view mode (AMENDMENT 43) and VR toggle
