@@ -20,6 +20,7 @@
     "check:transfer": "node scripts/transfer.mjs",
     "check:network-panel": "node scripts/network-panel.mjs",
     "check:paint": "bun scripts/paint-unit.mjs",
+    "check:paint-icons": "node scripts/paint-icons.mjs",
     "check:publish": "node --experimental-strip-types scripts/publish-unit.mjs",
     "check:hash": "bun scripts/hash-unit.mjs",
     "check:search": "bun scripts/search-unit.mjs",
