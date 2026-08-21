@@ -4,6 +4,17 @@ Claim a task by moving it to **In progress** with your name/date, push, then
 move it to **Done** with a commit reference. One agent per area.
 
 ## Done
+- [x] **Export codec settings = every encoder setting in the encoder's range**
+      (agent arena, 2026-08-22, SPEC AMENDMENT 87): the fine-settings section
+      exposes ALL options the local encoders accept, each bounded to its real
+      range — per-attribute draco quantization bits (POSITION/NORMAL/
+      TEX_COORD/COLOR/GENERIC, 1–30; no TANGENT dial, Babylon maps tangents
+      to GENERIC; defaults reproduce the old `balanced` preset byte-for-byte),
+      draco encode/decode speed (0–10), and webp quality now 0–100% (was
+      50–100). Each dial re-derives independently; the note reports every
+      applied value. Guards: `check:codec` (speeds reach the encoder),
+      `export-card-unit` (ranges/clamping/independence), `check:codec-browser`
+      (dial matrix + per-attribute + speed + webp-0% derives).
 - [x] **Export review: card aspect + size, model name, bits dial** (agent
       arena, 2026-08-21, SPEC AMENDMENT 86): the review owns the published
       `dim` — aspect slider (0.5–2.0, named presets) + resolution slider

@@ -482,12 +482,23 @@
           </div>
         </div>
         <div id="export-codec-settings" class="export-codec-settings" hidden>
-          <div class="codec-row" id="draco-quality-row" hidden><span>geometry bits</span>
-            <input type="range" id="draco-bits" min="6" max="16" step="1" value="12" aria-label="geometry bits" />
-            <b id="draco-bits-label" title="pos 12 · nrm 9 · tan 10 · uv 11 · col 8">12</b>
+          <div id="draco-quality-row" class="draco-settings" hidden>
+            <div class="draco-group">
+              <span class="draco-group-label">geometry bits · 1–30 per attribute</span>
+              <div class="codec-row"><span>position</span><input type="range" id="draco-bits-POSITION" min="1" max="30" step="1" value="12" aria-label="position bits" /><b id="draco-bits-POSITION-label">12</b></div>
+              <div class="codec-row"><span>normal</span><input type="range" id="draco-bits-NORMAL" min="1" max="30" step="1" value="9" aria-label="normal bits" /><b id="draco-bits-NORMAL-label">9</b></div>
+              <div class="codec-row"><span>uv</span><input type="range" id="draco-bits-TEX_COORD" min="1" max="30" step="1" value="11" aria-label="uv bits" /><b id="draco-bits-TEX_COORD-label">11</b></div>
+              <div class="codec-row"><span>color</span><input type="range" id="draco-bits-COLOR" min="1" max="30" step="1" value="8" aria-label="color bits" /><b id="draco-bits-COLOR-label">8</b></div>
+              <div class="codec-row"><span>generic</span><input type="range" id="draco-bits-GENERIC" min="1" max="30" step="1" value="11" aria-label="generic bits" /><b id="draco-bits-GENERIC-label">11</b></div>
+            </div>
+            <div class="draco-group">
+              <span class="draco-group-label">draco speed · 0 best compression, 10 fastest</span>
+              <div class="codec-row"><span>encode</span><input type="range" id="draco-encode-speed" min="0" max="10" step="1" value="5" aria-label="encode speed" /><b id="draco-encode-speed-label">5</b></div>
+              <div class="codec-row"><span>decode</span><input type="range" id="draco-decode-speed" min="0" max="10" step="1" value="5" aria-label="decode speed" /><b id="draco-decode-speed-label">5</b></div>
+            </div>
           </div>
           <div class="codec-row" id="webp-quality-row" hidden><span>texture quality</span>
-            <input type="range" id="webp-quality" min="50" max="100" step="5" value="85" aria-label="webp quality" />
+            <input type="range" id="webp-quality" min="0" max="100" step="1" value="85" aria-label="webp quality" />
             <b id="webp-quality-label">85%</b>
           </div>
         </div>

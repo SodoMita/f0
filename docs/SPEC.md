@@ -1370,3 +1370,28 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     state is correct, so it is a driver quirk, not app state). Real GPUs are
     unaffected; the codec-browser guard restores the default card size before
     its module-level webp pixel check to stay deterministic.
+
+87. EXPORT CODEC SETTINGS = EVERY ENCODER SETTING, IN THE ENCODER'S RANGE
+    (2026-08-22): AMENDMENT 86's single "geometry bits" dial was still an
+    abstraction over several encoder knobs. The fine-settings section now
+    lists EVERY option the local encoders actually accept, each bounded to
+    the range the encoder supports:
+    - Draco quantization bits, per attribute kind, 1–30: POSITION, NORMAL,
+      TEX_COORD, COLOR, GENERIC. There is deliberately NO TANGENT dial —
+      Babylon's Draco path maps TANGENT to GENERIC (GetDracoAttributeName),
+      so a TANGENT quantizationBits key would be dead; the GENERIC dial is
+      what controls tangents. Defaults (12/9/11/8/11) reproduce the old
+      `balanced` preset byte-for-byte, so untouched reviews encode identical
+      bytes. 0 (keep floats) is not offered because "raw" already covers it.
+    - Draco encode/decode speed, 0–10 (encoder default 5): 0 = slowest,
+      best compression; 10 = fastest, worst. Both flow through
+      DracoEncodeOptions (they were already plumbed, just not exposed).
+    - WebP quality now spans the canvas encoder's FULL 0–100% (was 50–100).
+    The codec note reports every applied value (`pos 12/nrm 9/uv 11/col 8/
+    gen 11 bits`, plus `encode n/decode n` when speeds leave the default).
+    Each dial is an independent lossy control: changing one re-derives +
+    re-validates + re-previews. Guards: `check:codec` (speed options reach
+    the encoder + still produce valid bytes), `export-card-unit` (ranges,
+    clamping, per-attribute independence, defaults), `check:codec-browser`
+    (all dials visible with encoder ranges, per-attribute note changes,
+    speed note + valid derive, webp 0% valid).

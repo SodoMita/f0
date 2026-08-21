@@ -40,6 +40,15 @@ body[data-theme="light"] .export-card-size .codec-row input[type="text"] { backg
 .export-codec-settings { display: flex; flex-direction: column; gap: 6px; }
 .codec-row input[type="range"] { width: 130px; accent-color: var(--accent, #7c9cff); }
 .codec-row b { min-width: 34px; color: var(--ink); font: 11px/1 ui-monospace, monospace; text-align: right; }
+/* Every draco setting the encoder supports, each in the encoder's range
+   (SPEC AMENDMENT 87): per-attribute quantization bits + encode/decode
+   speed. Grouped so the attribute rows sit under one caption. */
+.draco-settings { display: flex; flex-direction: column; gap: 8px; }
+.draco-group { display: flex; flex-direction: column; gap: 3px; }
+.draco-group-label { font: 9.5px/1.2 ui-monospace, monospace; color: var(--muted); letter-spacing: .03em; }
+.draco-group .codec-row { gap: 8px; }
+.draco-group .codec-row input[type="range"] { width: 112px; }
+.draco-group .codec-row span { min-width: 44px; }
 .export-preview { display: flex; flex-direction: column; gap: 6px; }
 .export-preview .shots { display: flex; gap: 8px; justify-content: center; }
 .export-shot { margin: 0; display: flex; flex-direction: column; gap: 4px; align-items: center; }

@@ -1,5 +1,6 @@
 import { formatSize } from './modelInfo'
 import { LIMITS } from '../theme'
+import type { DracoAttributeName } from '../model/compressGlb'
 
 /**
  * Export-review settings (SPEC AMENDMENT 86). Pure helpers — no Babylon, no
@@ -19,17 +20,43 @@ export const CARD_ASPECT_MAX = LIMITS.posterAspectMax
 export const CARD_RES_MIN = LIMITS.posterDimMin
 export const CARD_RES_MAX = LIMITS.posterDimMax
 
-/** Draco position-bits dial bounds (SPEC AMENDMENT 86: was 3 preset buttons). */
-export const DRACO_BITS_MIN = 6
-export const DRACO_BITS_MAX = 16
-/** Position bits that reproduce the old `balanced` preset exactly. */
-export const DRACO_BITS_DEFAULT = 12
+/** Draco quantization-bits dial bounds (SPEC AMENDMENT 86/87). The encoder
+ * (draco_encoder wasm via Babylon) accepts 1–30 bits per attribute kind;
+ * 0 would disable quantization for that attribute (floats kept), which the
+ * "raw" codec choice already covers, so the dials start at 1. */
+export const DRACO_BITS_MIN = 1
+export const DRACO_BITS_MAX = 30
+/** Attribute kinds the draco path actually quantizes. TANGENT is NOT one of
+ * them — Babylon maps it to GENERIC (GetDracoAttributeName), so a TANGENT
+ * key in quantizationBits is dead; the GENERIC dial controls it. */
+export const DRACO_ATTRIBS: readonly DracoAttributeName[] = ['POSITION', 'NORMAL', 'TEX_COORD', 'COLOR', 'GENERIC']
+/** Defaults reproduce the old `balanced` preset (AMENDMENT 85) exactly, so an
+ * untouched review encodes identical bytes to before. */
+export const DRACO_BITS_DEFAULT: Record<DracoAttributeName, number> = { POSITION: 12, NORMAL: 9, TEX_COORD: 11, COLOR: 8, GENERIC: 11 }
+/** Draco speed options (encode/decode): 0 = slowest, best compression;
+ * 10 = fastest, worst. The encoder's own default is 5. */
+export const DRACO_SPEED_MIN = 0
+export const DRACO_SPEED_MAX = 10
+export const DRACO_SPEED_DEFAULT = 5
 
-export interface CardDim { width: number; height: number }
+/** Clamp + round a (possibly partial) bits record into the full per-attribute
+ * record the encoder consumes; missing kinds take the balanced defaults. */
+export function sanitizeDracoBits(bits: Partial<Record<DracoAttributeName, number>>): Record<DracoAttributeName, number> {
+  const out = {} as Record<DracoAttributeName, number>
+  for (const a of DRACO_ATTRIBS) out[a] = clamp(Math.round(bits[a] ?? DRACO_BITS_DEFAULT[a]), DRACO_BITS_MIN, DRACO_BITS_MAX)
+  return out
+}
+
+/** Compact label for the codec note: `pos 12/nrm 9/uv 11/col 8/gen 11`. */
+export function dracoBitsNote(bits: Record<DracoAttributeName, number>): string {
+  return `pos ${bits.POSITION}/nrm ${bits.NORMAL}/uv ${bits.TEX_COORD}/col ${bits.COLOR}/gen ${bits.GENERIC} bits`
+}
 
 function clamp(v: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, v))
 }
+
+export interface CardDim { width: number; height: number }
 
 /**
  * A card size from the review's two dials. `longEdge` is the pixel count of
@@ -81,25 +108,6 @@ export function aspectLabel(aspect: number): string {
   }
   if (best && bestDiff <= 0.025) return best
   return a.toFixed(2)
-}
-
-/**
- * Per-attribute Draco quantization for the single "geometry bits" dial.
- * The dial sets POSITION directly; the other kinds scale from the balanced
- * ratios (12 → pos 12 · nrm 9 · tan 10 · uv 11 · col 8 · gen 11, the old
- * `balanced` preset). Rounding keeps every value inside the encoder's range.
- */
-export function dracoBits(position: number): Record<string, number> {
-  const p = clamp(Math.round(position), DRACO_BITS_MIN, DRACO_BITS_MAX)
-  const scale = (v: number) => clamp(Math.round((v * p) / 12), DRACO_BITS_MIN, DRACO_BITS_MAX)
-  return {
-    POSITION: p,
-    NORMAL: scale(9),
-    TANGENT: scale(10),
-    TEX_COORD: scale(11),
-    COLOR: scale(8),
-    GENERIC: scale(11),
-  }
 }
 
 export interface GLBExportInfo {

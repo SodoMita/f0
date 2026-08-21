@@ -326,7 +326,10 @@ const sortedDelta = (a, b) => { const x = Float64Array.from(a).sort(); const y =
   }
   const high = await compressGLB(bytes, { draco: spyCodec, dracoOptions: { quantizationBits: { POSITION: 14, NORMAL: 10, TEX_COORD: 12, COLOR: 8 } } })
   const small = await compressGLB(bytes, { draco: spyCodec, dracoOptions: { quantizationBits: { POSITION: 10, NORMAL: 8, TEX_COORD: 9, COLOR: 6 } } })
+  const sped = await compressGLB(bytes, { draco: spyCodec, dracoOptions: { quantizationBits: { POSITION: 12 }, encodeSpeed: 8, decodeSpeed: 3 } })
   check('draco: fine settings reach the encoder', !!captured?.quantizationBits && captured.quantizationBits.POSITION !== undefined, JSON.stringify(captured?.quantizationBits ?? null))
+  check('draco: speed options reach the encoder', captured?.encodeSpeed === 8 && captured?.decodeSpeed === 3, JSON.stringify({ e: captured?.encodeSpeed, d: captured?.decodeSpeed }))
+  check('draco: speed options still produce bytes', sped.bytes.length > 0 && sped.bytes.length <= bytes.length * 2, String(sped.bytes.length))
   check('draco: fewer bits -> smaller payload', !small.report.keptOriginal && small.bytes.length < high.bytes.length, `${high.bytes.length} vs ${small.bytes.length}`)
   try {
     const before = await loadVerts(bytes)

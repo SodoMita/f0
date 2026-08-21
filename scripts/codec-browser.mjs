@@ -151,9 +151,26 @@ if (dracoVisible) {
   check('lossy preview reports the pixel difference', /identical pixels|mean pixel difference/.test(preview.diff), preview.diff)
   check('lossy preview labels the codec side', preview.label.includes('draco'), preview.label)
 
-  // Fine settings: fewer geometry bits must re-derive a smaller file.
+  // Fine settings (AMENDMENT 87): the section lists EVERY encoder setting in
+  // the encoder's own range — per-attribute bits + encode/decode speed.
+  const bitsAttrs = await page.evaluate(() => ({
+    position: { min: document.getElementById('draco-bits-POSITION').min, max: document.getElementById('draco-bits-POSITION').max, label: document.getElementById('draco-bits-POSITION-label').textContent },
+    normal: document.getElementById('draco-bits-NORMAL-label').textContent,
+    uv: document.getElementById('draco-bits-TEX_COORD-label').textContent,
+    color: document.getElementById('draco-bits-COLOR-label').textContent,
+    generic: document.getElementById('draco-bits-GENERIC-label').textContent,
+    encode: { min: document.getElementById('draco-encode-speed').min, max: document.getElementById('draco-encode-speed').max },
+    decode: { min: document.getElementById('draco-decode-speed').min, max: document.getElementById('draco-decode-speed').max },
+  }))
+  check('draco settings cover every attribute the encoder quantizes',
+    bitsAttrs.position.min === '1' && bitsAttrs.position.max === '30'
+    && bitsAttrs.normal === '9' && bitsAttrs.uv === '11' && bitsAttrs.color === '8' && bitsAttrs.generic === '11',
+    JSON.stringify(bitsAttrs))
+  check('draco speed dials cover the encoder range 0–10', bitsAttrs.encode.min === '0' && bitsAttrs.encode.max === '10' && bitsAttrs.decode.min === '0' && bitsAttrs.decode.max === '10')
+
+  // Fewer position bits must re-derive a smaller file.
   const balancedSize = await fileSize()
-  await page.$eval('#draco-bits', (el) => {
+  await page.$eval('#draco-bits-POSITION', (el) => {
     el.value = '10'
     el.dispatchEvent(new Event('input', { bubbles: true }))
     el.dispatchEvent(new Event('change', { bubbles: true }))
@@ -163,8 +180,39 @@ if (dracoVisible) {
   const smallSize = await fileSize()
   const noteSmall = await page.$eval('#export-codec-note', (el) => el.textContent)
   check('draco bits dial changes the result', smallSize !== balancedSize && /pos 10/.test(noteSmall), `${balancedSize} -> ${smallSize}`)
-  await page.$eval('#draco-bits', (el) => {
+  // A non-position attribute dial is independent: color 4 must not move pos.
+  await page.$eval('#draco-bits-COLOR', (el) => {
+    el.value = '4'
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+    el.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  await settle()
+  await page.waitForFunction(() => /col 4/.test(document.getElementById('export-codec-note').textContent), { timeout: 60000 })
+  const noteColor = await page.$eval('#export-codec-note', (el) => el.textContent)
+  check('per-attribute bits stay independent', /pos 10/.test(noteColor) && /col 4/.test(noteColor), noteColor)
+  // Speed dials re-derive and show in the note.
+  await page.$eval('#draco-encode-speed', (el) => {
+    el.value = '8'
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+    el.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  await settle()
+  await page.waitForFunction(() => /encode 8/.test(document.getElementById('export-codec-note').textContent), { timeout: 60000 })
+  const noteSpeed = await page.$eval('#export-codec-note', (el) => el.textContent)
+  check('draco speed setting reaches the note + stays valid', /encode 8\/decode 5/.test(noteSpeed) && (await state()).includes('validated'), noteSpeed)
+  // Restore defaults for the rest of the flow.
+  await page.$eval('#draco-bits-POSITION', (el) => {
     el.value = '12'
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+    el.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  await page.$eval('#draco-bits-COLOR', (el) => {
+    el.value = '8'
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+    el.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  await page.$eval('#draco-encode-speed', (el) => {
+    el.value = '5'
     el.dispatchEvent(new Event('input', { bubbles: true }))
     el.dispatchEvent(new Event('change', { bubbles: true }))
   })
@@ -189,9 +237,12 @@ if (webpVisible) {
   await settle()
   const note = await page.$eval('#export-codec-note', (el) => el.textContent)
   check('webp with nothing to encode keeps the review valid', (await state()).includes('validated'), note)
-  // Fine settings: the quality slider re-derives and stays valid.
+  // Fine settings: the quality slider covers the encoder's full 0–100 range
+  // and re-derives.
   const rowVisible = await page.isVisible('#webp-quality-row')
   check('webp quality slider appears with the codec', rowVisible)
+  const qRange = await page.evaluate(() => ({ min: document.getElementById('webp-quality').min, max: document.getElementById('webp-quality').max }))
+  check('webp quality covers the encoder range 0–100', qRange.min === '0' && qRange.max === '100', JSON.stringify(qRange))
   await page.$eval('#webp-quality', (el) => {
     el.value = '70'
     el.dispatchEvent(new Event('input', { bubbles: true }))
@@ -200,6 +251,21 @@ if (webpVisible) {
   await settle()
   const qLabel = await page.$eval('#webp-quality-label', (el) => el.textContent)
   check('webp quality change re-derives a valid review', qLabel === '70%', qLabel)
+  // Bottom of the range is still a valid derive (0% = worst quality).
+  await page.$eval('#webp-quality', (el) => {
+    el.value = '0'
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+    el.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  await settle()
+  const q0 = await page.evaluate(() => ({ label: document.getElementById('webp-quality-label').textContent, state: document.getElementById('export-state').textContent }))
+  check('webp quality 0 stays valid', q0.label === '0%' && q0.state.includes('validated'), JSON.stringify(q0))
+  await page.$eval('#webp-quality', (el) => {
+    el.value = '85'
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+    el.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  await settle()
   await page.click('#codec-texture [data-v="none"]')
   await settle()
   const rowHidden = !(await page.isVisible('#webp-quality-row'))

@@ -39,7 +39,7 @@ import { bindPaintHud } from './studio/paintHud'
 import { formatCount, formatSize, modelNameForPublish, modelWarnings, sizeHeatColor } from './studio/modelInfo'
 import type { ImportedModel } from './studio/studio'
 import { bindLibraryHud } from './studio/library/hud'
-import { exportBreakdown, inspectGLB, aspectLabel, cardDimFromSettings, cardSettingsFromDim, dracoBits as dracoBitsFor, DRACO_BITS_DEFAULT, type GLBExportInfo } from './studio/exportInfo'
+import { exportBreakdown, inspectGLB, aspectLabel, cardDimFromSettings, cardSettingsFromDim, sanitizeDracoBits, dracoBitsNote, DRACO_ATTRIBS, DRACO_BITS_DEFAULT, DRACO_SPEED_DEFAULT, type GLBExportInfo } from './studio/exportInfo'
 import { compressGLB, type CompressReport } from './model/compressGlb'
 import { configureDracoEncoder, dracoCodec, dracoEncoderReady } from './model/dracoEncode'
 import { webpCodec, webpEncoderSupported } from './model/webpEncode'
@@ -166,8 +166,17 @@ async function boot(): Promise<void> {
   const exportCodecs = $('export-codecs')
   const exportCodecSettings = $('export-codec-settings')
   const dracoQualityRow = $('draco-quality-row')
-  const dracoBitsEl = $('draco-bits') as HTMLInputElement
-  const dracoBitsLabel = $('draco-bits-label')
+  // Every setting the draco encoder supports (SPEC AMENDMENT 87): quantization
+  // bits per attribute kind (POSITION/NORMAL/TEX_COORD/COLOR/GENERIC — TANGENT
+  // is not a draco kind, GENERIC controls it) + encode/decode speed.
+  const dracoBitsEls = new Map<string, { input: HTMLInputElement; label: HTMLElement }>()
+  for (const a of DRACO_ATTRIBS) {
+    dracoBitsEls.set(a, { input: $(`draco-bits-${a}`) as HTMLInputElement, label: $(`draco-bits-${a}-label`) })
+  }
+  const dracoEncodeSpeed = $('draco-encode-speed') as HTMLInputElement
+  const dracoEncodeSpeedLabel = $('draco-encode-speed-label')
+  const dracoDecodeSpeed = $('draco-decode-speed') as HTMLInputElement
+  const dracoDecodeSpeedLabel = $('draco-decode-speed-label')
   const webpQualityRow = $('webp-quality-row')
   const webpQuality = $('webp-quality') as HTMLInputElement
   const webpQualityLabel = $('webp-quality-label')
@@ -196,12 +205,14 @@ async function boot(): Promise<void> {
   // Choices/settings clicked while a derive is running are queued (same
   // pattern as the studio preview) — a busy pass must never swallow a click.
   let exportCodecQueued = false
-  // Fine settings (SPEC AMENDMENT 85/86): both codecs are LOSSY, so the review
-  // renders the compressed bytes next to the raw export and exposes quality.
-  // Geometry bits is ONE dial (SPEC AMENDMENT 86: was 3 preset buttons) — it
-  // sets POSITION quantization directly and scales the other attribute kinds
-  // from the balanced ratios; dracoBitsFor(12) is exactly the old `balanced`.
-  let dracoBitsValue = DRACO_BITS_DEFAULT
+  // Fine settings (SPEC AMENDMENT 85/86/87): both codecs are LOSSY, so the
+  // review renders the compressed bytes next to the raw export and exposes
+  // quality. The settings section lists EVERY option the encoders support in
+  // the encoder's own range: per-attribute draco quantization bits (defaults
+  // reproduce the old `balanced` preset byte-for-byte), draco encode/decode
+  // speed (0–10, encoder default 5), and webp quality (0–100%).
+  let dracoBitsState = { ...DRACO_BITS_DEFAULT }
+  let dracoSpeeds = { encode: DRACO_SPEED_DEFAULT, decode: DRACO_SPEED_DEFAULT }
   // Card-rendered preview of the CURRENT pristine export (raw baseline).
   let rawPreview: { pixels: Uint8Array; width: number; height: number } | null = null
   const netDot = $('net-dot')
@@ -618,8 +629,12 @@ async function boot(): Promise<void> {
   function codecNote(report: CompressReport | null, before?: GLBExportInfo, after?: GLBExportInfo): string {
     if (!report) return ''
     const parts: string[] = []
-    const b = dracoBitsFor(dracoBitsValue)
-    if (report.draco.prims) parts.push(`draco ${report.draco.prims} mesh${report.draco.prims === 1 ? '' : 'es'} ${formatSize(report.draco.bytesBefore)} → ${formatSize(report.draco.bytesAfter)} · pos ${b.POSITION}/nrm ${b.NORMAL}/uv ${b.TEX_COORD}/col ${b.COLOR} bits`)
+    const b = sanitizeDracoBits(dracoBitsState)
+    if (report.draco.prims) {
+      let note = `draco ${report.draco.prims} mesh${report.draco.prims === 1 ? '' : 'es'} ${formatSize(report.draco.bytesBefore)} → ${formatSize(report.draco.bytesAfter)} · ${dracoBitsNote(b)}`
+      if (dracoSpeeds.encode !== DRACO_SPEED_DEFAULT || dracoSpeeds.decode !== DRACO_SPEED_DEFAULT) note += ` · encode ${dracoSpeeds.encode}/decode ${dracoSpeeds.decode}`
+      parts.push(note)
+    }
     if (report.webp.images) parts.push(`webp ${report.webp.images} texture${report.webp.images === 1 ? '' : 's'} q${Math.round(webpQuality.valueAsNumber)}% ${formatSize(report.webp.bytesBefore)} → ${formatSize(report.webp.bytesAfter)}`)
     if (before && after && !report.keptOriginal) parts.push(`file ${formatSize(before.bytes)} → ${formatSize(after.bytes)} · −${Math.round((1 - after.bytes / before.bytes) * 100)}%`)
     const reasons = [...new Set([...report.draco.reasons, ...report.webp.reasons])]
@@ -722,7 +737,7 @@ async function boot(): Promise<void> {
       const src = new Uint8Array(await pristineExport.blob.arrayBuffer())
       const { bytes: out, report } = await compressGLB(src, {
         draco: wantDraco ? dracoCodec : undefined,
-        dracoOptions: wantDraco ? { quantizationBits: { ...dracoBitsFor(dracoBitsValue) } } : undefined,
+        dracoOptions: wantDraco ? { quantizationBits: { ...sanitizeDracoBits(dracoBitsState) }, encodeSpeed: dracoSpeeds.encode, decodeSpeed: dracoSpeeds.decode } : undefined,
         webp: wantWebp ? webpCodec : undefined,
         webpQuality: webpQuality.valueAsNumber / 100,
       })
@@ -847,23 +862,39 @@ async function boot(): Promise<void> {
     syncCodecButtons()
     requestCodecApply()
   })
-  // Draco quantization bits: a lossy dial (range 6–16), so it re-derives +
-  // re-previews. The label echoes the dial and its title breaks the bits down
-  // per attribute kind.
-  const paintDracoBits = (): void => {
-    const b = dracoBitsFor(dracoBitsValue)
-    dracoBitsLabel.textContent = String(dracoBitsValue)
-    dracoBitsLabel.title = `pos ${b.POSITION} · nrm ${b.NORMAL} · tan ${b.TANGENT} · uv ${b.TEX_COORD} · col ${b.COLOR}`
+  // Draco fine settings: every encoder setting in the encoder's range, each
+  // a lossy dial, so any change re-derives + re-previews.
+  const paintDracoSettings = (): void => {
+    for (const a of DRACO_ATTRIBS) {
+      const el = dracoBitsEls.get(a)
+      if (el) el.label.textContent = String(sanitizeDracoBits(dracoBitsState)[a])
+    }
+    dracoEncodeSpeedLabel.textContent = String(dracoSpeeds.encode)
+    dracoDecodeSpeedLabel.textContent = String(dracoSpeeds.decode)
   }
-  paintDracoBits()
-  dracoBitsEl.addEventListener('input', () => {
-    dracoBitsLabel.textContent = dracoBitsEl.value
-  })
-  dracoBitsEl.addEventListener('change', () => {
-    dracoBitsValue = dracoBitsEl.valueAsNumber
-    paintDracoBits()
-    if (codecChoice.geometry === 'draco') requestCodecApply()
-  })
+  const bindDracoBitsDial = (a: string, input: HTMLInputElement, label: HTMLElement): void => {
+    input.addEventListener('input', () => { label.textContent = input.value })
+    input.addEventListener('change', () => {
+      dracoBitsState = sanitizeDracoBits({ ...dracoBitsState, [a]: input.valueAsNumber })
+      label.textContent = input.value
+      if (codecChoice.geometry === 'draco') requestCodecApply()
+    })
+  }
+  for (const a of DRACO_ATTRIBS) {
+    const el = dracoBitsEls.get(a)
+    if (el) bindDracoBitsDial(a, el.input, el.label)
+  }
+  const bindDracoSpeed = (input: HTMLInputElement, label: HTMLElement, key: 'encode' | 'decode'): void => {
+    input.addEventListener('input', () => { label.textContent = input.value })
+    input.addEventListener('change', () => {
+      dracoSpeeds[key] = input.valueAsNumber
+      label.textContent = input.value
+      if (codecChoice.geometry === 'draco') requestCodecApply()
+    })
+  }
+  bindDracoSpeed(dracoEncodeSpeed, dracoEncodeSpeedLabel, 'encode')
+  bindDracoSpeed(dracoDecodeSpeed, dracoDecodeSpeedLabel, 'decode')
+  paintDracoSettings()
   webpQuality.addEventListener('input', () => {
     webpQualityLabel.textContent = `${webpQuality.valueAsNumber}%`
   })
