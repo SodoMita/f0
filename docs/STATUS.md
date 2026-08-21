@@ -897,3 +897,11 @@ move it to **Done** with a commit reference. One agent per area.
 - Poster/preview pool renders share one scene (serialized by a mutex) — fine
   for now, but per-slot isolation is on the roadmap (spec 03 §5).
 - No service worker / offline caching beyond IndexedDB poster cache.
+- Board card crossfade race (surfaced by the shared-pool refactor, AMENDMENT
+  80): `drive2D()` requests the live preview right after starting the
+  plate->poster crossfade; the consolidated pool re-loads the RTT in <120ms,
+  and `onLive`'s `crossfadeTo()` snaps opacity to 1 (`finishFade`) — cutting
+  the poster fade short. `scripts/offline-verify.mjs` §1b "board card
+  crossfades over >=60ms" reports `rampMs=0` as a result. Needs a decision:
+  hold the live blend until the poster fade completes, or allow a fast live
+  load to truncate it.
