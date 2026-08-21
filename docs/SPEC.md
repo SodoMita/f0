@@ -1281,6 +1281,12 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     - `TransformNode.dispose(true)` means doNotRecurse, so every released
       model left its orient + fit nodes behind (46 orphans after a few 2D↔3D
       toggles). Released slots now dispose the whole chain.
+    - The 3D contact shadow was a FIXED ellipse in the middle of the card
+      ("the poster footprint is 2D-only"). With main-camera framing a model
+      can sit anywhere in its cell, so the shadow floated next to it.
+      `placeFrame()` now returns the model's real footprint (cell-relative
+      centre, bottom and width) and the board's shadow follows it, refreshed
+      on every re-place — the same shape the poster pipeline measures.
     Housekeeping: `scripts/offline-verify.mjs` still asserted the
     pre-AMENDMENT-6 poster policy ("poster from authored camera", "poster
     uses cam0"). Those two checks had failed on every run for months — a

@@ -30,7 +30,9 @@ move it to **Done** with a commit reference. One agent per area.
       blank on a settled board); group-1 overlays use `depthFunction=ALWAYS`
       so a model with real depth cannot cover its own ▶ button (AMENDMENT
       76 only fixed the transparent sort); released slots dispose their whole
-      transform chain (`dispose(true)` = do NOT recurse). Guards:
+      transform chain (`dispose(true)` = do NOT recurse); the 3D contact
+      shadow follows the model's real footprint in its cell instead of a
+      fixed ellipse. Guards:
       `bun scripts/direct3d-camera-unit.mjs` (framing vs the authored view
       matrix) and `node scripts/direct3d-camera.mjs` (pixel census against
       the offline rig, board + thread + scroll). Also un-rotted

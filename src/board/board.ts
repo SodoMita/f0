@@ -307,9 +307,10 @@ export class Board {
       const slot = this.cards.find((c) => c.meta?.eventId === postId)
       if (!slot) return
       slot.spinner.setEnabled(false)
-      // A real model stands on the card: a default contact shadow (the poster
-      // footprint is 2D-only and never computed in 3D mode).
-      slot.footprint = { cx: 0.5, bottom: 0.1, w: 0.66 }
+      // A real model stands on the card: its contact shadow follows where the
+      // model actually landed (main-camera framing puts it wherever the author
+      // framed it), not a fixed guess.
+      slot.footprint = this.pool3d.footprintOf(postId) ?? { cx: 0.5, bottom: 0.1, w: 0.66 }
       slot.shadow.setEnabled(this.contactStrength > 0)
       this.positionExtras(slot)
       this.invalidate(2)
@@ -1087,7 +1088,9 @@ export class Board {
     slot.spinner.scaling.set(ring / 4, ring / 4, 1)
     slot.spinner.position.set(slot.mesh.position.x, slot.mesh.position.y, -0.02)
 
-    const fp = slot.footprint
+    // In 3D the pool owns the footprint: a resize or a re-place moves the
+    // model inside its cell, and the shadow has to follow in the same frame.
+    const fp = (this.threeD && slot.meta ? this.pool3d.footprintOf(slot.meta.eventId) : null) ?? slot.footprint
     if (fp) {
       const w = Math.max(slot.w * 0.18, Math.min(slot.w * 1.05, fp.w * slot.w * 1.35))
       const h = Math.min(slot.h * 0.34, w * 0.34)

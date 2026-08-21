@@ -74,6 +74,10 @@ export interface FramePlacement {
   x: number
   y: number
   z: number
+  /** Where the model actually sits INSIDE the cell, in 0..1 cell coordinates
+   *  (x from the left, y from the bottom) — the contact shadow uses it, the
+   *  same shape the poster pipeline measures from its render. */
+  footprint: { cx: number; bottom: number; w: number }
 }
 
 /** The cell a model has to live in (world units of the flat scene). */
@@ -315,7 +319,16 @@ export function placeFrame(frame: ModelFrame, cell: FrameCell): FramePlacement {
   const budget = Math.max(0.001, cell.depth) / 2
   if (halfDepth > budget) z -= Math.min(halfDepth - budget, MAX_FORWARD)
 
-  return { scale, x: cell.x + ox, y: cell.y + oy, z }
+  // Where the model ends up inside the cell — the contact shadow follows the
+  // real model instead of the fixed guess 3D mode used to draw.
+  const clamp01 = (v: number): number => Math.max(0, Math.min(1, v))
+  const footprint = {
+    cx: clamp01(0.5 + ((frame.min.x + frame.max.x) / 2 * scale + ox) / w),
+    bottom: clamp01(0.5 + (frame.min.y * scale + oy) / h),
+    w: clamp01((extX * scale) / w),
+  }
+
+  return { scale, x: cell.x + ox, y: cell.y + oy, z, footprint }
 }
 
 /**

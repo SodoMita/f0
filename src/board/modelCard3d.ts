@@ -56,6 +56,8 @@ interface Slot {
   frame: ModelFrame | null
   /** the four planes that crop this model to its card / node rect */
   clip: Plane[] | null
+  /** where the model sits inside its cell (contact shadow) */
+  footprint: { cx: number; bottom: number; w: number } | null
   /** false while the model's shaders are still compiling (see hasWork) */
   warm: boolean
   /** give up waiting for a never-ready effect at this timestamp */
@@ -133,6 +135,10 @@ export class Direct3DPool {
   isLive(postId: string): boolean { return this.byPost.has(postId) }
   isLoading(postId: string): boolean { return this.loading.has(postId) }
   isRejected(postId: string): boolean { return this.rejected.has(postId) }
+  /** Where a live model sits inside its cell (0..1), for the contact shadow. */
+  footprintOf(postId: string): { cx: number; bottom: number; w: number } | null {
+    return this.byPost.get(postId)?.footprint ?? null
+  }
   isPlaying(postId: string): boolean { return this.byPost.get(postId)?.playing ?? false }
   hasAnims(postId: string): boolean { return (this.byPost.get(postId)?.anims.length ?? 0) > 0 }
 
@@ -297,8 +303,8 @@ export class Direct3DPool {
     return {
       postId: null, pending: false, visible: false, playing: false, started: false,
       root: null, orient: null, fit: null, container: null, anims: [], sounds: [],
-      soundTimer: null, frame: null, clip: null, warm: false, warmUntil: 0,
-      place: null, placedAt: 0,
+      soundTimer: null, frame: null, clip: null, footprint: null,
+      warm: false, warmUntil: 0, place: null, placedAt: 0,
     }
   }
 
@@ -333,6 +339,7 @@ export class Direct3DPool {
     const at = placeFrame(slot.frame, place)
     slot.root.scaling.setAll(at.scale)
     slot.root.position.set(at.x, at.y, at.z)
+    slot.footprint = at.footprint
     // The crop follows the cell: scrolling a card moves its window too.
     if (slot.clip) updateCellClip(slot.clip, place)
   }
@@ -461,6 +468,7 @@ export class Direct3DPool {
     // so recursing only reaches this pool's two helper nodes.
     if (slot.root) { slot.root.dispose(); slot.root = null; slot.orient = null; slot.fit = null }
     slot.clip = null
+    slot.footprint = null
     slot.warm = false
     slot.warmUntil = 0
     slot.frame = null

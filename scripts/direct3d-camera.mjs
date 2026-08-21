@@ -233,6 +233,54 @@ if (twoCamCards.length) {
 await page.evaluate(() => window.__form0.setSearchQuery(''))
 await page.waitForTimeout(1500)
 
+// The contact shadow must sit UNDER the real model: with main-camera framing
+// a model can be anywhere in its cell, so the fixed "middle of the card"
+// guess 3D mode used to draw floated next to it.
+{
+  const shadows = await page.evaluate(() => {
+    const b = window.__form0.board
+    const out = []
+    for (const c of b.cards) {
+      if (!c.meta || !c.mesh.isEnabled() || !b.pool3d.isLive(c.meta.eventId)) continue
+      if (!c.shadow.isEnabled()) continue
+      const slot = b.pool3d.byPost.get(c.meta.eventId)
+      const left = c.mesh.position.x - c.w / 2, right = c.mesh.position.x + c.w / 2
+      const bottom = c.mesh.position.y - c.h / 2, top = c.mesh.position.y + c.h / 2
+      let mnx = Infinity, mxx = -Infinity, mny = Infinity
+      for (const mesh of slot.container.meshes) {
+        if (mesh.getTotalVertices() <= 0) continue
+        mesh.computeWorldMatrix(true)
+        const bb = mesh.getBoundingInfo().boundingBox
+        const lo = bb.minimumWorld, hi = bb.maximumWorld
+        // a mesh entirely outside the cell is cropped away — it is not part
+        // of the picture and must not drag the measurement (rig flavour `a`
+        // parks a huge green cube outside the authored frame on purpose)
+        if (hi.x < left || lo.x > right || hi.y < bottom || lo.y > top) continue
+        mnx = Math.min(mnx, Math.max(lo.x, left)); mxx = Math.max(mxx, Math.min(hi.x, right))
+        mny = Math.min(mny, Math.max(lo.y, bottom))
+      }
+      if (!(mxx > mnx)) continue
+      out.push({
+        file: c.meta.filename,
+        dx: Math.abs(c.shadow.position.x - (mnx + mxx) / 2) / c.w,
+        dy: (c.shadow.position.y - mny) / c.h,
+        wRatio: (c.shadow.scaling.x * 4) / Math.max(0.001, mxx - mnx),
+      })
+    }
+    return out
+  })
+  check('3D cards have contact shadows', shadows.length > 0, `${shadows.length}`)
+  const off = shadows.filter((s) => s.dx > 0.08)
+  check('the contact shadow is centred under the model it belongs to',
+    off.length === 0, off.map((s) => `${s.file} dx=${s.dx.toFixed(2)}`).join(' ') || 'all aligned')
+  const low = shadows.filter((s) => Math.abs(s.dy) > 0.2)
+  check('the contact shadow sits at the model\'s feet',
+    low.length === 0, low.map((s) => `${s.file} dy=${s.dy.toFixed(2)}`).join(' ') || 'all grounded')
+  const wide = shadows.filter((s) => s.wRatio < 0.6 || s.wRatio > 2.2)
+  check('the contact shadow is scaled to the model, not fixed',
+    wide.length === 0, wide.map((s) => `${s.file} w=${s.wRatio.toFixed(2)}`).join(' ') || 'all proportional')
+}
+
 // Demand-driven rendering must survive 3D mode: a settled board with paused
 // models draws ZERO frames, and an animating one draws again. The warm-up
 // loop that fixed blank cards must not latch (AMENDMENT 77 had exactly that
