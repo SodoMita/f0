@@ -4,6 +4,31 @@ Claim a task by moving it to **In progress** with your name/date, push, then
 move it to **Done** with a commit reference. One agent per area.
 
 ## Done
+- [x] **Library palette texture + low-poly ball faces + voxel art** (agent
+      arena, 2026-08-21, SPEC AMENDMENT 86): colour left the vertices. All 61
+      generated library pieces now sample ONE embedded 32x32 palette PNG
+      (`scripts/palette.py`, 64 curated swatches, 4x4 px each, NEAREST) through
+      a per-vertex UV — no COLOR_0, same bytes, one art direction, and a real
+      textured PBR material the tint/poster/export paths already handle.
+      Colours are authored as palette names; a stray literal snaps and the
+      build fails past 0.12. The smileys are gone: faces are low-poly BALLS
+      (subdivided icosahedra + flat palette patches laid on the surface), and a
+      new **voxel** group ships greedy-meshed cube art — invader, ghost, creep,
+      grassblock, snake, sword, pixheart. Manifest gained `front` (authored
+      facing +Z) so the studio stops guessing from `dim`.
+      Two real bugs fell out: `byteStride` was on the ACCESSOR (glTF has no
+      such field) so every loader read the padded NORMAL/TEXCOORD streams
+      tightly packed — shifted normals for the whole library and UVs that tiled
+      the palette into stripes; and the symbols picker leaked the studio accent
+      into an untinted selection, silently tinting the next piece placed (it
+      defaults to white now: palette as authored, tint still one click away).
+      Guards: `node scripts/library-unit.mjs` (palette embedded/NEAREST/bound/
+      tiny, faces 3d, voxel group, `front` flags), `npm run check:symbols`
+      (green in headless Chromium, palette texture bound), new
+      `node scripts/library-shot.mjs` (places pieces in the real studio and
+      screenshots), `python3 scripts/preview-library.py` contact sheet. Full
+      gate green: check:static + check:unit (13 files) + check:e2e (4 suites).
+      Library 142 KiB after Draco; standalone 5.11 → 5.15 MB.
 - [x] **Export codec lossy preview + fine settings** (agent arena, 2026-08-21,
       SPEC AMENDMENT 85): the review renders the exact compressed bytes
       through the card pipeline beside the raw export with a pixel-difference

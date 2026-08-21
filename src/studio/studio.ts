@@ -34,7 +34,7 @@ const rad2deg = (r: number): number => (r * 180) / Math.PI
 
 /**
  * White means "no tint": the library piece keeps the colours its palette
- * texture was authored with (AMENDMENT 85). Such a pick must not become the
+ * texture was authored with (AMENDMENT 86). Such a pick must not become the
  * post's `color` tag — that tag drives the card placeholder tint.
  */
 const NEUTRAL_TINT = '#FFFFFF'
@@ -247,7 +247,7 @@ export class Studio {
    * selection is something we do not colour (an imported model mesh).
    *
    * A library piece placed with no explicit tint reports NEUTRAL white
-   * (AMENDMENT 85) — it is showing its own palette texture, not the studio
+   * (AMENDMENT 86) — it is showing its own palette texture, not the studio
    * accent. Reporting the accent here used to leak it into the pickers, so
    * the second piece a player placed came out tinted even though they never
    * touched the colour control.
@@ -678,7 +678,7 @@ export class Studio {
    * Colour a library mesh by modulating its material with the studio tint.
    *
    * Library pieces carry their colour in the shared PALETTE TEXTURE
-   * (AMENDMENT 85, 2026-08-21): a 32x32 PNG inside the GLB, one 4x4 swatch per
+   * (AMENDMENT 86, 2026-08-21): a 32x32 PNG inside the GLB, one 4x4 swatch per
    * palette slot, sampled NEAREST through a UV per vertex. Babylon multiplies
    * `albedoColor` INTO `albedoTexture`, so the tint modulates the palette the
    * same way it used to modulate COLOR_0 — and the neutral white default

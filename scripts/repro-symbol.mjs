@@ -44,7 +44,7 @@ await page.click('button[data-tab="symbols"]')
 await page.waitForTimeout(400)
 ok('symbol grid rendered', await page.evaluate(() => !!document.querySelector('#symbol-grid button[data-symbol="cube"]')))
 
-// The symbols tab now defaults to a NEUTRAL pick (AMENDMENT 85): library
+// The symbols tab now defaults to a NEUTRAL pick (AMENDMENT 86): library
 // pieces carry their own palette texture, so white shows the art as authored
 // and a coloured pick still tints it (checked below with #22AA66 / #8866FF).
 const accent = '#FFFFFF'

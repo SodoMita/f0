@@ -1,4 +1,4 @@
-// Visual guard for the studio symbol library (AMENDMENT 85): place a strip of
+// Visual guard for the studio symbol library (AMENDMENT 86): place a strip of
 // palette-textured pieces in the real studio and screenshot the canvas, so a
 // human (or an agent with `visual_critique.py`) can see that the palette
 // texture actually renders — not black, not washed out, not inside-out.
