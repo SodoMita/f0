@@ -41,8 +41,9 @@ export function applySettings(w: Wiring, v: SettingsValues, changed: string[] | 
       height: Number(v.resolutionHeight ?? 1080),
       aspectLock: !!v.aspectLock,
     })
-    w.board.resize()
-    w.threadView.resize()
+    // setResolutionPolicy() fires the engine's viewport notification, which is
+    // what re-measures board / thread / viewer / studio (AMENDMENT 79). It
+    // used to be re-measured here, which missed the viewer and the studio.
   }
   if (touched('displayMode')) {
     const wantFull = v.displayMode === 'fullscreen'
