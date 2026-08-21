@@ -425,7 +425,7 @@ if (rootId) {
   await page.evaluate((id) => { window.location.hash = `#/thread/${id}` }, rootId)
   await page.waitForTimeout(8000)
   await page.screenshot({ path: `${OUT}/thread3d.png` })
-  const nodes = await page.evaluate(() => {
+  const nodes = await page.evaluate((rid) => {
     const t = window.__form0.threadView
     const eng = t.scene.getEngine()
     const cssW = eng.getRenderWidth() * eng.getHardwareScalingLevel()
@@ -439,11 +439,31 @@ if (rootId) {
       const sy = ((halfH - (n.y - t.panY)) / (2 * halfH)) * cssH
       const pw = (n.w / (2 * halfW)) * cssW
       const ph = (n.h / (2 * halfH)) * cssH
-      out.push({ id: id.slice(0, 8), file: n.meta.filename || '', x: sx - pw / 2, y: sy - ph / 2, w: pw, h: ph })
+      out.push({ id: id.slice(0, 8), file: n.meta.filename || '', isRoot: id === rid,
+        x: sx - pw / 2, y: sy - ph / 2, w: pw, h: ph })
     }
     return out
-  })
+  }, rootId)
   check('thread has live 3D nodes', nodes.length > 0, `${nodes.length} nodes`)
+  check('EVERY node in the tree renders its real model', nodes.length >= 5,
+    `${nodes.length} of ${await page.evaluate(() => window.__form0.threadView.nodes.size)}`)
+
+  // Every node — not just the camera-framed one — must have its model
+  // centred in its own rect and cropped to it (the tree is the other half of
+  // "board, tree" and used to fall back to 2D posters for every reply).
+  const offNodes = []
+  for (const [i, n] of nodes.entries()) {
+    // The root node wears an ACCENT-coloured frame; a saturation-based
+    // measurement would read that outline as "the model".
+    if (n.isRoot) continue
+    const c = await census(n, `thread3d-node-${i}-${n.file.replace('.glb', '')}`)
+    if (!c.model) { offNodes.push(`${n.file}: nothing drawn`); continue }
+    const dx = Math.abs(c.model.cx - c.width / 2), dy = Math.abs(c.model.cy - c.height / 2)
+    if (dx > 0.05 * c.width || dy > 0.05 * c.height) offNodes.push(`${n.file} off by (${dx.toFixed(0)},${dy.toFixed(0)})px`)
+    if (c.model.w > c.width || c.model.h > c.height) offNodes.push(`${n.file} spills its node`)
+  }
+  check('every 3D node is centred in — and cropped to — its own rect',
+    offNodes.length === 0, offNodes.join(' | ') || `${nodes.length} nodes clean`)
   const camNode = nodes.find((n) => n.file === 'a.glb')
   if (camNode) {
     const c = await census(camNode, 'thread3d-node-a')
