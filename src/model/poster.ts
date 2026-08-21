@@ -11,6 +11,8 @@ import { PBRMaterial } from '@babylonjs/core/Materials/PBR/pbrMaterial'
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial'
 import { LoadAssetContainerAsync } from '@babylonjs/core/Loading/sceneLoader'
 import { Vector3 } from '@babylonjs/core/Maths/math.vector'
+import { Frustum } from '@babylonjs/core/Maths/math.frustum'
+import { BoundingBox } from '@babylonjs/core/Culling/boundingBox'
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color'
 import type { AssetContainer } from '@babylonjs/core/assetContainer'
 import './gltf'
@@ -266,23 +268,17 @@ function preparePosterMaterials(container: AssetContainer): void {
   }
 }
 
-/** True when the camera's NDC box overlaps the screen AND something is in front. */
+/** True when the authored camera's frustum overlaps the model's AABB. */
 function cameraFramesBox(cam: Camera, min: Vector3, max: Vector3): boolean {
   cam.computeWorldMatrix()
-  const m = cam.getTransformationMatrix()
-  let uMin = Infinity, uMax = -Infinity, vMin = Infinity, vMax = -Infinity
-  let anyInFront = false
-  const p = new Vector3()
-  for (let i = 0; i < 8; i++) {
-    p.set(i & 1 ? max.x : min.x, i & 2 ? max.y : min.y, i & 4 ? max.z : min.z)
-    const q = Vector3.TransformCoordinates(p, m)
-    if (!isFinite(q.x) || !isFinite(q.y) || !isFinite(q.z)) continue
-    if (q.z >= -0.15 && q.z <= 1.15) anyInFront = true
-    uMin = Math.min(uMin, q.x); uMax = Math.max(uMax, q.x)
-    vMin = Math.min(vMin, q.y); vMax = Math.max(vMax, q.y)
-  }
-  if (!anyInFront || !isFinite(uMin)) return false
-  return uMax > -1 && uMin < 1 && vMax > -1 && vMin < 1
+  // getTransformationMatrix() just multiplies the CACHED view and projection
+  // matrices, which are still identity for a freshly-loaded glTF camera that
+  // has never rendered. Build the view-projection fresh, then use the
+  // standard AABB-vs-frustum test. (A hand-rolled NDC projection flips
+  // points that sit behind the camera and would misclassify a camera that
+  // frames nothing — model 'f' — as framing the model.)
+  const m = cam.getViewMatrix().multiply(cam.getProjectionMatrix())
+  return new BoundingBox(min, max).isInFrustum(Frustum.GetPlanes(m))
 }
 
 function projectFootprint(cam: Camera, min: Vector3, max: Vector3): Footprint | null {
