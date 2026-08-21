@@ -1,6 +1,5 @@
 import { Scene } from '@babylonjs/core/scene'
 import { ArcRotateCamera } from '@babylonjs/core/Cameras/arcRotateCamera'
-import { FreeCamera } from '@babylonjs/core/Cameras/freeCamera'
 import type { Camera } from '@babylonjs/core/Cameras/camera'
 import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight'
 import { DirectionalLight } from '@babylonjs/core/Lights/directionalLight'
@@ -12,11 +11,14 @@ import { Vector3 } from '@babylonjs/core/Maths/math.vector'
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color'
 import type { AssetContainer } from '@babylonjs/core/assetContainer'
 import type { HighlightLayer } from '@babylonjs/core/Layers/highlightLayer'
+import type { Sound } from '@babylonjs/core/Audio/sound'
+import type { TransformNode } from '@babylonjs/core/Meshes/transformNode'
 import '../model/gltf'
 import type { FormEngine } from '../core/engine'
 import type { ThreadMeta } from '../protocol/thread-index'
 import { validateGLBCached } from '../model/limits'
 import { worldBox, frameDistance, dominantFacing } from '../model/facing'
+import { playModelSounds } from '../board/modelSounds'
 import type { ShaderMaterial } from '@babylonjs/core/Materials/shaderMaterial'
 import {
   makeCardMaterial, setCardTexture, setCardTint, setCardWhite, setCardFlip, setCardOpacity,
@@ -27,8 +29,10 @@ import { theme } from '../theme'
 import { TrackAnimator } from './animator'
 
 /**
- * Detail viewer: exactly one interactive model. Uses the model's own cameras
- * when present (switchable), else an orbit camera auto-fit to the model.
+ * Detail viewer: exactly one interactive model. One ORBIT camera at a time:
+ * auto-fit to the model (A dot), or seeded from one of the model's own
+ * authored cameras (numbered dots / C) — the author's position + fov, model
+ * center as pivot — so every view is fully navigable (AMENDMENT 84).
  */
 export class Viewer {
   readonly scene: Scene
@@ -54,6 +58,13 @@ export class Viewer {
   private camHash = ''
   private camPrefs = { fov: 46, near: 0.01, far: 2000, inertia: 0.7, invertY: false }
   private contactStrength = 0.5
+  /** The model's world AABB (worldBox), re-derived per adopt. */
+  private modelBox: { min: Vector3; max: Vector3; center: Vector3; radius: number } | null = null
+  /** Embedded model audio (MSFT_audio_emitter). Off until the user taps it. */
+  private readonly soundOwner = { sounds: [] as Sound[], soundTimer: null as number | null }
+  private claimedSounds = new Set<Sound>()
+  /** Board setting: "everything opens paused" applies to the viewer too. */
+  private autoplay = true
   // Model outline (settings: Post-processing -> Model outline). The layer is
   // created on demand so the setting costs nothing while it is off.
   private hl: HighlightLayer | null = null
@@ -115,6 +126,7 @@ export class Viewer {
 
     this.scene.onBeforeRenderObservable.add(() => {
       this.frameBackdrop()
+      this.adaptNearPlane()
       // no dt argument: engine.getDeltaTime() is 0 under FormEngine's
       // demand-driven RAF loop, so the animator measures wall time itself
       this.animator.tick()
@@ -268,9 +280,12 @@ export class Viewer {
     this.clear()
     const token = ++this.loadToken
     if (container.scene !== this.scene) {
-      // Defensive: only adopt containers already bound to our scene.
+      // Defensive: only adopt containers already bound to our scene. Throw
+      // (don't return silently) so the caller's catch rolls the preview slot
+      // back and re-parses from bytes — a silent return would commit the
+      // slot and leave a BLANK viewer with no loading ring (AMENDMENT 84).
       this.loadToken++
-      return
+      throw new Error('handoff container is not bound to the viewer scene')
     }
     try {
       this.pending = false
@@ -281,18 +296,20 @@ export class Viewer {
     }
   }
 
-  /** Wire a parsed container into the viewer state (camera, anims, glow, lights). */
+  /** Wire a parsed container into the viewer state (camera, anims, glow, lights, audio). */
   private adopt(container: AssetContainer, meta: ThreadMeta): void {
     container.addAllToScene()
     for (const m of container.meshes) {
       if (m.material) m.material.backFaceCulling = false
     }
     this.container = container
+    this.modelBox = worldBox(container)
     graphics.trackContainer(container)
     graphics.applyToContainer(container)
     graphics.setShadowCasters(this.scene, container.meshes.filter((m) => m.getTotalVertices() > 0))
     this.syncHighlight()
     this.imported = container.cameras.slice()
+    this.claimSounds(container)
 
     let verts = 0
     for (const m of container.meshes) verts += m.getTotalVertices() || 0
@@ -306,8 +323,63 @@ export class Viewer {
 
     this.form.kick()
     // Same policy as before: the authored preview-animation (or track 0)
-    // starts playing on open — but through the manual driver.
-    this.animator.setGroups(container.animationGroups, meta.previewAnimation ?? 0, true)
+    // starts playing on open — but through the manual driver, and only when
+    // the board's "cards start animating in view" setting says so (the
+    // viewer obeys the same preference, AMENDMENT 84).
+    this.animator.setGroups(container.animationGroups, meta.previewAnimation ?? 0, this.autoplay)
+  }
+
+  /** Board setting: "everything opens paused" applies to the viewer too. */
+  setAutoplay(on: boolean): void { this.autoplay = on }
+
+  /**
+   * Take ownership of this model's MSFT_audio_emitter sounds (loader-created
+   * on the byte path, hand-off-transferred on the live-preview path). They
+   * stay PAUSED: like the board, sound only starts on an explicit tap
+   * (AMENDMENT 84 — the viewer's S key / sound button).
+   */
+  private claimSounds(container: AssetContainer): void {
+    const nodes = new Set<unknown>(container.meshes)
+    for (const t of container.transformNodes) nodes.add(t)
+    for (const r of container.rootNodes) nodes.add(r)
+    for (const s of this.scene.mainSoundTrack.soundCollection) {
+      if (this.claimedSounds.has(s)) continue
+      const attached = (s as unknown as { _connectedTransformNode?: TransformNode })._connectedTransformNode ?? null
+      if (attached && nodes.has(attached)) {
+        this.claimedSounds.add(s)
+        this.soundOwner.sounds.push(s)
+      }
+    }
+  }
+
+  get soundCount(): number { return this.soundOwner.sounds.length }
+  get soundOn(): boolean { return this.soundOwner.sounds.some((s) => s.isPlaying) }
+
+  /** S key / sound button. No-op (and hidden in the HUD) when trackless. */
+  toggleSound(): void {
+    if (!this.soundOwner.sounds.length) return
+    if (this.soundOn) {
+      if (this.soundOwner.soundTimer !== null) {
+        clearInterval(this.soundOwner.soundTimer)
+        this.soundOwner.soundTimer = null
+      }
+      for (const s of this.soundOwner.sounds) if (s.isPlaying) s.pause()
+    } else {
+      playModelSounds(this.soundOwner)
+    }
+    this.form.kick()
+  }
+
+  private stopSounds(): void {
+    if (this.soundOwner.soundTimer !== null) {
+      clearInterval(this.soundOwner.soundTimer)
+      this.soundOwner.soundTimer = null
+    }
+    for (const s of this.soundOwner.sounds) {
+      this.claimedSounds.delete(s)
+      try { s.dispose() } catch { /* already gone */ }
+    }
+    this.soundOwner.sounds.length = 0
   }
 
   /** True while a model is being fetched/parsed for this view. */
@@ -341,19 +413,37 @@ export class Viewer {
     return n
   }
 
+  /**
+   * Switch camera mode: -1 = auto-fit orbit, >=0 = one of the model's own
+   * cameras. EITHER WAY the controlled camera is the orbit — an authored
+   * camera only SEEDS it (the author's position + fov, model center as
+   * pivot) instead of becoming a frozen, control-less view (AMENDMENT 84):
+   * the player sees the author's framing and can immediately orbit, zoom
+   * and pan from it. Re-clicking a dot re-seeds (snap back to the authored
+   * framing); the A dot re-fits from the dominant face.
+   */
   applyCamera(idx: number): void {
-    this.camIdx = idx
-    if (idx >= 0 && this.imported[idx]) {
-      this.orbit.detachControl()
-      const cam = this.imported[idx]
-      if (cam instanceof FreeCamera) { cam.minZ = 0.001; cam.maxZ = 100000 }
-      this.scene.activeCamera = cam
+    const authored = idx >= 0 ? this.imported[idx] : undefined
+    if (authored && this.modelBox) {
+      this.camIdx = idx
+      this.seedFromAuthored(authored)
     } else {
       this.camIdx = -1
       this.fitOrbit()
-      this.scene.activeCamera = this.orbit
-      this.orbit.attachControl(true)
     }
+    this.scene.activeCamera = this.orbit
+    this.orbit.attachControl(true)
+    this.form.kick()
+  }
+
+  /** Re-frame the CURRENT mode (fit button / F key). */
+  refit(): void {
+    if (this.camIdx >= 0 && this.imported[this.camIdx]) {
+      this.seedFromAuthored(this.imported[this.camIdx])
+    } else {
+      this.fitOrbit()
+    }
+    this.form.kick()
   }
 
   cycleCamera(): void {
@@ -362,20 +452,59 @@ export class Viewer {
     this.applyCamera(next >= n ? -1 : next)
   }
 
+  /** Auto-fit orbit from the model's dominant face (the poster's side). */
   private fitOrbit(): void {
-    if (!this.container) return
-    const { min, max, center, radius } = worldBox(this.container)
+    const box = this.modelBox
+    const container = this.container
+    if (!box || !container) return
+    const { min, max, center } = box
     const eng = this.scene.getEngine()
     const aspect = eng.getRenderWidth() / Math.max(1, eng.getRenderHeight())
     // Open on the SAME side the poster was rendered from. The orbit camera used
     // to start at alpha=-PI/2 (the -Z side), i.e. behind flat content, so the
     // viewer showed mirrored wordmarks even though the card was correct.
-    const facing = dominantFacing(this.container)
+    const facing = dominantFacing(container)
     const TILT = 0.12 // a few degrees of elevation for a little depth
     const dir = facing.scale(Math.cos(TILT)).add(new Vector3(0, Math.sin(TILT), 0)).normalize()
     const dist = frameDistance(min, max, center, dir.scale(-1), this.orbit.fov || 0.8, aspect, 0.8)
     this.orbit.setTarget(center)
     this.orbit.setPosition(center.add(dir.scale(Math.max(0.6, dist))))
+    this.applyFraming(Math.max(0.1, dist))
+  }
+
+  /**
+   * Seed the orbit from an authored camera: the author's world position as
+   * the camera position, the author's fov, model center as the orbit pivot —
+   * the authored framing, fully navigable (AMENDMENT 84).
+   */
+  private seedFromAuthored(cam: Camera): void {
+    const box = this.modelBox!
+    const wm = cam.getWorldMatrix()
+    const pos = new Vector3(wm.m[12], wm.m[13], wm.m[14])
+    let dist = Vector3.Distance(pos, box.center)
+    let target: Vector3 = box.center
+    if (dist < 0.05) {
+      // Parked at the model's center: pivot 0.5 units along the dominant
+      // face so the orbit has a well-defined axis (zero radius = NaN angles).
+      target = box.center.add(dominantFacing(this.container!).scale(0.5))
+      dist = 0.5
+    }
+    const fov = (cam as { fov?: number }).fov
+    if (typeof fov === 'number' && fov > 0.1 && fov < 1.6) this.orbit.fov = fov
+    this.orbit.target.copyFrom(target)
+    this.orbit.setPosition(pos)
+    this.applyFraming(dist)
+  }
+
+  /**
+   * Per-model orbit limits (radius-dependent wheel/pan feel + frustum clips)
+   * for the current framing distance. The near plane set here is only a
+   * STARTING value — adaptNearPlane() keeps it proportional to the live
+   * camera-to-model distance so close-ups of small parts never clip
+   * (AMENDMENT 84).
+   */
+  private applyFraming(dist: number): void {
+    const { min, center, radius } = this.modelBox!
     this.orbit.lowerRadiusLimit = Math.max(0.05, radius * 0.1)
     this.orbit.upperRadiusLimit = Math.max(1, radius * 12)
     this.orbit.minZ = Math.max(this.camPrefs.near, Math.min(this.camPrefs.near * 100, (dist - radius) * 0.2))
@@ -387,6 +516,26 @@ export class Viewer {
     this.glow.position.set(center.x, min.y - radius * 0.02, center.z)
     this.glow.scaling.set(radius * 1.9, radius * 1.9, 1)
     this.backdropDistance = Math.max(20, Math.min(dist * 6, radius * 26))
+  }
+
+  /**
+   * Keep the near plane proportional to the camera's distance to the model
+   * box (10% of it, floored by the user's near setting; the floor alone when
+   * the camera is inside the box). The old fixed model-sized minZ let the
+   * player wheel-zoom closer than the near plane (lowerRadiusLimit < minZ),
+   * slicing any part smaller than the whole model (AMENDMENT 84). Runs per
+   * rendered frame — one AABB distance, no allocations.
+   */
+  private adaptNearPlane(): void {
+    const box = this.modelBox
+    if (!box || this.scene.activeCamera !== this.orbit) return
+    const p = this.orbit.position
+    const dx = Math.max(box.min.x - p.x, 0, p.x - box.max.x)
+    const dy = Math.max(box.min.y - p.y, 0, p.y - box.max.y)
+    const dz = Math.max(box.min.z - p.z, 0, p.z - box.max.z)
+    const d = Math.sqrt(dx * dx + dy * dy + dz * dz)
+    const near = d <= 0 ? this.camPrefs.near : Math.max(this.camPrefs.near, d * 0.1)
+    if (Math.abs(near - this.orbit.minZ) > this.orbit.minZ * 0.01 + 1e-5) this.orbit.minZ = near
   }
 
   isPlaying(): boolean { return this.animator.playing }
@@ -406,8 +555,10 @@ export class Viewer {
     this.pending = false
     this.glow?.setEnabled(false)
     this.animator.clear()
+    this.stopSounds()
     this.imported = []
     this.camIdx = -1
+    this.modelBox = null
     if (this.container) {
       graphics.untrackContainer(this.container)
       this.container.removeAllFromScene()

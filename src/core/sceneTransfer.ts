@@ -1,8 +1,10 @@
 import { Scene } from '@babylonjs/core/scene'
 import { Vector3 } from '@babylonjs/core/Maths/math.vector'
 import { Mesh } from '@babylonjs/core/Meshes/mesh'
+import type { Node } from '@babylonjs/core/node'
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode'
 import type { Camera } from '@babylonjs/core/Cameras/camera'
+import type { Sound } from '@babylonjs/core/Audio/sound'
 import { AssetContainer } from '@babylonjs/core/assetContainer'
 
 /**
@@ -38,7 +40,11 @@ import { AssetContainer } from '@babylonjs/core/assetContainer'
  * source pool staged it (the preview pool stages each slot 800 units along
  * +X so the slots' frustums don't overlap).
  *
- * Returns a new AssetContainer (not yet added to `targetScene`).
+ * Returns `{ container, sounds }`: a new AssetContainer (not yet added to
+ * `targetScene`) plus the model's MSFT_audio_emitter sounds, which are
+ * re-attached to the cloned nodes and re-registered on `targetScene`'s
+ * mainSoundTrack (AMENDMENT 84 — without this the hand-off path dropped a
+ * model's audio, since commit() disposes the stage scene's sounds).
  */
 export function handoffContainer(
   source: AssetContainer,
@@ -46,7 +52,7 @@ export function handoffContainer(
   targetScene: Scene,
   worldOffset: Vector3 = new Vector3(0, 0, 0),
   nameHint = 'viewer',
-): AssetContainer {
+): { container: AssetContainer; sounds: Sound[] } {
   // Cloning happens IN the source scene (Babylon's instantiateModelsToScene
   // always operates on container.scene). Materials are cloned so each
   // scene's graphics pipeline owns its own copy.
@@ -130,6 +136,46 @@ export function handoffContainer(
     targetScene.addAnimationGroup(ag)
   }
 
+  // ----- sounds (MSFT_audio_emitter) -----
+  // instantiateModelsToScene does not clone sounds, and a Sound is not a
+  // Node — it follows its `_connectedTransformNode` for positioning. Without
+  // re-attaching, the hand-off would leave the viewer silent (commit()
+  // disposes the stage scene's sounds). Pairing is by name: the clone tree
+  // mirrors the source tree in order, and clone names are
+  // `${nameHint}-<source name>`, so a per-name FIFO lines up i-th with i-th.
+  const srcByName = new Map<string, Node[]>()
+  const collectSrc = (n: Node): void => {
+    const arr = srcByName.get(n.name)
+    if (arr) arr.push(n)
+    else srcByName.set(n.name, [n])
+  }
+  for (const r of source.rootNodes) {
+    collectSrc(r)
+    for (const c of r.getDescendants(false)) collectSrc(c)
+  }
+  const cloneOfSrc = new Map<Node, Node>()
+  const pairClone = (c: Node): void => {
+    const srcName = c.name.startsWith(nameHint + '-') ? c.name.slice(nameHint.length + 1) : c.name
+    const arr = srcByName.get(srcName)
+    const s = arr ? arr.shift() : undefined
+    if (s) cloneOfSrc.set(s, c)
+  }
+  for (const root of entries.rootNodes) {
+    pairClone(root)
+    for (const child of root.getDescendants(false)) pairClone(child)
+  }
+  const transferred: Sound[] = []
+  for (const s of [...sourceScene.mainSoundTrack.soundCollection]) {
+    const node = (s as unknown as { _connectedTransformNode?: Node })._connectedTransformNode ?? null
+    const clone = node ? cloneOfSrc.get(node) : undefined
+    if (!clone) continue
+    ;(s as unknown as { _connectedTransformNode?: Node })._connectedTransformNode = clone
+    ;(s as unknown as { _scene?: Scene })._scene = targetScene
+    sourceScene.mainSoundTrack.removeSound(s)
+    targetScene.mainSoundTrack.addSound(s)
+    transferred.push(s)
+  }
+
   // The source is now empty (meshes detached, materials cloned elsewhere).
   // Disposing the container does NOT touch the cloned materials/textures —
   // Babylon's dispose walks only the arrays held by the source container.
@@ -152,7 +198,7 @@ export function handoffContainer(
   for (const ag of entries.animationGroups) {
     if (c.animationGroups.indexOf(ag) === -1) c.animationGroups.push(ag)
   }
-  return c
+  return { container: c, sounds: transferred }
 }
 
 function moveMesh(m: Mesh, from: Scene, to: Scene, seen: Set<object>): void {
