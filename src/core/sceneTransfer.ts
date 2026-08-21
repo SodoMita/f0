@@ -43,7 +43,7 @@ import { AssetContainer } from '@babylonjs/core/assetContainer'
  * Returns `{ container, sounds }`: a new AssetContainer (not yet added to
  * `targetScene`) plus the model's MSFT_audio_emitter sounds, which are
  * re-attached to the cloned nodes and re-registered on `targetScene`'s
- * mainSoundTrack (AMENDMENT 86 — without this the hand-off path dropped a
+ * mainSoundTrack (AMENDMENT 87 — without this the hand-off path dropped a
  * model's audio, since commit() disposes the stage scene's sounds).
  */
 export function handoffContainer(

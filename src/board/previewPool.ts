@@ -436,7 +436,7 @@ export class PreviewPool {
         // The stage no longer owns the model: release its sounds so they
         // cannot keep registered (and sounding) in the hidden stage scene.
         // A sound handoffContainer MOVED to the viewer scene is the
-        // viewer's now (AMENDMENT 86) — never dispose it here.
+        // viewer's now (AMENDMENT 87) — never dispose it here.
         for (const s of slot.sounds) {
           self.claimedSounds.delete(s)
           if (keepSounds.has(s) || (s as unknown as { _scene?: Scene })._scene !== self.scene) continue
