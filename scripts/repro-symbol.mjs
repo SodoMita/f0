@@ -44,7 +44,10 @@ await page.click('button[data-tab="symbols"]')
 await page.waitForTimeout(400)
 ok('symbol grid rendered', await page.evaluate(() => !!document.querySelector('#symbol-grid button[data-symbol="cube"]')))
 
-const accent = '#FF5C35'
+// The symbols tab now defaults to a NEUTRAL pick (AMENDMENT 85): library
+// pieces carry their own palette texture, so white shows the art as authored
+// and a coloured pick still tints it (checked below with #22AA66 / #8866FF).
+const accent = '#FFFFFF'
 const hex2rgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16))
 const want = hex2rgb(accent).map((c) => c / 255)
 const isTint = (arr, target = want) => !!arr && arr.length >= 3 && arr.every((v, i) => Math.abs(v - target[i]) < 0.02)
@@ -64,12 +67,14 @@ const cube = await page.evaluate(() => {
     albedo: m.albedoColor?.asArray?.(),
     emissive: m.emissiveColor?.asArray?.(),
     backFaceCulling: m.backFaceCulling,
+    hasAlbedoTexture: !!m.albedoTexture,
   }
 })
 ok('cube placed', cube?.count === 1 && !!cube?.albedo, JSON.stringify(cube))
 ok('cube vertex colors on (modulate, not replace)', cube?.useVertexColors === true && cube?.hasVertexAlpha === false)
-ok('cube albedo = accent tint', isTint(cube?.albedo), JSON.stringify(cube?.albedo))
-ok('cube emissive black (vertex colors drive)', !!cube?.emissive && cube.emissive.slice(0, 3).every((v) => v < 0.02), JSON.stringify(cube?.emissive))
+ok('cube albedo = picker color (white = palette as authored)', isTint(cube?.albedo), JSON.stringify(cube?.albedo))
+ok('cube emissive black (albedo/palette drives)', !!cube?.emissive && cube.emissive.slice(0, 3).every((v) => v < 0.02), JSON.stringify(cube?.emissive))
+ok('cube has the palette texture bound', cube?.hasAlbedoTexture === true, JSON.stringify(cube?.hasAlbedoTexture))
 ok('cube double-sided', cube?.backFaceCulling === false)
 
 // live tint change

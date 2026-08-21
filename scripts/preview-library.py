@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Rasterize every library GLB into a contact sheet (sanity check)."""
+"""Rasterize every library GLB into a contact sheet (sanity check).
+
+Reads the RAW writer output, so run it right after `gen-library-glb.py` and
+BEFORE `encode-library.mjs` — there is no Draco decoder here, and Draco'd
+pieces are drawn as empty tiles with a warning.
+"""
 
 from __future__ import annotations
 
@@ -59,6 +64,8 @@ def load_glb(path: str):
         return np.frombuffer(blob, np.uint16, n, start).astype(np.int32).copy()
 
     prim = gltf["meshes"][0]["primitives"][0]
+    if "KHR_draco_mesh_compression" in (prim.get("extensions") or {}):
+        raise NotImplementedError("draco")
     v = take(prim["attributes"]["POSITION"], 3)
     n = take(prim["attributes"]["NORMAL"], 3)
     uv = take(prim["attributes"]["TEXCOORD_0"], 2)
@@ -168,9 +175,18 @@ def main():
     os.makedirs(OUT, exist_ok=True)
     items = json.load(open(MANIFEST))
     tiles = []
+    skipped = []
     for item in items:
-        v, n, c, f = load_glb(os.path.join(GLB_DIR, item["id"] + ".glb"))
+        try:
+            v, n, c, f = load_glb(os.path.join(GLB_DIR, item["id"] + ".glb"))
+        except NotImplementedError:
+            skipped.append(item["id"])
+            tiles.append(Image.new("RGB", (160, 120), (40, 26, 26)))
+            continue
         tiles.append(Image.fromarray(render(v, n, c, f, front=bool(item.get("front"))), "RGB"))
+    if skipped:
+        print(f"skipped {len(skipped)} draco pieces (re-run gen-library-glb.py first): "
+              + ", ".join(skipped[:8]))
     cols = 9
     rows = math.ceil(len(tiles) / cols)
     tw, th = tiles[0].size
