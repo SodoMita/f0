@@ -2,14 +2,15 @@ import { Scene } from '@babylonjs/core/scene'
 import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight'
 import { DirectionalLight } from '@babylonjs/core/Lights/directionalLight'
 import { LoadAssetContainerAsync } from '@babylonjs/core/Loading/sceneLoader'
-import { Matrix, Quaternion, Vector3 } from '@babylonjs/core/Maths/math.vector'
+import { Vector3 } from '@babylonjs/core/Maths/math.vector'
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode'
+import type { Plane } from '@babylonjs/core/Maths/math.plane'
 import type { AssetContainer } from '@babylonjs/core/assetContainer'
 import type { AnimationGroup } from '@babylonjs/core/Animations/animationGroup'
 import type { Sound } from '@babylonjs/core/Audio/sound'
 import '../model/gltf'
 import { configureDraco } from '../model/draco'
-import { worldBox, dominantFacing } from '../model/facing'
+import { frameModel, placeFrame, makeCellClip, updateCellClip, type ModelFrame } from '../model/framing'
 import { validateGLBCached } from '../model/limits'
 import { graphics } from '../render/graphics'
 import { claimModelSounds, playModelSounds } from './modelSounds'
@@ -49,14 +50,18 @@ interface Slot {
   anims: AnimationGroup[]
   sounds: Sound[]
   soundTimer: number | null
-  /** oriented extents in model space AFTER the display rotation (unit size). */
-  ext: { x: number; y: number; z: number } | null
+  frame: ModelFrame | null
+  clip: Plane[] | null
+  footprint: { cx: number; bottom: number; w: number } | null
+  /** false while the model's shaders are still compiling (see hasWork). */
+  warm: boolean
+  warmUntil: number
   place: Place3D | null
   placedAt: number
 }
 
-/** How much of the card cell the model should fill (margin for badges). */
-const FILL = 0.7
+/** How long to keep asking for frames while a model's shaders compile. */
+const WARMUP_MS = 10_000
 
 /**
  * Direct 3D cards: real GLB meshes rendered in the VISIBLE scene — no
@@ -65,11 +70,10 @@ const FILL = 0.7
  * models as they scroll or pan out of the viewport (same pipeline budget
  * as the poster/preview path).
  *
- * Framing (spec AMENDMENT 43): each model is rotated by
- * inverse(main-camera rotation) so a static camera looking along +Z sees
- * exactly the view the author framed; models without a camera fall back to
- * auto-fit (dominant facing turned toward the camera). Uniform scale then
- * fits the oriented box into the card cell.
+ * Framing (spec AMENDMENT 43 / 81, see model/framing.ts): each model is
+ * shown through its MAIN CAMERA (rotated about the camera position, scaled
+ * so that frame maps onto the card). No camera → the poster's auto-fit.
+ * Close-up models are cropped to the card with clip planes.
  */
 export class Direct3DPool {
   private slots: Slot[] = []
@@ -123,6 +127,9 @@ export class Direct3DPool {
   isLive(postId: string): boolean { return this.byPost.has(postId) }
   isLoading(postId: string): boolean { return this.loading.has(postId) }
   isRejected(postId: string): boolean { return this.rejected.has(postId) }
+  footprintOf(postId: string): { cx: number; bottom: number; w: number } | null {
+    return this.byPost.get(postId)?.footprint ?? null
+  }
   isPlaying(postId: string): boolean { return this.byPost.get(postId)?.playing ?? false }
   hasAnims(postId: string): boolean { return (this.byPost.get(postId)?.anims.length ?? 0) > 0 }
 
@@ -227,14 +234,37 @@ export class Direct3DPool {
 
   resume(postId: string, sound = false): void { this.play(postId, sound) }
 
-  /** True while any VISIBLE model is animating (the scene must keep drawing). */
+  /**
+   * True while any VISIBLE model still needs frames: it is animating, or its
+   * shaders have not finished compiling. Demand-driven rendering only compiles
+   * a material on first draw, so without this the place-frame draws nothing
+   * and the next frame never comes — cards stayed blank until the user scrolled.
+   */
   hasWork(visible?: ReadonlySet<string>): boolean {
+    let work = false
+    const now = performance.now()
     for (const slot of this.slots) {
-      if (!slot.postId || !slot.playing || slot.anims.length === 0) continue
+      if (!slot.postId) continue
       if (visible && !visible.has(slot.postId)) continue
-      return true
+      if (slot.playing && slot.anims.length > 0) work = true
+      if (!slot.warm) {
+        // Keep asking on the poll that FLIPS warm — that frame is the one
+        // that finally draws the model. A broken effect must not pin 30 fps
+        // forever, hence the deadline.
+        slot.warm = now > slot.warmUntil || this.effectsReady(slot)
+        work = true
+      }
     }
-    return false
+    return work
+  }
+
+  private effectsReady(slot: Slot): boolean {
+    if (!slot.container) return true
+    for (const mesh of slot.container.meshes) {
+      if (mesh.getTotalVertices() <= 0) continue
+      if (!mesh.isReady(true)) return false
+    }
+    return true
   }
 
   /** Per-frame upkeep. Animations advance with the scene's own render loop,
@@ -257,7 +287,8 @@ export class Direct3DPool {
     return {
       postId: null, pending: false, visible: false, playing: false, started: false,
       root: null, orient: null, fit: null, container: null, anims: [], sounds: [],
-      soundTimer: null, ext: null, place: null, placedAt: 0,
+      soundTimer: null, frame: null, clip: null, footprint: null,
+      warm: false, warmUntil: 0, place: null, placedAt: 0,
     }
   }
 
@@ -275,69 +306,20 @@ export class Direct3DPool {
   }
 
   /**
-   * The display rotation: inverse of the authored main camera's world
-   * rotation when the model ships a camera (the static display camera looks
-   * along +Z with identity rotation, so R_d·R_a⁻¹ = R_a⁻¹ — spec AMENDMENT
-   * 43). Without a camera, the auto-fit camera the poster pipeline would
-   * build (positioned at center + facing·d, targeting center, up = +Y) is
-   * inverted the same way, so the flat camera shows exactly the poster's
-   * view. A FromUnitVectorsToRef(facing, -Z) fallback is NOT equivalent: for
-   * opposite vectors it picks an arbitrary 180° axis, which flips flat models
-   * upside-down or mirror-inverts them (the "inverted models" regression).
+   * Apply a cell to a resident model. Framing was computed once at load;
+   * this only maps it onto the current card / node. SCALE lives on the root
+   * so the pivot translation below it is scaled too (scale on `fit` drifted
+   * off-origin models by pivot·(1-scale)).
    */
-  private displayRotation(container: AssetContainer, cameraIndex: number): Quaternion {
-    const authored = cameraIndex >= 0 && cameraIndex < container.cameras.length ? container.cameras[cameraIndex] : null
-    if (authored) {
-      // Camera.computeWorldMatrix() takes no args (it just reads the cached
-      // world matrix) — force the recompute through the Node-level method.
-      ;(authored as unknown as { computeWorldMatrix: (force?: boolean) => unknown }).computeWorldMatrix(true)
-      const quat = new Quaternion()
-      authored.getWorldMatrix().decompose(undefined, quat, undefined)
-      return quat.invertInPlace()
-    }
-    // Auto-fit: model front (dominantFacing) turned toward the camera at -Z,
-    // up kept as +Y (or +Z when facing is vertical). LookAtLH(eye=facing,
-    // target=0) IS the inverse of the auto-fit camera's world rotation —
-    // exactly what rotating the model needs to reproduce the poster view.
-    const facing = dominantFacing(container).normalizeToNew()
-    const up = Math.abs(facing.y) > 0.99 ? new Vector3(0, 0, 1) : Vector3.Up()
-    const view = new Matrix()
-    Matrix.LookAtLHToRef(facing, Vector3.Zero(), up, view)
-    const quat = new Quaternion()
-    Quaternion.FromRotationMatrixToRef(view, quat)
-    return quat
-  }
-
-  /** Oriented world extents of the AABB after `rot` is applied (unit size). */
-  private orientedExtents(box: { min: Vector3; max: Vector3 }, rot: Quaternion): { x: number; y: number; z: number } {
-    const m = new Matrix()
-    rot.toRotationMatrix(m)
-    const mn = new Vector3(Infinity, Infinity, Infinity)
-    const mx = new Vector3(-Infinity, -Infinity, -Infinity)
-    const p = new Vector3()
-    for (let i = 0; i < 8; i++) {
-      p.set(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z)
-      Vector3.TransformCoordinatesToRef(p, m, p)
-      mn.x = Math.min(mn.x, p.x); mn.y = Math.min(mn.y, p.y); mn.z = Math.min(mn.z, p.z)
-      mx.x = Math.max(mx.x, p.x); mx.y = Math.max(mx.y, p.y); mx.z = Math.max(mx.z, p.z)
-    }
-    const e = 1e-4
-    return {
-      x: Math.max(e, mx.x - mn.x),
-      y: Math.max(e, mx.y - mn.y),
-      z: Math.max(e, mx.z - mn.z),
-    }
-  }
-
   private applyPlace(slot: Slot, place: Place3D): void {
     slot.place = place
     slot.placedAt = ++this.epoch
-    if (!slot.root || !slot.fit || !slot.ext) return
-    const { w, h, depth } = place
-    const s = FILL * Math.min(w / slot.ext.x, h / slot.ext.y, Math.max(0.001, depth) / slot.ext.z)
-    const clamp = Math.max(1e-4, Math.min(1000, s))
-    slot.fit.scaling.setAll(clamp)
-    slot.root.position.set(place.x, place.y, place.z)
+    if (!slot.root || !slot.fit || !slot.frame) return
+    const at = placeFrame(slot.frame, place)
+    slot.root.scaling.setAll(at.scale)
+    slot.root.position.set(at.x, at.y, at.z)
+    slot.footprint = at.footprint
+    if (slot.clip) updateCellClip(slot.clip, place)
   }
 
   private async load(slot: Slot, postId: string): Promise<void> {
@@ -356,6 +338,13 @@ export class Direct3DPool {
       container.addAllToScene()
       slot.container = container // clearSlot() owns the cleanup from here on
       graphics.applyToContainer(container)
+      const clip = makeCellClip()
+      for (const mat of container.materials) {
+        mat.clipPlane = clip[0]
+        mat.clipPlane2 = clip[1]
+        mat.clipPlane3 = clip[2]
+        mat.clipPlane4 = clip[3]
+      }
       for (const m of container.meshes) {
         if (m.material) m.material.backFaceCulling = false
         // Background content: taps must hit the card/node quads, never a mesh.
@@ -366,22 +355,18 @@ export class Direct3DPool {
       for (const l of container.lights) l.setEnabled(false)
       for (const c of container.cameras) c.setEnabled(false)
 
-      // Framing is computed BEFORE reparenting: the authored camera's world
-      // matrix must reflect its authored transform, not the fit chain.
-      const box = worldBox(container)
-      const rot = this.displayRotation(container, model.cameraIndex ?? 0)
-      const ext = this.orientedExtents(box, rot)
+      const cell = this.pendingPlace.get(postId)
+      const aspect = cell && cell.h > 0 ? cell.w / cell.h : 1.6
+      const frame = frameModel(container, model.cameraIndex ?? 0, aspect)
 
       const root = new TransformNode(`d3-${postId.slice(0, 8)}`, this.scene)
       const orient = new TransformNode(`d3-orient-${postId.slice(0, 8)}`, this.scene)
       const fit = new TransformNode(`d3-fit-${postId.slice(0, 8)}`, this.scene)
       orient.parent = root
       fit.parent = orient
-      orient.rotationQuaternion = rot
-      fit.position = box.center.scale(-1)
+      orient.rotationQuaternion = frame.rot
+      fit.position = frame.pivot.scale(-1)
       for (const n of container.rootNodes) n.parent = fit
-      // Reparenting dirtied the whole chain — force it or the first frame
-      // renders the model at its pre-fit transform.
       root.computeWorldMatrix(true)
       orient.computeWorldMatrix(true)
       fit.computeWorldMatrix(true)
@@ -392,12 +377,16 @@ export class Direct3DPool {
       slot.root = root
       slot.orient = orient
       slot.fit = fit
+      slot.clip = clip
       slot.anims = container.animationGroups.filter((g) => g.targetedAnimations.length > 0)
+      for (const g of container.animationGroups) g.stop()
       slot.sounds = claimModelSounds(this.scene, container, soundBaseline, this.claimedSounds)
-      slot.ext = ext
+      slot.frame = frame
       slot.postId = postId
       slot.started = false
       slot.playing = false
+      slot.warm = false
+      slot.warmUntil = performance.now() + WARMUP_MS
       this.applyPlace(slot, this.pendingPlace.get(postId) ?? { x: 0, y: 0, z: 0, w: 1, h: 1, depth: 1 })
       this.byPost.set(postId, slot)
       this.onPlaced?.(postId)
@@ -430,8 +419,15 @@ export class Direct3DPool {
       slot.container.dispose()
       slot.container = null
     }
-    if (slot.root) { slot.root.dispose(true); slot.root = null; slot.orient = null; slot.fit = null }
-    slot.ext = null
+    // Recurse: dispose(true) means doNotRecurse, so orient+fit leaked
+    // (46 orphan nodes after a few 2D↔3D toggles). Container roots were
+    // unparented above, so this only reaches the two helper nodes.
+    if (slot.root) { slot.root.dispose(); slot.root = null; slot.orient = null; slot.fit = null }
+    slot.clip = null
+    slot.footprint = null
+    slot.warm = false
+    slot.warmUntil = 0
+    slot.frame = null
     slot.place = null
     slot.postId = null
     slot.visible = false

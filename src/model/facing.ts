@@ -1,6 +1,18 @@
 import { Matrix, Vector3 } from '@babylonjs/core/Maths/math.vector'
 import { VertexBuffer } from '@babylonjs/core/Buffers/buffer'
 import type { AssetContainer } from '@babylonjs/core/assetContainer'
+import type { AbstractMesh } from '@babylonjs/core/Meshes/abstractMesh'
+
+/**
+ * Meshes that actually have geometry. Babylon's glTF loader inserts an empty
+ * `__root__` (right-handed → left-handed) and authors leave empty group nodes;
+ * those boxes are zero-size at their own position (usually the origin). Every
+ * fit below is a UNION, so a model authored far from the origin had its box
+ * stretched back to 0 and framed as a speck — posters, live previews and 3D.
+ */
+function drawable(container: AssetContainer): AbstractMesh[] {
+  return container.meshes.filter((m) => m.getTotalVertices() > 0)
+}
 
 // Sampling budget. We STRIDE over the whole model instead of taking the first
 // N triangles: same answer, a fraction of the work, and no bias toward
@@ -11,14 +23,6 @@ const MAX_TRIANGLES = 12_000
 /** Diagnostics for test/facing.ts (never used in production paths). */
 export let lastFacingDebug: { sum: Vector3; mag: Vector3; triangles: number } | null = null
 
-/**
- * Dominant facing direction of a model: the axis with the most surface area,
- * signed by the net outward normal. Area-weighted normals of closed shapes
- * (thin boxes, capsules) cancel out, so the magnitude is accumulated
- * component-wise (|area|) to pick the axis, and the sign is taken from the
- * signed sum. Auto-fit cameras sit on this side or flat content (text)
- * renders mirrored (spec 05b §2.7), and closed shapes render edge-on.
- */
 /**
  * Dominant facing direction of a model: the axis with the most surface area,
  * signed by the net outward normal (authored normals when the GLB has them,
@@ -34,7 +38,7 @@ export function dominantFacing(container: AssetContainer, out?: Vector3): Vector
   const a = new Vector3(), b = new Vector3(), c = new Vector3()
   const e1 = new Vector3(), e2 = new Vector3(), geo = new Vector3()
   const n0 = new Vector3(), n1 = new Vector3(), n2 = new Vector3(), nAuthored = new Vector3()
-  for (const mesh of container.meshes) {
+  for (const mesh of drawable(container)) {
     if (triangles >= MAX_TRIANGLES) break
     const data = mesh.getVerticesData(VertexBuffer.PositionKind)
     const indices = mesh.getIndices()
@@ -83,7 +87,6 @@ export function dominantFacing(container: AssetContainer, out?: Vector3): Vector
   }
 
   lastFacingDebug = { sum: sum.clone(), mag: mag.clone(), triangles }
-  lastFacingDebug = { sum: sum.clone(), mag: mag.clone(), triangles }
 
   // Axis: a clearly FLAT model is faced along its thin axis (a sign, a screen,
   // a text plate); otherwise take the axis carrying the most surface area.
@@ -120,7 +123,7 @@ export function worldCenter(container: AssetContainer, out?: Vector3): Vector3 {
   const c = out ?? new Vector3()
   c.set(0, 0, 0)
   let n = 0
-  for (const mesh of container.meshes) {
+  for (const mesh of drawable(container)) {
     mesh.computeWorldMatrix(true)
     const info = mesh.getBoundingInfo()
     if (!info) continue
@@ -133,7 +136,7 @@ export function worldCenter(container: AssetContainer, out?: Vector3): Vector3 {
 
 export function worldRadius(container: AssetContainer): number {
   let r = 0
-  for (const mesh of container.meshes) {
+  for (const mesh of drawable(container)) {
     mesh.computeWorldMatrix(true)
     const info = mesh.getBoundingInfo()
     if (!info) continue
@@ -148,7 +151,7 @@ export function worldBox(container: AssetContainer): { min: Vector3; max: Vector
   const min = new Vector3(Infinity, Infinity, Infinity)
   const max = new Vector3(-Infinity, -Infinity, -Infinity)
   let any = false
-  for (const mesh of container.meshes) {
+  for (const mesh of drawable(container)) {
     mesh.computeWorldMatrix(true)
     const info = mesh.getBoundingInfo()
     if (!info) continue

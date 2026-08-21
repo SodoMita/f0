@@ -33,8 +33,9 @@ src/
     draco.ts         local Draco decoders (data: URIs), numWorkers:0
     offline.ts       blank KTX2/MSC CDN URLs (zero-CDN guarantee)
     limits.ts        validateGLB() — pre-load GLB complexity caps (crash guard)
-    facing.ts        worldBox (union AABB) + dominantFacing (thin-axis / authored
-                     normals) + frameDistance (aspect-aware tight fit); auto-fit math
+    facing.ts        worldBox (union AABB of drawable meshes) + dominantFacing
+                     (thin-axis / authored normals) + frameDistance
+    framing.ts       3D-card main-camera / auto-fit frame + cell clip planes
     poster.ts        GLB → dedicated transparent RTT via scene.render() +
                      camera.outputRenderTarget, rendered at the post's `dim`
                      (default 448×280); format v4: never fetched, never a PNG

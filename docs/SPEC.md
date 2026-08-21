@@ -1266,3 +1266,15 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     `livePreviews` setting is one budget, not `min(3, n)` for the thread.
     Graphics registers the stage scene once. Guard: board.previewPool ===
     threadView.previewPool (offline-verify).
+
+81. 3D VIEW BUGS (2026-08-21): empty glTF `__root__` / group nodes must not
+    enter worldBox / dominantFacing (zero-size boxes at the origin stretched
+    off-origin models into specks). Overlay materials use depthFunction
+    ALWAYS — renderingGroup 1 only fixes sort, not the depth test against a
+    3D mesh that pokes out of the card. Direct3DPool.hasWork is true while
+    shaders compile (demand-driven render otherwise left cards blank). Models
+    crop to the card with four clip planes. Transform scale is on the root
+    (scale on `fit` drifted off-origin models). `Node.dispose(true)` means
+    doNotRecurse — release must recurse or orient/fit leak. The glTF loader
+    auto-starts animation group 0; the pool stops it so play/pause own
+    playback. Contact shadow uses the model's real footprint in the cell.

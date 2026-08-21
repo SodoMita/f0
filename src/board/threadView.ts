@@ -26,7 +26,7 @@ import { theme } from '../theme'
 import { nodeWorthTexture } from './threadGate'
 import { type CardFade, finishFade, setOpacityNow, crossfadeTo, tickFade } from './cardFade'
 import { PlayIntent, playVisible } from './playIntent'
-import { disableOverlayAutoClear, makePlayTextures, paintGlassPill, strokeReplyArrow, inkFor } from './overlays'
+import { disableOverlayAutoClear, makeOverlayMaterial, makePlayTextures, paintGlassPill, strokeReplyArrow, inkFor } from './overlays'
 
 export { nodeWorthTexture } from './threadGate'
 
@@ -762,7 +762,7 @@ export class ThreadView {
       mesh.metadata = { tnode: meta }
 
       const spinner = MeshBuilder.CreatePlane(`tspin-${meta.eventId.slice(0, 8)}`, { width: 4, height: 4 }, this.scene)
-      const spinnerMat = makeCardMaterial(this.scene)
+      const spinnerMat = makeOverlayMaterial(this.scene)
       spinner.material = spinnerMat
       setCardTexture(spinnerMat, this.spinnerTex)
       setCardTint(spinnerMat, this.isDark ? theme.ink : '#3a3a44')
@@ -778,7 +778,7 @@ export class ThreadView {
       // reply pill, bottom-right, floating half out of the card like the
       // board badge; pickable and routed to the studio compose flow
       const reply = MeshBuilder.CreatePlane(`treply-${meta.eventId.slice(0, 8)}`, { width: 4, height: 4 }, this.scene)
-      const replyMat = makeCardMaterial(this.scene)
+      const replyMat = makeOverlayMaterial(this.scene)
       reply.material = replyMat
       setCardTexture(replyMat, this.replyTex)
       setCardWhite(replyMat)

@@ -1,6 +1,7 @@
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder'
 import { DynamicTexture } from '@babylonjs/core/Materials/Textures/dynamicTexture'
 import { Texture } from '@babylonjs/core/Materials/Textures/texture'
+import { Constants } from '@babylonjs/core/Engines/constants'
 import type { Scene } from '@babylonjs/core/scene'
 import type { Mesh } from '@babylonjs/core/Meshes/mesh'
 import type { ShaderMaterial } from '@babylonjs/core/Materials/shaderMaterial'
@@ -25,13 +26,26 @@ export interface QuadOpts {
   blend?: boolean
 }
 
+/**
+ * Overlay (badge / ▶ / spinner): group 1 only fixes SORT order. Depth is not
+ * cleared between groups, so a 3D model sticking out of the card won the
+ * depth test against the button on top of it. Overlays never write depth;
+ * ignoring the test is what "always on top" means.
+ */
+export function makeOverlayMaterial(scene: Scene): ShaderMaterial {
+  const mat = makeCardMaterial(scene)
+  mat.depthFunction = Constants.ALWAYS
+  return mat
+}
+
 export function makeQuad(scene: Scene, name: string, opts: QuadOpts = {}): { mesh: Mesh; mat: ShaderMaterial } {
   const mesh = MeshBuilder.CreatePlane(name, { width: 4, height: 4 }, scene)
   mesh.setEnabled(opts.enabled ?? false)
   mesh.isPickable = opts.pickable ?? false
   mesh.position.z = opts.z ?? 0
-  if (opts.group !== undefined) mesh.renderingGroupId = opts.group
-  const mat = makeCardMaterial(scene, opts.blend ?? true)
+  const overlay = opts.group !== undefined
+  if (overlay) mesh.renderingGroupId = opts.group as number
+  const mat = overlay ? makeOverlayMaterial(scene) : makeCardMaterial(scene, opts.blend ?? true)
   mesh.material = mat
   return { mesh, mat }
 }

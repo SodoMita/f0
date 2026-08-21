@@ -4,6 +4,16 @@ Claim a task by moving it to **In progress** with your name/date, push, then
 move it to **Done** with a commit reference. One agent per area.
 
 ## Done
+- [x] **3D view bugs from arena/01a02366-f0, kept short** (agent arena, 2026-08-21,
+      SPEC AMENDMENT 81): empty `__root__` meshes no longer stretch every fit
+      to the origin (specks); overlay materials ignore depth so 3D models
+      cannot cover ▶/↩; Direct3DPool `hasWork` keeps drawing while shaders
+      compile (blank cards on a settled board); clip planes crop close-ups
+      to the card; scale lives on the root (off-origin drift); `dispose()`
+      recurses (orient/fit leaked); loader-started anims are stopped so the
+      pool owns play/pause; contact shadow follows the real footprint.
+      Did NOT take the 357-line per-mesh frustum rewrite.
+
 - [x] **One preview/3D pool across board + thread** (agent arena, 2026-08-21,
       SPEC AMENDMENT 80): `LivePool` owns the single PreviewPool stage (one
       scene, one RTT set) and the per-scene Direct3D pools. `activate(view)`
