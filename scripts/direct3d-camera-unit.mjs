@@ -79,7 +79,9 @@ function makeGlb(cameras = []) {
   const nodes = [{ mesh: 0 }]
   const gltfCameras = []
   cameras.forEach((c, i) => {
-    gltfCameras.push({ type: 'perspective', perspective: { yfov: 0.7, znear: 0.01, zfar: 100 } })
+    gltfCameras.push(c.ymag
+      ? { type: 'orthographic', orthographic: { xmag: c.ymag * 1.6, ymag: c.ymag, znear: 0.01, zfar: 100 } }
+      : { type: 'perspective', perspective: { yfov: 0.7, znear: 0.01, zfar: 100 } })
     nodes.push({ camera: i, translation: c.eye, rotation: lookAtQuat(c.eye, c.target) })
   })
   const json = {
@@ -340,6 +342,51 @@ function expectedCardPoints(view, cell) {
   for (let i = 0; i < want.length; i++) worst = Math.max(worst, Math.hypot(cloud[i].x - want[i].x, cloud[i].y - want[i].y))
   check('re-placing into a smaller cell keeps the camera framing', worst < 0.02 * small.h, `worst=${worst.toFixed(3)}`)
   engine.dispose()
+}
+
+// An ORTHOGRAPHIC authored camera frames by magnification, not by distance:
+// its ymag*2 is what must map onto the cell height, at any distance.
+{
+  const ortho = makeGlb([{ eye: [6, 5, -7], target: [0.5, 0.75, 1.25], ymag: 4 }])
+  const { cloud } = await direct3dCloud(ortho, 0, place)
+  const ref = await authoredViewCloud(ortho, 0)
+  const miss = shapeMismatch(cloud, ref)
+  check('orthographic authored camera: same orientation', miss < 0.01, `mismatch=${miss.toFixed(4)}`)
+  // ymag 4 -> an 8-unit frame maps onto the 10-unit cell: scale = 1.25.
+  const b = bounds(cloud)
+  const rb = bounds(ref)
+  const scale = b.size.y / rb.size.y
+  check('orthographic authored camera: ymag sets the size (cell/2·ymag)',
+    Math.abs(scale - place.h / 8) < 0.02, `scale=${scale.toFixed(3)} want=${(place.h / 8).toFixed(3)}`)
+  check('orthographic authored camera: composition is the camera\'s',
+    Math.abs(b.center.x - (place.x + rb.center.x * scale)) < 0.05 &&
+    Math.abs(b.center.y - (place.y + rb.center.y * scale)) < 0.05,
+    `centre=(${b.center.x.toFixed(2)},${b.center.y.toFixed(2)})`)
+}
+
+// An out-of-range preview-camera index must fall back to the FIRST authored
+// camera (the viewer's policy), not to auto-fit and not to a crash.
+{
+  const one = makeGlb([{ eye, target }])
+  const ref = await authoredViewCloud(one, 0)
+  const { cloud } = await direct3dCloud(one, 7, place)
+  const want = expectedCardPoints(ref, place)
+  let worst = 0
+  for (let i = 0; i < want.length; i++) worst = Math.max(worst, Math.hypot(cloud[i].x - want[i].x, cloud[i].y - want[i].y))
+  check('a bogus preview-camera index falls back to camera 0', worst < 0.02 * place.h, `worst=${worst.toFixed(3)}`)
+}
+
+// A cell with a different aspect keeps the camera's SIZE (height maps to
+// height) — a 1:1 node and a 16:10 card show the model at the same scale.
+{
+  const ref = await authoredViewCloud(withCam, 0)
+  const square = { x: 0, y: 0, z: 0, w: 10, h: 10, depth: 6 }
+  const { cloud } = await direct3dCloud(withCam, 0, square)
+  const want = expectedCardPoints(ref, square)
+  let worst = 0
+  for (let i = 0; i < want.length; i++) worst = Math.max(worst, Math.hypot(cloud[i].x - want[i].x, cloud[i].y - want[i].y))
+  check('cell aspect does not change the framing (height maps to height)',
+    worst < 0.02 * square.h, `worst=${worst.toFixed(3)}`)
 }
 
 console.log(fails.length ? `\n${fails.length} FAILURES` : '\nall checks passed')
