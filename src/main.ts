@@ -1708,7 +1708,19 @@ async function boot(): Promise<void> {
     }
   })
 
-  window.addEventListener('resize', () => { engine.resize(); board.resize(); threadView.resize(); viewer.resize() })
+  // The engine re-derives the drawing buffer (device pixel ratio + pixel
+  // budget both move with a zoom / screen change) and then tells the views to
+  // re-measure. Subscribing to the engine rather than to `resize` alone means
+  // a page zoom, a DPI change with no resize event, and a resolution-policy
+  // change all take the SAME path — a view can no longer be left behind
+  // holding a frustum for a buffer that no longer exists. (AMENDMENT 79)
+  engine.onViewportChange(() => {
+    board.resize()
+    threadView.resize()
+    viewer.resize()
+    studio.resize()
+  })
+  window.addEventListener('resize', () => { engine.resize() })
 
   ;(window as any).__form0 = {
     engine, pool, blossoms, index, board, viewer, studio, threadView, router, assets,

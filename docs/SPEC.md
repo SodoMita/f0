@@ -1205,3 +1205,46 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     while another view owns the canvas (bind/tap respect the flag); studio
     camera attaches only in `attach()`/`detach()`. Poster queue pauses in
     studio/viewer. Guard: `node scripts/studio-open.mjs`.
+
+79. PAGE ZOOM MUST NOT STRETCH OR SOFTEN 3D (2026-08-21): zooming the page
+    (or dragging the window to a screen with a different scale factor) left
+    the drawing buffer at the device pixel ratio sampled when the engine was
+    constructed. `FormEngine.resize()` called `engine.resize()`, which
+    re-reads the CSS box but KEEPS `hardwareScalingLevel`, so the browser
+    scaled a stale frame over the new box: content came out soft, and any
+    view holding a cached frustum came out stretched. Reloading — or anything
+    else that happened to recompute the ratio — appeared to "fix" it, which
+    is why the bug looked intermittent. Fix:
+    - `resize()` now re-runs the full resolution policy (`applyResolution`),
+      so devicePixelRatio AND the MAX_PIXELS budget (which depends on the CSS
+      box) are re-derived on every viewport change. A degrade the adaptive
+      controller had earned is carried across the change instead of being
+      silently reset.
+    - devicePixelRatio is watched with a re-armed `(resolution: Xdppx)` media
+      query. Zoom fires `resize`, but a same-size DPI change (second monitor)
+      does not, and the buffer would keep the old ratio.
+    - New `engine.onViewportChange(fn)`: fires when the buffer size or its
+      aspect actually moves (not on every adaptive step). Board, thread,
+      viewer AND studio subscribe. Previously one `window resize` handler in
+      main.ts re-measured three views by hand, so the studio was never told,
+      and a resolution-policy change re-measured only two of them.
+    - `Studio.resize()` recomputes its orthographic frustum. Babylon
+      re-derives a PERSPECTIVE camera's aspect from the engine on every
+      projection recompute, but `orthoLeft/Right/Top/Bottom` are cached, so
+      studio ortho stayed frozen at the aspect it was authored at (1.6) and
+      rendered stretched after any resize. The four duplicated copies of that
+      frustum math are now one private `applyOrtho()`; `syncCameraNode()`
+      joins them (it used to set `mode` and never refresh the bounds, so a
+      stored ortho camera kept the frustum it was born with).
+    - Manual resolution with `aspectLock` OFF renders an arbitrary buffer
+      aspect while `#engine` is 100vw/100vh, so a 16:9 buffer in a 4:3 window
+      was stretched non-uniformly — circles drew as ellipses. The canvas
+      element is now LETTERBOXED to the buffer's aspect (bars, centred)
+      rather than stretched, and the toggle's hint says so (rule 9j: a
+      control must not silently do something visually wrong).
+    Guard: `node scripts/zoom.mjs` — asserts, from the ACTIVE CAMERA's
+    projection matrix against the canvas CSS box, that pixels-per-world-unit
+    is equal on X and Y (m00·cssW == m11·cssH) for board / thread / studio at
+    67…300% zoom, that the buffer tracks the device ratio (sharpness), that
+    studio ortho follows four window sizes plus a route re-entry, and that
+    manual mode letterboxes instead of stretching.

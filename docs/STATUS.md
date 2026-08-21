@@ -4,6 +4,25 @@ Claim a task by moving it to **In progress** with your name/date, push, then
 move it to **Done** with a commit reference. One agent per area.
 
 ## Done
+- [x] **Page zoom stretched / softened 3D content** (agent arena, 2026-08-21,
+      SPEC AMENDMENT 79): zooming the page left the drawing buffer at the
+      device pixel ratio sampled at boot — `FormEngine.resize()` re-read the
+      CSS box but kept `hardwareScalingLevel` — so the browser upscaled a
+      stale frame over the new box (soft, and stretched wherever a view held
+      a cached frustum). A reload appeared to fix it, so it looked
+      intermittent. `resize()` now re-runs the whole resolution policy,
+      devicePixelRatio is watched with a re-armed `(resolution: Xdppx)` media
+      query (a second-monitor DPI change fires no resize event), and views
+      re-measure through the new `engine.onViewportChange` instead of one
+      hand-written handler that had never included the studio. Also fixed:
+      `Studio.resize()` recomputes the ortho frustum (Babylon caches
+      `orthoLeft/Right/Top/Bottom`, so studio ortho was frozen at its
+      authored 1.6 aspect; the four duplicated copies of that math are now
+      one `applyOrtho()`, which `syncCameraNode` had been skipping), and
+      manual resolution with `aspectLock` off now LETTERBOXES the canvas
+      instead of stretching a mismatched buffer to fill the window.
+      Guard: `node scripts/zoom.mjs`.
+
 - [x] **Studio left the board clickable** (agent arena, 2026-08-21, SPEC
       AMENDMENT 78): opening the studio left board-only topbar controls
       (search / shuffle / 3D / create) clickable over the editor, a live

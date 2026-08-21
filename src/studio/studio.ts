@@ -273,12 +273,48 @@ export class Studio {
   /** Request a render (render-on-demand engine). */
   kick(ms?: number): void { this.form.kick(ms) }
 
+  /**
+   * Recompute an orthographic frustum from the LIVE engine aspect.
+   *
+   * Babylon re-derives a perspective camera's aspect from the engine on every
+   * projection-matrix recompute, so those self-correct after a resize;
+   * `orthoLeft/Right/Top/Bottom` are cached values and do not. This is the
+   * single place the studio's ortho bounds are computed (AMENDMENT 79) —
+   * previously the same four lines were duplicated at four call sites and
+   * only ever ran when the camera state changed.
+   */
+  private applyOrtho(cam: ArcRotateCamera): void {
+    if (cam.mode !== 1) return
+    const eng = this.form.engine
+    const aspect = eng.getRenderWidth() / Math.max(1, eng.getRenderHeight())
+    const h = Math.max(0.1, cam.radius * 0.55)
+    cam.orthoTop = h
+    cam.orthoBottom = -h
+    cam.orthoLeft = -h * aspect
+    cam.orthoRight = h * aspect
+  }
+
+  /**
+   * The drawing buffer changed (window resize, page zoom, resolution policy).
+   * Perspective cameras follow the engine on their own; the ortho ones have
+   * to be re-derived or the scene keeps the aspect it was authored at and
+   * renders stretched.
+   */
+  resize(): void {
+    this.applyOrtho(this.camera)
+    for (const node of this.storedCameraNodes) if (node) this.applyOrtho(node)
+    // 9g: a visual change outside a render must ask for a frame.
+    this.form.invalidate()
+  }
+
   attach(): void {
     if (this.freeCam) this.freeCam.attachControl(true, false)
     else this.camera.attachControl(true)
     const canvas = this.form.engine.getRenderingCanvas()
     if (canvas) this.paint.attach(canvas)
     this.applyOrbitButtons()
+    // The window may have changed size while another view owned the canvas.
+    this.resize()
   }
   detach(): void {
     this.camera.detachControl()
@@ -761,15 +797,7 @@ export class Studio {
     }
     // Orthographic framing: drive the ortho half-height from radius so zoom
     // (distance) still makes the subject larger/smaller. Width follows aspect.
-    if (this.camera.mode === 1) {
-      const eng = this.form.engine
-      const aspect = eng.getRenderWidth() / Math.max(1, eng.getRenderHeight())
-      const h = Math.max(0.1, this.camera.radius * 0.55)
-      this.camera.orthoTop = h
-      this.camera.orthoBottom = -h
-      this.camera.orthoLeft = -h * aspect
-      this.camera.orthoRight = h * aspect
-    }
+    this.applyOrtho(this.camera)
     this.form?.kick(300)
     // keep stored camera in sync when editing the active one
     if (this.activeCamIndex >= 0 && this.activeCamIndex < this.storedCameras.length) {
@@ -930,15 +958,8 @@ export class Studio {
     const [, yaw, pitch] = state.rotationDeg ?? [0, 0, 0]
     if (Number.isFinite(yaw)) cam.alpha = -deg2rad(yaw) + Math.PI / 2
     if (Number.isFinite(pitch)) cam.beta = Math.PI / 2 - deg2rad(Math.max(-89.9, Math.min(89.9, pitch)))
-    if (state.projection === 'ortho') {
-      cam.mode = 1
-      const eng = this.form.engine
-      const aspect = eng.getRenderWidth() / Math.max(1, eng.getRenderHeight())
-      const h = Math.max(0.1, cam.radius * 0.55)
-      cam.orthoTop = h; cam.orthoBottom = -h; cam.orthoLeft = -h * aspect; cam.orthoRight = h * aspect
-    } else {
-      cam.mode = 0
-    }
+    cam.mode = state.projection === 'ortho' ? 1 : 0
+    this.applyOrtho(cam)
     cam.minZ = 0.01
     cam.maxZ = 4000
     return cam
@@ -954,8 +975,10 @@ export class Studio {
     const [, yaw, pitch] = state.rotationDeg ?? [0, 0, 0]
     if (Number.isFinite(yaw)) node.alpha = -deg2rad(yaw) + Math.PI / 2
     if (Number.isFinite(pitch)) node.beta = Math.PI / 2 - deg2rad(Math.max(-89.9, Math.min(89.9, pitch)))
-    if (state.projection === 'ortho') node.mode = 1
-    else node.mode = 0
+    node.mode = state.projection === 'ortho' ? 1 : 0
+    // BUGFIX (AMENDMENT 79): this set `mode` but never refreshed the ortho
+    // bounds, so a stored ortho camera kept whatever frustum it was born with.
+    this.applyOrtho(node)
   }
 
   getCameras(): CameraState[] { return this.storedCameras.slice() }
