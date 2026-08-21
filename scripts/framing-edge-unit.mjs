@@ -184,6 +184,64 @@ const scaled = (pts, k, off = [0, 0, 0]) => pts.map((p) => [p[0] * k + off[0], p
   }
 }
 
+// The same plate authored BACK-TO-FRONT (reversed winding, so its normals
+// point at -Z) must also come out readable, not mirrored. This is the exact
+// shape of the AMENDMENT 77 "inverted models" regression: the auto-fit turns
+// the model's own front toward the viewer, and a wordmark seen from behind
+// is unreadable even though every pixel is "there".
+{
+  const flipped = L_TRIS.slice()
+  for (let i = 0; i < flipped.length; i += 3) { const t = flipped[i + 1]; flipped[i + 1] = flipped[i + 2]; flipped[i + 2] = t }
+  const res = await sane('back-to-front plate', makeGlb(L_PTS, flipped))
+  if (res) {
+    const area = (pts) => {
+      let a = 0
+      for (let i = 0; i < pts.length; i++) {
+        const p = pts[i], q = pts[(i + 1) % pts.length]
+        a += p.x * q.y - q.x * p.y
+      }
+      return a / 2
+    }
+    // Its front is -Z now, so its own front view mirrors X: the outline seen
+    // from the readable side has the OPPOSITE sign to the +Z view.
+    const front = -area(L_PTS.map((p) => ({ x: p[0], y: p[1] })))
+    const shown = area(res.pts.slice(0, L_PTS.length))
+    check('back-to-front plate is shown from ITS front (not mirrored)',
+      Math.sign(front) === Math.sign(shown) && Math.abs(shown) > 1e-6,
+      `model=${front.toFixed(2)} card=${shown.toFixed(2)}`)
+  }
+}
+
+// A plate lying FLAT (in the XZ plane, facing +Y) forces the up-vector
+// fallback (+Z instead of +Y). It must still be framed face-on, not edge-on.
+{
+  const lying = L_PTS.map(([x, y]) => [x, 0, y])
+  const lyingTris = [0, 2, 1, 0, 3, 2, 0, 4, 3, 0, 5, 4]
+  const res = await sane('plate lying flat (faces +Y)', makeGlb(lying, lyingTris))
+  if (res) {
+    check('a flat-lying plate is framed face-on', res.b.w > 0.2 && res.b.h > 0.2,
+      `${res.b.w.toFixed(2)}x${res.b.h.toFixed(2)}`)
+  }
+}
+
+// An authored camera ROLLED about its own view axis: the roll is part of the
+// view the author composed, so the card must be rolled the same way.
+{
+  const roll = Math.PI / 6
+  // quaternion: look down -Z (identity) then roll about Z
+  const q = [0, 0, Math.sin(roll / 2), Math.cos(roll / 2)]
+  const res = await sane('rolled authored camera', makeGlb(L_PTS, L_TRIS, { eye: [1.5, 2, 8], rotation: q }),
+    CELL, 0, { contained: false })
+  if (res) {
+    // The plate's left edge runs straight up +Y in the model (vertices 0→5),
+    // so on an unrolled card it is vertical; a 30° camera roll must tilt it
+    // by exactly 30°.
+    const a = res.pts[5], b = res.pts[0]
+    const tilt = Math.abs(Math.atan2(a.x - b.x, a.y - b.y) * 180 / Math.PI)
+    check('camera roll is reproduced on the card', Math.abs(tilt - 30) < 3, `tilt=${tilt.toFixed(1)}° want 30°`)
+  }
+}
+
 // Dust-sized and kilometre-sized models must land at the same cell size.
 {
   const tiny = await sane('dust-sized model', makeGlb(scaled(L_PTS, 0.0005), L_TRIS))
