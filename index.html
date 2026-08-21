@@ -443,6 +443,21 @@
       </div>
     </div>
 
+    <!-- Export review: the inspected/downloaded GLB is the immutable blob that
+         Publish uploads. Codec choices land here once their browser encoders
+         are bundled; no fake toggles in the editor itself. -->
+    <div id="export-review" class="hud export-review" hidden role="dialog" aria-modal="true" aria-label="GLB export review">
+      <section class="export-card">
+        <header class="export-head"><div><strong>Export GLB</strong><span id="export-state">ready to inspect</span></div><button id="btn-export-close" class="hbtn small" aria-label="close export review">✕</button></header>
+        <div id="export-summary" class="export-summary"></div>
+        <div id="export-meter" class="export-meter"><i></i></div>
+        <div id="export-breakdown" class="export-breakdown"></div>
+        <p id="export-extensions" class="export-extensions"></p>
+        <p class="hint">This is the exact self-contained GLB that download and publish use. Compression codecs will appear here only when a local encoder is available.</p>
+        <footer class="export-actions"><button id="btn-export-download" class="net-btn">download GLB</button><button id="btn-export-publish" class="net-btn primary">publish</button></footer>
+      </section>
+    </div>
+
     <input id="file-input" type="file" multiple hidden accept=".glb,.gltf,.bin,.obj,.mtl,.png,.jpg,.jpeg,.webp" />
     <div id="a11y-bridge" hidden></div>
 

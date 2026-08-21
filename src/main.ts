@@ -1,4 +1,5 @@
 import './style.css'
+import './studio/exportReview.css'
 import { AbstractEngine } from '@babylonjs/core/Engines/abstractEngine'
 import { AudioEngine } from '@babylonjs/core/Audio/audioEngine'
 import { FormEngine } from './core/engine'
@@ -15,6 +16,7 @@ import { AssetCache } from './core/assets'
 import { publishModel, type PublishProgress } from './protocol/publish'
 import { isAbortError } from './protocol/hash'
 import { configureDraco } from './model/draco'
+import { validateGLB } from './model/limits'
 import { enforceOffline } from './model/offline'
 import { DEFAULTS, LIMITS, POSTER_W, POSTER_H, theme } from './theme'
 import { drawPosterPixels } from './model/poster'
@@ -37,6 +39,7 @@ import { bindPaintHud } from './studio/paintHud'
 import { formatCount, formatSize, modelNameForPublish, modelWarnings, sizeHeatColor } from './studio/modelInfo'
 import type { ImportedModel } from './studio/studio'
 import { bindLibraryHud } from './studio/library/hud'
+import { exportBreakdown, inspectGLB } from './studio/exportInfo'
 
 type Mode = 'boot' | 'board' | 'viewer' | 'studio' | 'thread'
 
@@ -142,6 +145,16 @@ async function boot(): Promise<void> {
   const fileInput = $('file-input') as HTMLInputElement
   let publishing = false
   let publishAbort: AbortController | null = null
+  // A review is a frozen export snapshot. It is invalidated by every Studio
+  // edit, so preview/download/publish cannot disagree about the bytes.
+  let reviewedExport: { blob: Blob; filename: string; sourceFormat: 'glb' | 'gltf' | 'obj' | 'generated' } | null = null
+  const exportReview = $('export-review')
+  const exportSummary = $('export-summary')
+  const exportMeter = $('export-meter').firstElementChild as HTMLElement
+  const exportBreakdownEl = $('export-breakdown')
+  const exportExtensions = $('export-extensions')
+  const exportState = $('export-state')
+  const btnExportPublish = $('btn-export-publish') as HTMLButtonElement
   const netDot = $('net-dot')
   let relaysOnline = 0
   const btn3d = $('btn-3d') as HTMLButtonElement
@@ -457,9 +470,9 @@ async function boot(): Promise<void> {
     publishAbort?.abort()
   }
 
-  async function publishStudio(): Promise<void> {
+  async function publishStudio(snapshot: typeof reviewedExport = reviewedExport): Promise<void> {
     if (publishing) { cancelPublish(); return }
-    if (!studio.hasContent()) return
+    if (!studio.hasContent() || !snapshot) return
     publishing = true
     publishAbort = new AbortController()
     const signal = publishAbort.signal
@@ -468,8 +481,11 @@ async function boot(): Promise<void> {
     studio.setFrozen(true)
     setPublishButton(true)
     try {
-      setStudioStatus('export…', 'busy')
-      const content = await studio.getContentForPublish()
+      // The review has already generated and validated this immutable blob.
+      // Never serialize again here: the reviewed/downloaded/uploaded bytes
+      // must stay identical.
+      const content = snapshot
+      setStudioStatus(`upload ${formatSize(content.blob.size)}…`, 'busy')
       if (signal.aborted) throw Object.assign(new Error('upload aborted'), { name: 'AbortError' })
       // Format v4: the studio generates NO poster at all — every client
       // renders cards locally from the model at the event's `dim`. The event
@@ -539,8 +555,56 @@ async function boot(): Promise<void> {
     }
   }
 
+  async function openExportReview(): Promise<void> {
+    if (publishing || !studio.hasContent()) return
+    try {
+      btnStudioPublish.disabled = true
+      setStudioStatus('exporting…', 'busy')
+      // Freeze the editing scene while the serializer takes its snapshot.
+      studio.setFrozen(true)
+      const content = await studio.getContentForPublish()
+      const bytes = new Uint8Array(await content.blob.arrayBuffer())
+      const report = validateGLB(bytes)
+      if (!report.ok) throw new Error(report.reason)
+      reviewedExport = { ...content, blob: new Blob([bytes.buffer], { type: 'model/gltf-binary' }) }
+      const info = inspectGLB(bytes)
+      exportSummary.innerHTML = `<span>file size</span><b>${formatSize(info.bytes)} / ${formatSize(LIMITS.modelBytesHard)}</b><span>scene</span><b>${info.meshes} meshes · ${formatCount(info.triangles)} triangles</b><span>content</span><b>${info.textures} textures · ${info.animations} animations</b>`
+      const pct = Math.min(100, (info.bytes / LIMITS.modelBytesHard) * 100)
+      exportMeter.style.width = `${pct.toFixed(1)}%`
+      exportMeter.style.background = sizeHeatColor(info.bytes)
+      exportBreakdownEl.textContent = exportBreakdown(info)
+      exportExtensions.textContent = info.extensions.length ? `extensions: ${info.extensions.join(', ')}` : 'extensions: none'
+      exportState.textContent = report.ok ? 'validated · exact bytes' : 'validation failed'
+      btnExportPublish.disabled = !report.ok
+      exportReview.hidden = false
+      setStudioStatus(`${formatSize(info.bytes)} · reviewed`, 'ok')
+    } catch (err) {
+      reviewedExport = null
+      setStudioStatus('')
+      errorSheet.show(ERRORS.STUDIO_PUBLISH(err instanceof Error ? err.message : 'export failed'))
+    } finally {
+      studio.setFrozen(false)
+      if (!publishing) btnStudioPublish.disabled = !studio.hasContent()
+    }
+  }
+
+  function closeExportReview(): void { exportReview.hidden = true }
+
+  function downloadReviewedExport(): void {
+    if (!reviewedExport) return
+    const url = URL.createObjectURL(reviewedExport.blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = reviewedExport.filename.replace(/\.[^.]+$/, '') + '.glb'
+    a.click()
+    window.setTimeout(() => URL.revokeObjectURL(url), 4000)
+  }
+
   btnStudioImport.addEventListener('click', () => { if (!publishing) void pickStudioFile() })
-  btnStudioPublish.addEventListener('click', () => void publishStudio())
+  btnStudioPublish.addEventListener('click', () => void openExportReview())
+  $('btn-export-close').addEventListener('click', closeExportReview)
+  $('btn-export-download').addEventListener('click', downloadReviewedExport)
+  btnExportPublish.addEventListener('click', () => { if (reviewedExport) { closeExportReview(); void publishStudio(reviewedExport) } })
 
   // Remove every studio addition (text, paint, cameras, mesh moves): the
   // studio reloads the model from its pristine imported bytes, so publishing
@@ -630,7 +694,13 @@ async function boot(): Promise<void> {
       void renderStudioPreview()
     }, delay)
   }
-  studio.onDirty = () => scheduleStudioPreview()
+  studio.onDirty = () => {
+    // Any edit makes a previously reviewed export stale. Keep the old blob
+    // private; it can no longer be published from the UI.
+    reviewedExport = null
+    if (!exportReview.hidden) closeExportReview()
+    scheduleStudioPreview()
+  }
 
   previewCanvas?.addEventListener('click', () => {
     previewHidden = true
