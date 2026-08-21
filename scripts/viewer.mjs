@@ -1,4 +1,4 @@
-// Viewer guard (AMENDMENT 84): the essential viewer behaviors, asserted.
+// Viewer guard (AMENDMENT 86): the essential viewer behaviors, asserted.
 //   1. authored camera = navigable (orbit seeded from it, not a frozen frame)
 //   2. authored composition preserved (position + fov, pivot on the forward ray)
 //   3. near plane adaptive (close-ups of small parts never clip)

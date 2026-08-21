@@ -1366,7 +1366,7 @@ async function boot(): Promise<void> {
 
   /** Model sound button: visible only when the model carries audio, lit
    *  while it plays (spec: sound always needs an explicit tap, never
-   *  autoplays — AMENDMENT 84). */
+   *  autoplays — AMENDMENT 86). */
   function syncSoundButton(): void {
     btnSound.hidden = viewer.soundCount === 0
     btnSound.classList.toggle('on', viewer.soundOn)
@@ -1408,7 +1408,7 @@ async function boot(): Promise<void> {
   })
   animSpeed.addEventListener('input', () => {
     // parseFloat('') || 1 used to swallow the documented 0 = freeze pose
-    // (AMENDMENT 84): 0 is a real value here, only NaN (empty field) falls
+    // (AMENDMENT 86): 0 is a real value here, only NaN (empty field) falls
     // back to 1.
     const v = parseFloat(animSpeed.value)
     viewer.animator.setSpeed(Number.isFinite(v) ? v : 1)
@@ -1606,7 +1606,7 @@ async function boot(): Promise<void> {
   settings.subscribe((values, changed) => {
     applySettings(wiring, values, changed)
     // "everything opens paused" (board cards AND the viewer) + reduced
-    // motion both stop the viewer's open-autoplay (AMENDMENT 84).
+    // motion both stop the viewer's open-autoplay (AMENDMENT 86).
     viewer.setAutoplay(!!values.autoplayAnimations && !values.reduceMotion)
     btn3d.classList.toggle('active', settings.bool('direct3D'))
     settingsPanel.refresh()
@@ -2087,7 +2087,7 @@ async function boot(): Promise<void> {
       case 'a': case 'A': viewer.toggleAnimation(); syncPlay(); break
       // re-fit the CURRENT camera mode (authored pose or auto-fit)
       case 'f': case 'F': viewer.refit(); break
-      // model sound (spec A11Y "S sound" — was never wired; AMENDMENT 84)
+      // model sound (spec A11Y "S sound" — was never wired; AMENDMENT 86)
       case 's': case 'S': viewer.toggleSound(); syncSoundButton(); break
       // frame stepping (pauses playback; wraps around the clip)
       case ',': case '<': viewer.animator.step(-1); engine.kick(); syncPlay(); break

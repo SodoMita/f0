@@ -1,7 +1,7 @@
 # VIEWER RESEARCH — what is good, missing, wrong, and bad in the viewer
 (2026-08-21, agent arena)
 
-**Status (2026-08-21, AMENDMENT 84):** the essential fixes are implemented —
+**Status (2026-08-21, AMENDMENT 86):** the essential fixes are implemented —
 navigable authored cameras (orbit seeded from the author's pose), adaptive
 near plane (no close-up slice), F/fit re-frame (incl. residual-inertia kill),
 speed-0 fix, model audio in the viewer (S key / sound button, hand-off
@@ -301,7 +301,7 @@ pixels — all available in `limits.ts` stats but not shown).
 
 ## 6. Prioritized recommendations
 
-Status: ✅ done in AMENDMENT 84 · ⏸ deferred by decision (2026-08-21 — keep
+Status: ✅ done in AMENDMENT 86 · ⏸ deferred by decision (2026-08-21 — keep
 the codebase essential while there is a lot to optimize/polish/debug) ·
 ➖ not needed now (per decision).
 
@@ -319,7 +319,7 @@ the codebase essential while there is a lot to optimize/polish/debug) ·
 4. ✅ Reset/re-frame: F key + fit button, works for camera-less models and
    for authored mode; "N of M" next to prev/next. Re-framing also kills the
    orbit's residual inertial offsets (a frozen mid-glide used to drag the
-   re-framed pose off — see AMENDMENT 84).
+   re-framed pose off — see AMENDMENT 86).
 5. ✅ `setSpeed(parseFloat(v) || 1)` → only NaN (empty field) falls back to
    1; 0 (freeze pose) is reachable.
 

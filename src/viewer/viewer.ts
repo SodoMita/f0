@@ -32,7 +32,7 @@ import { TrackAnimator } from './animator'
  * Detail viewer: exactly one interactive model. One ORBIT camera at a time:
  * auto-fit to the model (A dot), or seeded from one of the model's own
  * authored cameras (numbered dots / C) — the author's position + fov, model
- * center as pivot — so every view is fully navigable (AMENDMENT 84).
+ * center as pivot — so every view is fully navigable (AMENDMENT 86).
  */
 export class Viewer {
   readonly scene: Scene
@@ -288,7 +288,7 @@ export class Viewer {
       // Defensive: only adopt containers already bound to our scene. Throw
       // (don't return silently) so the caller's catch rolls the preview slot
       // back and re-parses from bytes — a silent return would commit the
-      // slot and leave a BLANK viewer with no loading ring (AMENDMENT 84).
+      // slot and leave a BLANK viewer with no loading ring (AMENDMENT 86).
       this.loadToken++
       throw new Error('handoff container is not bound to the viewer scene')
     }
@@ -330,7 +330,7 @@ export class Viewer {
     // Same policy as before: the authored preview-animation (or track 0)
     // starts playing on open — but through the manual driver, and only when
     // the board's "cards start animating in view" setting says so (the
-    // viewer obeys the same preference, AMENDMENT 84).
+    // viewer obeys the same preference, AMENDMENT 86).
     this.animator.setGroups(container.animationGroups, meta.previewAnimation ?? 0, this.autoplay)
   }
 
@@ -341,7 +341,7 @@ export class Viewer {
    * Take ownership of this model's MSFT_audio_emitter sounds (loader-created
    * on the byte path, hand-off-transferred on the live-preview path). They
    * stay PAUSED: like the board, sound only starts on an explicit tap
-   * (AMENDMENT 84 — the viewer's S key / sound button).
+   * (AMENDMENT 86 — the viewer's S key / sound button).
    */
   private claimSounds(container: AssetContainer): void {
     const nodes = new Set<unknown>(container.meshes)
@@ -422,7 +422,7 @@ export class Viewer {
    * Switch camera mode: -1 = auto-fit orbit, >=0 = one of the model's own
    * cameras. EITHER WAY the controlled camera is the orbit — an authored
    * camera only SEEDS it (the author's position + fov, model center as
-   * pivot) instead of becoming a frozen, control-less view (AMENDMENT 84):
+   * pivot) instead of becoming a frozen, control-less view (AMENDMENT 86):
    * the player sees the author's framing and can immediately orbit, zoom
    * and pan from it. Re-clicking a dot re-seeds (snap back to the authored
    * framing); the A dot re-fits from the dominant face.
@@ -462,7 +462,7 @@ export class Viewer {
    * inertia only decays WHILE frames render — if rendering stops mid-glide
    * (static model, paused animation, idle), the offsets FREEZE and the next
    * render trigger (F, a camera dot, a settings kick) applies them, dragging
-   * the freshly re-framed pose off (AMENDMENT 84).
+   * the freshly re-framed pose off (AMENDMENT 86).
    */
   private stopOrbitInertia(): void {
     this.orbit.inertialAlphaOffset = 0
@@ -494,7 +494,7 @@ export class Viewer {
   }
 
   /**
-   * Seed the orbit from an authored camera (AMENDMENT 84): the author's
+   * Seed the orbit from an authored camera (AMENDMENT 86): the author's
    * world position as the camera position, the author's fov, and the orbit
    * pivot placed ON the authored forward ray — the authored composition is
    * position + direction + fov, and any pivot distance along that ray keeps
@@ -537,7 +537,7 @@ export class Viewer {
    * for the current framing distance. The near plane set here is only a
    * STARTING value — adaptNearPlane() keeps it proportional to the live
    * camera-to-model distance so close-ups of small parts never clip
-   * (AMENDMENT 84).
+   * (AMENDMENT 86).
    */
   private applyFraming(dist: number): void {
     const { min, center, radius } = this.modelBox!
@@ -559,7 +559,7 @@ export class Viewer {
    * box (10% of it, floored by the user's near setting; the floor alone when
    * the camera is inside the box). The old fixed model-sized minZ let the
    * player wheel-zoom closer than the near plane (lowerRadiusLimit < minZ),
-   * slicing any part smaller than the whole model (AMENDMENT 84). Runs per
+   * slicing any part smaller than the whole model (AMENDMENT 86). Runs per
    * rendered frame — one AABB distance, no allocations.
    */
   private adaptNearPlane(): void {

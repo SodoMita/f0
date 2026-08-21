@@ -232,7 +232,7 @@ function makeModel(flavour) {
 
   // Flavour 'a' carries a short 440 Hz beep (MSFT_audio_emitter over an
   // in-BIN bufferView) so the rig can verify the viewer's sound claim,
-  // the S-key toggle, and the hand-off sound transfer (AMENDMENT 84).
+  // the S-key toggle, and the hand-off sound transfer (AMENDMENT 86).
   let audioExt = null
   if (flavour === 'a') {
     const audioView = addView(makeWav(), 'audio')

@@ -942,7 +942,7 @@ move it to **Done** with a commit reference. One agent per area.
       inverse(main-cam rotation); thread camera is only a position). Center a
       node -> thread view == model's main-camera view. Fall back to auto-fit
       when no camera. Load models only near viewport (same pipeline as board).
-- [ ] **Viewer: remaining fixes from the AMENDMENT 84 research**
+- [ ] **Viewer: remaining fixes from the AMENDMENT 86 research**
       (docs/VIEWER-RESEARCH.md §6 — deferred by decision 2026-08-21 to keep
       the codebase essential while there is a lot to optimize/polish/debug;
       pick in this order, extend scripts/viewer.mjs per feature):
