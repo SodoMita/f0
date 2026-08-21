@@ -16,7 +16,11 @@ sidecar import branch merged and hardened (local-only, bounded, validate-first) 
 AES-GCM deletion-key envelopes · schema-validated persisted settings · data-URI
 texture decoded-memory guards.
 
-3D MODE FIXED (2026-08-21, AMENDMENT 79): the board and the thread tree now
+ALSO LANDED ON MAIN (2026-08-21): page-zoom/DPI buffer fix (AMENDMENT 79,
+scripts/zoom.mjs) · quad+triangle paint brushes and runtime library icons
+(AMENDMENT 80).
+
+3D MODE FIXED (2026-08-21, AMENDMENT 81): the board and the thread tree now
 show each post through its model's MAIN CAMERA — authored view matrix ->
 model transform, camera frame height -> cell height, crop planes instead of
 shrink-to-fit, auto-fit only as the fallback (src/model/framing.ts). Also:
@@ -29,7 +33,7 @@ was also un-rotted: its two "poster from authored camera" checks predated
 AMENDMENT 6 (posters ALWAYS auto-fit) and had been red on every run — the
 whole suite is green again (43/43), so a real regression is now visible.
 
-EMPTY-NODE FIT BUG FIXED (2026-08-21, AMENDMENT 80): model/facing.ts fits
+EMPTY-NODE FIT BUG FIXED (2026-08-21, AMENDMENT 82): model/facing.ts fits
 counted Babylon's empty __root__ mesh (zero-size box AT THE ORIGIN), so a
 model authored far from the origin was framed with all the empty space back
 to (0,0,0) — an invisible speck, in posters and live previews as much as in
@@ -52,7 +56,7 @@ NEXT — EDITOR CORE FIRST (primary use cases):
 
 REST: thread view MODE PICKER (AMENDMENT 43 wants 2D posters / tree / 3D as
 a settings choice; today the tree is the layout and 3D is a global toggle —
-the main-camera-as-model-transform rule itself is done, AMENDMENT 79) · VR support (AMENDMENT 37, WebXR
+the main-camera-as-model-transform rule itself is done, AMENDMENT 81) · VR support (AMENDMENT 37, WebXR
 viewer) · new settings entries (thread mode + VR toggle into the schema) ·
 low-poly text geometry · tests (Vitest + Playwright).
 

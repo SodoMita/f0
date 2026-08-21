@@ -60,7 +60,14 @@ settings/network shapes are schema/type/range validated; sidecar imports are
 local-only and preflighted (128 files/20 MiB, GLB validate-before-load,
 glTF/OBJ complexity caps); embedded and data-URI image dimensions/MIME/decoded
 memory are checked before decode, with SVG/unknown formats failing closed.
-79 3D MODE = THE MODEL'S MAIN-CAMERA VIEW (the AMENDMENT 43 rule, now
+79 PAGE ZOOM MUST NOT STRETCH OR SOFTEN 3D: browser zoom / DPI changes
+re-derive the drawing buffer (visualViewport-aware), manual resolution mode
+letterboxes instead of stretching, and every view re-measures its camera on
+the change. Guard: node scripts/zoom.mjs.
+80 QUAD/TRIANGLE PAINT BRUSHES + RUNTIME MODEL ICONS: the paint editor gained
+square/triangle stamps and the library shows real rendered thumbnails of each
+GLB. Guards: check:paint, check:paint-icons.
+81 3D MODE = THE MODEL'S MAIN-CAMERA VIEW (the AMENDMENT 43 rule, now
 actually implemented): a 3D card/node is built from the authored camera's
 VIEW matrix — model pivoted at the camera position, rotated by the inverse of
 its rotation, scaled so the camera's frame height AT THE MODEL'S DEPTH maps
@@ -84,7 +91,7 @@ recurse, so orient/fit nodes piled up on every 2D<->3D toggle), and the
 contact shadow follows the model's REAL footprint in the cell instead of a
 fixed ellipse in the middle of the card.
 Guards: bun scripts/direct3d-camera-unit.mjs · node scripts/direct3d-camera.mjs.
-80 EMPTY NODES POISONED EVERY FIT: worldBox/worldBounds/worldCenter/
+82 EMPTY NODES POISONED EVERY FIT: worldBox/worldBounds/worldCenter/
 worldRadius unioned EVERY mesh, including Babylon's empty __root__ (the
 RH->LH conversion node) whose bounding box is a zero-size box AT THE ORIGIN.
 A model authored far from the origin was therefore framed together with all

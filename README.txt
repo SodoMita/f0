@@ -14,7 +14,7 @@ camera applied as the model transform vs a static camera (camera = just a
 position), so a centered model matches its main-camera view: the model is
 pivoted at the camera, rotated by the inverse of its rotation and scaled so the
 camera's frame maps onto the card, cropped at the card's edges like a poster
-(spec AMENDMENTS 43/75/79, src/model/framing.ts). No camera -> auto-fit.
+(spec AMENDMENTS 43/75/81, src/model/framing.ts). No camera -> auto-fit.
 Viewer = one model, orbit (A) or authored cameras (C), play/pause,
 metadata (M), download, thread (T), prev/next; VR = WebXR immersive 1:1 viewing
 (spec AMENDMENT 41), hidden when unsupported.

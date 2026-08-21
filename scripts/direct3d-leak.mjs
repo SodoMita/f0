@@ -5,7 +5,7 @@
 // textures, animation groups, MSFT_audio_emitter sounds and a transform
 // chain per model. Everything has to come back out again when the toggle
 // goes off or a card scrolls away — a browser-only imageboard is a
-// long-running tab, and AMENDMENT 79 already found one leak here
+// long-running tab, and AMENDMENT 81 already found one leak here
 // (`dispose(true)` = do NOT recurse left the orient/fit nodes behind).
 //
 // Four on/off cycles must return the scene to its exact baseline.

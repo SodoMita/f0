@@ -340,7 +340,7 @@ export class PaintSession {
       r: this.opts.color[0], g: this.opts.color[1], b: this.opts.color[2], a,
     }
     if (this.opts.shape === 'sphere') { s.sy = w; s.qx = 0; s.qy = 0; s.qz = 0; s.qw = 1 }
-    if (this.opts.shape === 'quad') { s.sy = w; s.sz = 0.02 }
+    if (this.opts.shape === 'quad' || this.opts.shape === 'triangle') { s.sy = w; s.sz = 0.02 }
     const added = this.store.add(s)
     this.hash.insert(added)
     this.strokeAdded.push(added)
@@ -396,7 +396,8 @@ export class PaintSession {
     const n = this.planeNormal
     switch (this.opts.shape) {
       case 'cylinder': return quatCylinder(tangent)
-      case 'quad': return quatFacing(n, tangent)
+      case 'quad':
+      case 'triangle': return quatFacing(n, tangent)
       case 'sphere': return IDENTITY_QUAT
       default: return quatAlign(tangent, n)
     }

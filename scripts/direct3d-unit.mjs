@@ -171,7 +171,7 @@ async function waitUntil(pred, tries = 40, ms = 25) {
   check('found a root transform', !!node, node?.name ?? 'none')
   if (node) {
     // Measure the GEOMETRY, not the root node: the root sits at the framing
-    // camera's position (AMENDMENT 79), which is behind the card plane by
+    // camera's position (AMENDMENT 81), which is behind the card plane by
     // design — the model itself is what has to land on the plane.
     const mn = [Infinity, Infinity, Infinity]
     const mx = [-Infinity, -Infinity, -Infinity]

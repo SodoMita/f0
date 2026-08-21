@@ -285,7 +285,7 @@ mismatch any page background.
   + `scene.render()`; (b) `whenReadyAsync()` on a never-rendered scene hangs →
   removed; (c) environment-texture IBL blackened PBR → removed, lights-only.
 - Poster thumbnails always auto-fit (AMENDMENT 6). Authored cameras drive the
-  viewer, live previews and **3D-mode cards/nodes** — where AMENDMENT 79 turns
+  viewer, live previews and **3D-mode cards/nodes** — where AMENDMENT 81 turns
   the camera's whole view (position + framing, not just its rotation) into the
   model's transform, so a 3D card shows what the author framed instead of a
   shrunken auto-fit of the entire file.

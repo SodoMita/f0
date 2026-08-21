@@ -35,7 +35,7 @@ src/
     limits.ts        validateGLB() — pre-load GLB complexity caps (crash guard)
     facing.ts        worldBox (union AABB) + dominantFacing (thin-axis / authored
                      normals) + frameDistance (aspect-aware tight fit); auto-fit math
-    framing.ts       3D-MODE framing (AMENDMENT 79): frameModel() turns a
+    framing.ts       3D-MODE framing (AMENDMENT 81): frameModel() turns a
                      model's authored MAIN camera into a model transform
                      (pivot = camera position, rot = inverse camera rotation,
                      frame height at the model's depth), placeFrame() maps it

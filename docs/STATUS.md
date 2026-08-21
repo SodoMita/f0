@@ -4,8 +4,35 @@ Claim a task by moving it to **In progress** with your name/date, push, then
 move it to **Done** with a commit reference. One agent per area.
 
 ## Done
+- [x] **Page zoom stretched / softened 3D content** (agent arena, 2026-08-21,
+      SPEC AMENDMENT 79): zooming the page left the drawing buffer at the
+      device pixel ratio sampled at boot — `FormEngine.resize()` re-read the
+      CSS box but kept `hardwareScalingLevel` — so the browser upscaled a
+      stale frame over the new box (soft, and stretched wherever a view held
+      a cached frustum). A reload appeared to fix it, so it looked
+      intermittent. `resize()` now re-runs the whole resolution policy,
+      devicePixelRatio is watched with a re-armed `(resolution: Xdppx)` media
+      query (a second-monitor DPI change fires no resize event), and views
+      re-measure through the new `engine.onViewportChange` instead of one
+      hand-written handler that had never included the studio. Also fixed:
+      `Studio.resize()` recomputes the ortho frustum (Babylon caches
+      `orthoLeft/Right/Top/Bottom`, so studio ortho was frozen at its
+      authored 1.6 aspect; the four duplicated copies of that math are now
+      one `applyOrtho()`, which `syncCameraNode` had been skipping), and
+      manual resolution with `aspectLock` off now LETTERBOXES the canvas
+      instead of stretching a mismatched buffer to fill the window.
+      Guard: `node scripts/zoom.mjs`.
+- [x] **Quad/triangle paint brushes + runtime model thumbnails** (agent arena,
+      2026-08-21, SPEC AMENDMENT 80, commit 165a81f): the paint editor now has
+      named quad and triangle plate brushes. Paint buttons and every Shapes
+      library cell show a transparent RTT capture of the exact mesh/GLB they
+      use instead of a font glyph or hand-drawn SVG. Library captures are
+      lazy and all jobs share one offscreen scene on the existing Engine.
+      Guards: `bun scripts/paint-unit.mjs` + `TARGET_URL=… bun run
+      check:paint-icons` (visible-pixel checks included).
+
 - [x] **Empty nodes poisoned every model fit** (agent arena, 2026-08-21, SPEC
-      AMENDMENT 80): `model/facing.ts` unioned the bounding box of every mesh
+      AMENDMENT 82): `model/facing.ts` unioned the bounding box of every mesh
       including Babylon's empty `__root__`, whose box is a zero-size box at
       the ORIGIN. Any model authored far from the origin was framed together
       with the empty space back to (0,0,0) and rendered as an invisible speck
@@ -16,7 +43,7 @@ move it to **Done** with a commit reference. One agent per area.
       cell shapes).
 
 - [x] **3D mode now really shows the model's MAIN CAMERA view** (agent arena,
-      2026-08-21, SPEC AMENDMENT 79): with "Show posts as 3D models" on, a
+      2026-08-21, SPEC AMENDMENT 81): with "Show posts as 3D models" on, a
       board card / thread node applied only the authored camera's ROTATION
       and then auto-fitted the whole file's bounding box (further shrunk by
       the depth budget), so cards showed a tiny off-centre speck of

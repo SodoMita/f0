@@ -96,6 +96,12 @@ export const SETTINGS: SettingDef[] = [
   },
   {
     id: 'aspectLock', label: 'Tie height to window aspect', group: 'display', kind: 'toggle', default: true,
+    // AMENDMENT 79: with this OFF the buffer aspect no longer has to match the
+    // window, and the canvas used to be stretched to fill it — a 16:9 buffer
+    // in a 4:3 window drew circles as ellipses. The canvas is now LETTERBOXED
+    // to the chosen aspect instead. Say so, because "black bars appear" is a
+    // visible consequence of the toggle, not a bug.
+    hint: 'On: height follows the window, the canvas always fills it. Off: the exact width × height below is rendered and letterboxed (bars) so the picture is never stretched.',
     showIf: (v) => v.resolutionMode === 'manual',
   },
   {

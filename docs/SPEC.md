@@ -1206,7 +1206,72 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     camera attaches only in `attach()`/`detach()`. Poster queue pauses in
     studio/viewer. Guard: `node scripts/studio-open.mjs`.
 
-79. 3D MODE REALLY IS THE MODEL'S MAIN-CAMERA VIEW (2026-08-21): AMENDMENT
+79. PAGE ZOOM MUST NOT STRETCH OR SOFTEN 3D (2026-08-21): zooming the page
+    (or dragging the window to a screen with a different scale factor) left
+    the drawing buffer at the device pixel ratio sampled when the engine was
+    constructed. `FormEngine.resize()` called `engine.resize()`, which
+    re-reads the CSS box but KEEPS `hardwareScalingLevel`, so the browser
+    scaled a stale frame over the new box: content came out soft, and any
+    view holding a cached frustum came out stretched. Reloading — or anything
+    else that happened to recompute the ratio — appeared to "fix" it, which
+    is why the bug looked intermittent. Fix:
+    - `resize()` now re-runs the full resolution policy (`applyResolution`),
+      so devicePixelRatio AND the MAX_PIXELS budget (which depends on the CSS
+      box) are re-derived on every viewport change. A degrade the adaptive
+      controller had earned is carried across the change instead of being
+      silently reset.
+    - devicePixelRatio is watched with a re-armed `(resolution: Xdppx)` media
+      query. Zoom fires `resize`, but a same-size DPI change (second monitor)
+      does not, and the buffer would keep the old ratio.
+    - New `engine.onViewportChange(fn)`: fires when the buffer size or its
+      aspect actually moves (not on every adaptive step). Board, thread,
+      viewer AND studio subscribe. Previously one `window resize` handler in
+      main.ts re-measured three views by hand, so the studio was never told,
+      and a resolution-policy change re-measured only two of them.
+    - `Studio.resize()` recomputes its orthographic frustum. Babylon
+      re-derives a PERSPECTIVE camera's aspect from the engine on every
+      projection recompute, but `orthoLeft/Right/Top/Bottom` are cached, so
+      studio ortho stayed frozen at the aspect it was authored at (1.6) and
+      rendered stretched after any resize. The four duplicated copies of that
+      frustum math are now one private `applyOrtho()`; `syncCameraNode()`
+      joins them (it used to set `mode` and never refresh the bounds, so a
+      stored ortho camera kept the frustum it was born with).
+    - Manual resolution with `aspectLock` OFF renders an arbitrary buffer
+      aspect while `#engine` is 100vw/100vh, so a 16:9 buffer in a 4:3 window
+      was stretched non-uniformly — circles drew as ellipses. The canvas
+      element is now LETTERBOXED to the buffer's aspect (bars, centred)
+      rather than stretched, and the toggle's hint says so (rule 9j: a
+      control must not silently do something visually wrong).
+    Guard: `node scripts/zoom.mjs` — asserts, from the ACTIVE CAMERA's
+    projection matrix against the canvas CSS box, that pixels-per-world-unit
+    is equal on X and Y (m00·cssW == m11·cssH) for board / thread / studio at
+    67…300% zoom, that the buffer tracks the device ratio (sharpness), that
+    studio ortho follows four window sizes plus a route re-entry, and that
+    manual mode letterboxes instead of stretching.
+80. QUAD/TRIANGLE PAINT BRUSHES + RUNTIME MODEL ICONS (2026-08-21):
+    the paint editor's plate brush remains `quad` (shape id 4) and gains a
+    `triangle` plate (shape id 5). Both face local +Z and use the
+    writing-surface orientation;
+    they travel through the same packed store, thin-instance renderer,
+    picking and export bake as every other brush. `paint/shapes.ts` is the
+    canonical mesh factory used by BOTH the editor and its icons, so an icon
+    cannot drift away from the geometry it paints.
+    Paint buttons and every cell in the Shapes library must show the real
+    model, not Unicode glyphs or hand-authored SVG approximations.
+    `RuntimeModelIcons` owns one transparent offscreen Scene on the EXISTING
+    Engine/context. It serializes 96×96 captures through
+    `camera.outputRenderTarget` + `scene.render()`, force-compiles the material
+    before the one-shot RTT (otherwise the first icon is blank), reads the
+    texture once, and supplies the HUD with a transparent PNG object URL.
+    Library GLBs are validated before Babylon loads them; their thumbnails
+    render lazily through IntersectionObserver and cache for the session.
+    No second Engine, WebGL context, visible canvas or network asset exists.
+    Guards: `bun scripts/paint-unit.mjs` and
+    `TARGET_URL=http://localhost:5173/ bun run check:paint-icons` (asserts the
+    quad/triangle source geometry, selection, packed-store round-trip,
+    ≥42px targets, no SVGs, and non-zero alpha in every runtime texture).
+
+81. 3D MODE REALLY IS THE MODEL'S MAIN-CAMERA VIEW (2026-08-21): AMENDMENT
     43/75 promised that a 3D board card / thread node shows the post's real
     model THROUGH THE MODEL'S MAIN CAMERA. Only the camera's ROTATION was
     applied. Everything else about the view — where the camera stands, how
@@ -1312,7 +1377,7 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     chains, animation groups, sounds, heap): a browser-only imageboard is a
     long-running tab and this toggle loads real GLBs into the live scene.
 
-80. EMPTY NODES POISONED EVERY FIT (2026-08-21): `model/facing.ts`'s
+82. EMPTY NODES POISONED EVERY FIT (2026-08-21): `model/facing.ts`'s
     `worldBox` / `worldBounds` / `worldCenter` / `worldRadius` unioned the
     bounding box of EVERY mesh in the container — including Babylon's
     `__root__` (the empty mesh its glTF loader inserts to convert

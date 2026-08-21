@@ -82,7 +82,7 @@ bun run build:standalone  # ONE self-contained form-zero-standalone.html
    against the static flat camera (`model/framing.ts`: pivot = camera
    position, rotation = inverse camera rotation, the camera's frame height at
    the model's depth = the cell height, four clip planes crop the model to
-   its card — spec AMENDMENT 79). The camera comes from the `preview-camera`
+   its card — spec AMENDMENT 81). The camera comes from the `preview-camera`
    index → first imported camera. Auto-fit (`worldBounds` + `dominantFacing`
    + `fitDistance` in `model/facing.ts`, 0.86 fill) is the fallback whenever
    there is no usable camera — and, per AMENDMENT 6, is what POSTER
@@ -184,7 +184,7 @@ bun scripts/capture.mjs             # board/viewer/thread/light/phone screenshot
 bun scripts/perf.mjs                # PERF: boot, per-view frame cost, 48-card stress, idle, heap
 bun scripts/shaders.mjs             # shader recompiles (repeat model opens must compile 0 programs)
 bun scripts/settings.mjs            # every setting must reach real engine state (20 checks)
-npm run check:3d                    # 3D MODE (AMENDMENT 79/80): framing vs the authored camera,
+npm run check:3d                    # 3D MODE (AMENDMENT 81/82): framing vs the authored camera,
                                     #   edge-case models, pixels on the rig, leak/toggle cycles
 bun scripts/transfer.mjs            # network button hit target + global AND per-server speed/ping/status readouts (needs the rig)
 bun scripts/network-panel.mjs       # network panel is an overlay: opens over / returns to the current page (needs the rig)

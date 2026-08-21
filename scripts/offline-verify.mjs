@@ -104,7 +104,7 @@ const fetchModel = (name) => page.evaluate(async (u) => {
 // -------------------------------------------- 1. poster camera policy
 //
 // SPEC AMENDMENT 6 overrode the original design: POSTERS ALWAYS AUTO-FIT.
-// Authored cameras drive the viewer, the live previews and (AMENDMENT 79)
+// Authored cameras drive the viewer, the live previews and (AMENDMENT 81)
 // the 3D cards/nodes — never the poster snapshot, which must show the whole
 // model so a card is never a mystery crop. These two checks still asserted
 // the pre-AMENDMENT-6 behaviour and had failed on every run for months,
