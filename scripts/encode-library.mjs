@@ -81,6 +81,10 @@ try {
       '--yes', '@gltf-transform/cli@4.1.2', 'optimize', src, dest,
       '--compress', 'draco',
       '--texture-compress', 'false',
+      // Colour is a UV into the palette texture (2026-08-21): a simplifier
+      // would interpolate those UVs and land vertices BETWEEN swatches, so
+      // decimation is off for the library. Same reason textures stay PNG.
+      '--simplify', 'false',
     ], { encoding: 'utf8', timeout: 120000 })
     if (run.status !== 0 || !existsSync(dest)) {
       skipped++

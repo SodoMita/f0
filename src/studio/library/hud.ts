@@ -59,7 +59,24 @@ const ICONS: Record<string, string> = {
   arrow3d: 'M12 20V6m0 0 4 4M12 6 8 10',
 }
 
+/**
+ * Voxel pieces get PIXEL icons: the same sprite the GLB is built from, as
+ * filled cells instead of a stroked outline (a stroked pixel grid is mush at
+ * 44 px). They render through `svg.pix` — fill, no stroke.
+ */
+const PIXEL_ICONS: Record<string, string> = {
+  invader: 'M4.36 3.27h2.18v2.18h-2.18zM17.45 3.27h2.18v2.18h-2.18zM6.55 5.45h2.18v2.18h-2.18zM15.27 5.45h2.18v2.18h-2.18zM4.36 7.64h15.27v2.18h-15.27zM2.18 9.82h4.36v2.18h-4.36zM8.73 9.82h6.55v2.18h-6.55zM17.45 9.82h4.36v2.18h-4.36zM0 12h24v2.18h-24zM0 14.18h2.18v2.18h-2.18zM4.36 14.18h15.27v2.18h-15.27zM21.82 14.18h2.18v2.18h-2.18zM0 16.36h2.18v2.18h-2.18zM4.36 16.36h2.18v2.18h-2.18zM17.45 16.36h2.18v2.18h-2.18zM21.82 16.36h2.18v2.18h-2.18zM6.55 18.55h4.36v2.18h-4.36zM13.09 18.55h4.36v2.18h-4.36z',
+  ghost: 'M8 0h8v2h-8zM4 2h16v2h-16zM2 4h20v2h-20zM0 6h24v2h-24zM0 8h2v2h-2zM10 8h4v2h-4zM22 8h2v2h-2zM0 10h2v2h-2zM10 10h4v2h-4zM22 10h2v2h-2zM0 12h2v2h-2zM10 12h4v2h-4zM22 12h2v2h-2zM0 14h2v2h-2zM10 14h4v2h-4zM22 14h2v2h-2zM0 16h24v2h-24zM0 18h24v2h-24zM0 20h24v2h-24zM0 22h6v2h-6zM8 22h8v2h-8zM18 22h6v2h-6z',
+  creep: 'M0 0h24v3h-24zM0 3h3v3h-3zM21 3h3v3h-3zM0 6h3v3h-3zM6 6h3v3h-3zM15 6h3v3h-3zM21 6h3v3h-3zM0 9h3v3h-3zM6 9h3v3h-3zM15 9h3v3h-3zM21 9h3v3h-3zM0 12h3v3h-3zM9 12h6v3h-6zM21 12h3v3h-3zM0 15h3v3h-3zM6 15h12v3h-12zM21 15h3v3h-3zM0 18h3v3h-3zM6 18h3v3h-3zM15 18h3v3h-3zM21 18h3v3h-3zM0 21h24v3h-24z',
+  grassblock: 'M0 0h24v3h-24zM0 3h24v3h-24zM0 6h3v3h-3zM6 6h6v3h-6zM15 6h3v3h-3zM21 6h3v3h-3zM0 9h3v3h-3zM21 9h3v3h-3zM0 12h3v3h-3zM6 12h3v3h-3zM15 12h3v3h-3zM21 12h3v3h-3zM0 15h3v3h-3zM21 15h3v3h-3zM0 18h3v3h-3zM9 18h3v3h-3zM15 18h3v3h-3zM21 18h3v3h-3zM0 21h24v3h-24z',
+  snake: 'M0 0h4v2h-4zM6 0h4v2h-4zM12 0h4v2h-4zM20 0h2v2h-2zM0 2h4v2h-4zM6 2h4v2h-4zM12 2h4v2h-4zM18 2h6v2h-6zM0 6h4v2h-4zM0 8h4v2h-4zM0 12h4v2h-4zM6 12h4v2h-4zM12 12h4v2h-4zM0 14h4v2h-4zM6 14h4v2h-4zM12 14h4v2h-4zM18 18h2v2h-2zM16 20h4v2h-4zM16 22h4v2h-4z',
+  sword: 'M10 0h2v2h-2zM10 2h4v2h-4zM8 4h6v2h-6zM8 6h6v2h-6zM8 8h6v2h-6zM8 10h6v2h-6zM8 12h6v2h-6zM4 14h16v2h-16zM10 16h4v2h-4zM10 18h4v2h-4zM10 20h4v2h-4zM8 22h8v2h-8z',
+  pixheart: 'M4.8 1.2h4.8v2.4h-4.8zM14.4 1.2h4.8v2.4h-4.8zM2.4 3.6h19.2v2.4h-19.2zM0 6h24v2.4h-24zM0 8.4h24v2.4h-24zM0 10.8h24v2.4h-24zM2.4 13.2h19.2v2.4h-19.2zM4.8 15.6h14.4v2.4h-14.4zM7.2 18h9.6v2.4h-9.6zM9.6 20.4h4.8v2.4h-4.8z',
+}
+
 function svgFor(id: string): string {
+  const pix = PIXEL_ICONS[id]
+  if (pix) return `<svg class="pix" viewBox="0 0 24 24" aria-hidden="true"><path d="${pix}"/></svg>`
   const d = ICONS[id] ?? 'M7 7h10v10H7z'
   return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg>`
 }
@@ -113,7 +130,9 @@ export function bindLibraryHud(studio: Studio, onChange: () => void, onError?: (
       const bytes = await libraryBytes(item)
       // Each placement takes its own color from the picker (AMENDMENT 68
       // corrected 2026-08-21): every symbol can carry a different color.
-      await studio.addLibraryItem(bytes, { faceCamera: item.dim === '2d', color: getColor?.() })
+      // `front` items (plates, face balls, voxel sprites) are authored facing
+      // +Z and must be turned to the camera or they land edge-on / backwards.
+      await studio.addLibraryItem(bytes, { faceCamera: item.front === true, color: getColor?.() })
       onChange()
     } catch (err) {
       // Never fail silently (AMENDMENT 68): a blocked Draco decoder, a bad

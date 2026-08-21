@@ -70,6 +70,12 @@ src/
                      cameras, text tool; camera stays where the user composed
                      it (explicit look-at-origin / look-at-center / fit-selected
                      buttons instead of auto-framing on import)
+    library/         the symbols tab: generated low-poly GLBs (face balls,
+                     voxel art, reactions, shapes, objects). Colour is a
+                     shared 32x32 PALETTE TEXTURE embedded in every piece and
+                     sampled NEAREST through a per-vertex UV — no COLOR_0
+                     (AMENDMENT 86). See library/README.md; authored by
+                     scripts/gen-library-glb.py + scripts/palette.py
   core/gfx.ts        flatCamera (THE orientation contract), backdrop/spotlight/
                      contact-shadow textures, colour helpers (shade/luminance)
   theme.ts           colors, LIMITS, DEFAULTS (relays/blossoms), kind numbers

@@ -1338,3 +1338,36 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     can never leave the controls locked (fallback clears busy, edits reset).
     Guards: `check:codec` fine-settings units + `check:codec-browser`
     (preview, dials, visibility).
+
+86. LIBRARY PALETTE TEXTURE + LOW-POLY FACES + VOXEL ART (2026-08-21): the
+    studio symbol library stops carrying colour per vertex. `scripts/palette.py`
+    defines 64 curated swatches and bakes them into a 32x32 PNG (8x8 grid,
+    4x4 px per swatch); `scripts/libglb.py` embeds that PNG in every generated
+    GLB's BIN chunk, binds it as `baseColorTexture` with a NEAREST sampler and
+    gives each vertex a `TEXCOORD_0` on its swatch centre — no `COLOR_0`, same
+    4 bytes per vertex, one art direction for the whole set. Colour is authored
+    as a palette NAME; a stray literal snaps to the nearest slot and the build
+    fails past 0.12. 4x4 swatches keep a lossy WebP re-encode or a stray
+    bilinear sample from bleeding between entries.
+    ART: faces are low-poly BALLS (once-subdivided icosahedra, 80 flat facets,
+    darker belly swatch) wearing flat palette patches laid onto the surface —
+    the flat smiley plates (including the traced `2d/smile.glb`) are gone. A
+    new `voxel` group ships greedy-meshed cube art: invader, ghost, creep,
+    grassblock, snake, sword, pixheart, authored as ASCII sprites extruded 2
+    deep. Voxels finish with `prefer="keep"` (exact winding, verified by the
+    signed volume) because the centroid "outward" test inverts every face
+    inside a notch. The manifest gains `front`, replacing the `dim === '2d'`
+    guess about which pieces must be turned to the camera when placed.
+    FIXED ALONG THE WAY: the writer put `byteStride` on the ACCESSOR — glTF has
+    no such field — so loaders read the padded NORMAL/TEXCOORD streams tightly
+    packed (shifted normals; UVs that tiled the palette into stripes). It
+    belongs on the bufferView. And the symbols tint picker defaults to WHITE:
+    pieces carry their own palette now, a neutral pick never overwrites the
+    post's `color` tag, and an untinted selection reports white instead of
+    leaking the studio accent into both pickers (which silently tinted the
+    second piece a player placed).
+    Guards: `node scripts/library-unit.mjs` (one embedded palette image per
+    piece, NEAREST, bound as baseColorTexture, <4 KiB, faces are 3d, voxel
+    group present, `front` flagged), `npm run check:symbols`, and
+    `node scripts/library-shot.mjs` (place pieces in a real browser and shoot
+    the canvas). Library 142 KiB after the Draco pass; standalone +34 KB.

@@ -32,6 +32,17 @@ export interface CameraState {
 const deg2rad = (d: number): number => (d * Math.PI) / 180
 const rad2deg = (r: number): number => (r * 180) / Math.PI
 
+/**
+ * White means "no tint": the library piece keeps the colours its palette
+ * texture was authored with (AMENDMENT 86). Such a pick must not become the
+ * post's `color` tag — that tag drives the card placeholder tint.
+ */
+const NEUTRAL_TINT = '#FFFFFF'
+
+function isNeutral(hex: string): boolean {
+  return /^#?f{3}$|^#?f{6}$/i.test(hex.trim())
+}
+
 function normalizeYaw(deg: number): number {
   let y = deg % 360
   if (y > 180) y -= 360
@@ -234,12 +245,18 @@ export class Studio {
   /**
    * Return the color of the selected item (symbol or text), or null when the
    * selection is something we do not colour (an imported model mesh).
+   *
+   * A library piece placed with no explicit tint reports NEUTRAL white
+   * (AMENDMENT 86) — it is showing its own palette texture, not the studio
+   * accent. Reporting the accent here used to leak it into the pickers, so
+   * the second piece a player placed came out tinted even though they never
+   * touched the colour control.
    */
   getSelectedColor(): string | null {
     if (this.textMesh && this.selection === this.textMesh.mesh) return this.textColor
     if (this.selection) {
       const extra = this.extras.find((c) => c.meshes.includes(this.selection!) || c.rootNodes.includes(this.selection!))
-      if (extra) return this.extraColors.get(extra) ?? this.tint
+      if (extra) return this.extraColors.get(extra) ?? NEUTRAL_TINT
     }
     return null
   }
@@ -636,11 +653,13 @@ export class Studio {
       }
     }
     const color = opts?.color ?? ''
-    if (color) {
+    if (color && !isNeutral(color)) {
       this.extraColors.set(container, color)
       // The event `color` tag is a single value per post; let it follow the
       // most recently placed symbol so a symbol-heavy post carries a
-      // representative tint (AMENDMENT 68 corrected 2026-08-21).
+      // representative tint (AMENDMENT 68 corrected 2026-08-21). A NEUTRAL
+      // (white) pick means "no tint, show the authored palette", so it must
+      // not overwrite the post's colour tag with white.
       this.tint = color
     }
     const tint = color || this.tint
@@ -656,15 +675,16 @@ export class Studio {
   }
 
   /**
-   * Colour a library mesh by modulating the vertex colours with the studio
-   * tint. The GLBs carry per-vertex COLOR_0 (VEC4), which the glTF loader
-   * maps to `useVertexColors` + `hasVertexAlpha`; the old code cleared both
-   * flags and used emissive = tint, which entirely replaced the model's
-   * colours. Now vertex colors STAY ON and the tint multiplies through
-   * albedo, so the original vertex colours remain visible — a neutral grey
-   * tint (50%) leaves them largely intact, and a coloured tint shifts the
-   * hue without losing the shape's shading (AMENDMENT 68, corrected
-   * 2026-08-20).
+   * Colour a library mesh by modulating its material with the studio tint.
+   *
+   * Library pieces carry their colour in the shared PALETTE TEXTURE
+   * (AMENDMENT 86, 2026-08-21): a 32x32 PNG inside the GLB, one 4x4 swatch per
+   * palette slot, sampled NEAREST through a UV per vertex. Babylon multiplies
+   * `albedoColor` INTO `albedoTexture`, so the tint modulates the palette the
+   * same way it used to modulate COLOR_0 — and the neutral white default
+   * shows the art exactly as authored. Vertex colours stay enabled because
+   * user-imported meshes (and the older traced 2D plates) still use them; a
+   * mesh without COLOR_0 simply ignores the flag.
    */
   private tintMesh(mesh: AbstractMesh, seen: Set<Material>, color: string): void {
     mesh.useVertexColors = true

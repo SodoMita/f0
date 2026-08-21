@@ -1222,6 +1222,9 @@ body[data-theme="light"] .mi-meter { background: rgba(0, 0, 0, 0.10); }
 }
 .symbol-cells button:hover { border-color: var(--accent); }
 .symbol-cells button svg { width: 100%; height: 100%; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+/* Voxel pieces show their own sprite as filled cells — a stroked pixel grid
+   turns to mush at this size. */
+.symbol-cells button svg.pix { fill: currentColor; stroke: none; shape-rendering: crispEdges; }
 .cam-advanced { border-top: 1px solid var(--line); padding-top: 8px; }
 .cam-advanced > summary { cursor: pointer; font: 11px ui-monospace,monospace; color: var(--muted); margin-bottom: 8px; }
 .num-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 6px; margin-bottom: 8px; }
