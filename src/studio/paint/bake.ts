@@ -18,9 +18,7 @@ const tmpV = new Vector3()
  * One mesh per shape (vertex colours carry ink). Caller disposes the result.
  */
 export function bakeStamps(scene: Scene, store: StampStore, sources: Map<ShapeKind, Mesh>): Mesh[] {
-  const buckets: Record<ShapeKind, Stamp[]> = {
-    cube: [], sphere: [], cylinder: [], tetra: [], quad: [],
-  }
+  const buckets = Object.fromEntries(SHAPES.map((shape) => [shape, [] as Stamp[]])) as unknown as Record<ShapeKind, Stamp[]>
   for (let i = 0; i < store.count; i++) {
     const s = store.at(i)
     buckets[s.shape].push(s)
