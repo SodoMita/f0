@@ -40,13 +40,30 @@
 
 ## Verification (mandatory)
 
-Run in order before claiming done:
+One command is the gate (and what PR CI runs — `.github/workflows/ci.yml`):
 
 ```bash
-bun run build
-bun scripts/smoke.mjs
-bun scripts/features.mjs
+bun run check
+```
+
+Tiers:
+
+| Command | What it runs | When |
+|---|---|---|
+| `bun run check:static` | `tsc --noEmit` + normal build + standalone build | every PR |
+| `bun run check:unit` | pure-logic unit files (`scripts/check-units.mjs` manifest) | every PR |
+| `bun run check:e2e` | smoke + features + offline-verify vs the offline rig (`scripts/run-e2e.mjs`) | every PR |
+| `bun run check:perf` | perf harness, enforces the stable budgets below | nightly / before release |
+| `bun run check` | static + unit + e2e | full gate |
+
+Area-specific probes still run by hand when touching those areas:
+
+```bash
+bun scripts/orient.mjs              # mirror/orientation guard (exits 1 on a mirror)
+bun scripts/interact.mjs            # thread pan/pinch/zoom + taps
 bun scripts/capture.mjs && python3 scripts/visual_critique.py
+bun scripts/shaders.mjs             # shader recompile guard
+bun scripts/settings.mjs            # settings reach real engine state
 ```
 
 - Visual claims require screenshots **and** the critique output (agents have no
@@ -117,18 +134,19 @@ Rules of thumb learned the hard way:
 
 ## Performance budget (round 5)
 
-`node scripts/perf.mjs` writes `shots/perf.json`. Keep these in range on the
-headless SwiftShader baseline (1280x800); they are ratios, not absolutes, so
-they hold on real GPUs too:
+`bun run check:perf` writes `shots/perf.json`. Stable budgets FAIL the run
+(non-zero exit); the noisy ones are reported but not enforced (they need a
+median-of-3 comparison on a scheduled run, not a per-PR gate):
 
-| Metric | Budget |
-|---|---|
-| `idleBoard.rendersPerSec` (static board) | 0 (the loop is demand-driven) |
-| `board.frameMs.p95` | < 25 ms |
-| `stress.scrolling.p95` (48 cards, continuous fling) | < 120 ms |
-| `boot.firstCardMs` (production build) | < 1.5 s |
-| `counts.modelBytesInMemory` | < 48 MiB |
-| JS bundle | < 1.5 MB raw / 400 kB gzip |
+| Metric | Budget | Enforced |
+|---|---|---|
+| `idleBoard.rendersPerSec` (static board) | 0 (the loop is demand-driven) | **fail** |
+| `counts.modelBytesInMemory` | < 48 MiB | **fail** |
+| `stress.spinnersLeft` (after 48-card stress) | 0 | **fail** |
+| `board.frameMs.p95` | < 25 ms | report |
+| `stress.scrolling.p95` (48 cards, continuous fling) | < 120 ms | report |
+| `boot.firstCardMs` (production build) | < 1.5 s | report |
+| JS bundle | < 1.5 MB raw / 400 kB gzip | report |
 
 If a number regresses, look for: a latched activity probe, a texture upload in
 a per-frame path, work queued for offscreen cards, or a new barrel import.

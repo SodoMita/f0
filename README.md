@@ -285,6 +285,7 @@ mismatch any page background.
 ## Run (Bun)
 ```bash
 bun install
+bun run check            # the gate: static + unit + browser (offline rig)
 bun run dev              # http://localhost:5173
 bun run build            # typecheck + normal build → release/
 bun run build:standalone # ONE .html → form-zero-standalone.html

@@ -1278,3 +1278,25 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     doNotRecurse — release must recurse or orient/fit leak. The glTF loader
     auto-starts animation group 0; the pool stops it so play/pause own
     playback. Contact shadow uses the model's real footprint in the cell.
+82. POSTER AUTHORED-CAMERA FRUSTUM TEST USED A STALE MATRIX (2026-08-21):
+    cameraFramesBox() called cam.getTransformationMatrix(), which multiplies
+    the CACHED view and projection matrices — still identity for a
+    freshly-loaded glTF camera that has never rendered. The frustum test
+    therefore always reported "camera misses the model" and every poster fell
+    back to auto-fit, silently ignoring AMENDMENT 6's authored-camera policy.
+    The fix builds the view-projection fresh (getViewMatrix() ×
+    getProjectionMatrix()) and uses the standard AABB-vs-frustum test, which
+    also rejects boxes fully behind the camera (a hand-rolled NDC projection
+    flips behind-camera points and misclassified the blank camera, model 'f',
+    as framing the model). Guard: scripts/offline-verify.mjs §1 (poster
+    camera policy) — authored camera must frame only the authored view, and a
+    camera that frames nothing must fall back to auto-fit.
+83. BOARD CARD CROSSFADE NOT SNAPPED BY A FAST LIVE RTT (2026-08-21): the
+    shared preview pool (AMENDMENT 80) can re-load a cached live RTT in under
+    the 120 ms poster crossfade. When onLive fired mid-fade, crossfadeTo()
+    called finishFade(), snapping opacity to 1 and cutting the plate->poster
+    fade-in short (a real instant-swap glitch, not just a test artifact).
+    Fix: the board defers a live RTT that arrives during a crossfade onto
+    slot.pendingLive and binds it in the tick loop once the fade completes;
+    onRelease clears it. Guard: scripts/offline-verify.mjs §1b "board card
+    crossfades over >=60ms".
