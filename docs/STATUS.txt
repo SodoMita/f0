@@ -16,6 +16,16 @@ sidecar import branch merged and hardened (local-only, bounded, validate-first) 
 AES-GCM deletion-key envelopes · schema-validated persisted settings · data-URI
 texture decoded-memory guards.
 
+3D MODE FIXED (2026-08-21, AMENDMENT 79): the board and the thread tree now
+show each post through its model's MAIN CAMERA — authored view matrix ->
+model transform, camera frame height -> cell height, crop planes instead of
+shrink-to-fit, auto-fit only as the fallback (src/model/framing.ts). Also:
+noteMeta() so 3D-only posts can download at all (thread replies never went
+3D), loader-started animations stopped when autoplay is off, frames kept
+coming until model shaders are ready (blank cards), overlays depth-independent
+so models cannot cover their own buttons. Guards: check:direct3d-camera
+(headless math) + scripts/direct3d-camera.mjs (pixels vs the offline rig).
+
 INCIDENT LOG: Pages had a 503 outage (artifact fine, re-run); main was once
 force-pushed away and restored — unlanded work kept on salvage/dev-rewrite
 (publish.ts, textMesh.ts, gui experiments); CHERRY-PICK from there, don't
@@ -31,8 +41,9 @@ NEXT — EDITOR CORE FIRST (primary use cases):
  4 phone-pose camera while recording (DeviceOrientation rotation; WebXR for
    position; sync pose+audio on one clock -> glTF camera anim)
 
-REST: 3D thread view mode (AMENDMENT 39: 2D posters / tree / 3D models with
-the main-camera-as-model-transform rule) · VR support (AMENDMENT 37, WebXR
+REST: thread view MODE PICKER (AMENDMENT 43 wants 2D posters / tree / 3D as
+a settings choice; today the tree is the layout and 3D is a global toggle —
+the main-camera-as-model-transform rule itself is done, AMENDMENT 79) · VR support (AMENDMENT 37, WebXR
 viewer) · new settings entries (thread mode + VR toggle into the schema) ·
 low-poly text geometry · tests (Vitest + Playwright).
 

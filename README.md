@@ -12,15 +12,19 @@ and optional embedded audio.
   later cards; PageUp/PageDown/Home/End; **scroll inertia** (configurable).
   Tap a card → viewer; the **reply badge (↩ N)** at the card's bottom-right is
   the reply button → thread.
-- **Thread**: a 2D map of the reply tree — framed node cards + elbow connectors
+- **Thread**: a map of the reply tree — framed node cards + elbow connectors
   in a tidy top-down tree, accent-outlined root. Drag pans, **pinch zooms**,
   wheel zooms about the cursor, `0` re-fits, tapping a node opens it.
-  **Planned modes** (a settings choice, spec AMENDMENT 43): 2D posters (now) ·
-  tree view · **3D** — the actual GLB models instead of poster textures. In 3D
-  each node shows its real model through the model's own MAIN camera, applied
-  as the model's transform vs a static thread camera (the camera is just a
-  position) — when a model is centered, the thread view matches the model's
-  main-camera view.
+- **3D mode** (topbar cube / settings → Interface → "Show posts as 3D models",
+  spec AMENDMENTS 43, 75, 79): the board AND the thread tree drop posters and
+  render each post's actual GLB in the visible scene. Every model is shown
+  **through its own MAIN camera**, applied as the MODEL's transform against
+  the static flat camera (the camera is "just a position"): the model is
+  pivoted at the camera, rotated by the inverse of the camera's rotation and
+  scaled so the camera's frame height at the model's depth maps onto the card,
+  then cropped to the card's edges the way a poster is. A centered card is
+  therefore exactly the model's main-camera view. Models without a usable
+  camera auto-fit like a poster (`src/model/framing.ts`).
 - **Viewer**: one interactive model; orbit camera (A) or the model's own
   cameras via dots / C; play/pause (A); metadata drawer (M); download; thread
   (T); prev/next. **VR** (spec AMENDMENT 41): an enter-VR action puts the
@@ -280,7 +284,11 @@ mismatch any page background.
   never compiled materials on this driver → render via `camera.outputRenderTarget`
   + `scene.render()`; (b) `whenReadyAsync()` on a never-rendered scene hangs →
   removed; (c) environment-texture IBL blackened PBR → removed, lights-only.
-- Poster thumbnails always auto-fit (authored cameras belong in the viewer).
+- Poster thumbnails always auto-fit (AMENDMENT 6). Authored cameras drive the
+  viewer, live previews and **3D-mode cards/nodes** — where AMENDMENT 79 turns
+  the camera's whole view (position + framing, not just its rotation) into the
+  model's transform, so a 3D card shows what the author framed instead of a
+  shrunken auto-fit of the entire file.
 
 ## Run (Bun)
 ```bash
@@ -293,6 +301,8 @@ bun scripts/orient.mjs   # orientation guard (raw/dyn/rtt probes) — exits 1 on
 bun scripts/interact.mjs # thread pan/pinch/zoom + tap targets
 bun scripts/smoke.mjs    # headless boot + layout/poster/live/click/scroll
 bun scripts/features.mjs # badges + thread view + settings assertions
+bun scripts/direct3d-camera-unit.mjs   # 3D framing vs the authored view matrix
+node scripts/direct3d-camera.mjs       # 3D pixels (needs the offline rig)
 ```
 
 ## Structure
@@ -300,7 +310,8 @@ bun scripts/features.mjs # badges + thread view + settings assertions
 src/
   core/      engine (1 canvas/1 context), router, assets (poster/model cache)
   protocol/  nostr (Relay pool + backoff), blossom (SHA-256 verified), events, storage
-  model/     draco (local), limits (pre-load GLB validation), facing, poster
+  model/     draco (local), limits (pre-load GLB validation), facing, framing
+             (3D-mode main-camera framing), poster
   core/gfx   flatCamera (orientation contract), backdrops, contact shadows
   board/     board (responsive grid + badges + inertia), threadView (tidy tree map,
              native pan/pinch), cardMaterial (unlit quad shader), previewPool (RTT slots)
@@ -312,8 +323,9 @@ src/
 
 Editor core first (the product's primary use cases): **paint editor for
 hand-writing text** → **animation editor** → **audio recording** → **phone-pose
-camera while recording**. Then: 3D thread view mode, VR support (WebXR), new
-settings entries (thread mode + VR toggle), low-poly text geometry, and the
+camera while recording**. Then: the thread MODE PICKER (2D posters / tree / 3D
+as a settings choice — the 3D rendering itself is done), VR support (WebXR),
+new settings entries (thread mode + VR toggle), low-poly text geometry, and the
 Vitest + Playwright suite. See `docs/STATUS.md` for the full board.
 
 ## Docs for agents

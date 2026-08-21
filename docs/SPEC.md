@@ -1205,3 +1205,79 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     while another view owns the canvas (bind/tap respect the flag); studio
     camera attaches only in `attach()`/`detach()`. Poster queue pauses in
     studio/viewer. Guard: `node scripts/studio-open.mjs`.
+
+79. 3D MODE REALLY IS THE MODEL'S MAIN-CAMERA VIEW (2026-08-21): AMENDMENT
+    43/75 promised that a 3D board card / thread node shows the post's real
+    model THROUGH THE MODEL'S MAIN CAMERA. Only the camera's ROTATION was
+    applied. Everything else about the view — where the camera stands, how
+    much of the model it frames, what it leaves out of frame — was thrown
+    away and replaced with a bounding-box auto-fit of the WHOLE file, then
+    shrunk again by the depth budget. Result on screen: a tiny, off-centre
+    speck of the entire scene (a model whose author framed one prop in
+    close-up rendered every other prop too, at ~28% of the card).
+    The framing now lives in `src/model/framing.ts`:
+    - `frameModel()` takes the authored camera's VIEW matrix as the ground
+      truth: `pivot` = the camera's position, `rot` = the inverse of its
+      rotation, `frameHeight` = the camera's frame height AT THE MODEL's
+      depth (ortho cameras use orthoTop-orthoBottom). A sanity probe checks
+      that `(v - pivot)·rot` really reproduces `v·view` — Babylon's glTF
+      loader mirrors the imported scene and gives cameras
+      `ignoreParentScaling`, so a hand-derived rotation can silently
+      disagree — and falls back to auto-fit if it does not.
+    - The scale reference uses ONLY the meshes the camera actually sees
+      (per-mesh projection test against the frame). A prop parked outside
+      the frame used to drag the reference depth out with it and turned a
+      close-up into a distant speck.
+    - `placeFrame()` maps that frame onto the card/node cell: cell height =
+      frame height, so the model is exactly as large — and as off-centre —
+      as the author framed it. The optical axis lands at the centre of the
+      cell ("the flat camera is just a position").
+    - No camera, a camera that frames nothing (aimed away, tiny fov, model
+      behind the lens), or a view matrix that fails the probe → auto-fit,
+      at `AUTOFIT_FILL` 0.86, the same fill the poster pipeline uses, so
+      toggling 2D↔3D does not resize the model.
+    - Geometry outside the authored frame is CROPPED by four world-space
+      clip planes on the model's materials (`makeCellClip`/`updateCellClip`,
+      updated on every scroll/pan) — a poster is cut off by the card's
+      edges, so a real model must be too. Shrinking the model to swallow
+      out-of-frame props (the old behaviour) destroys the framing.
+    - Uniform scale now lives on the ROOT node. It used to sit on the `fit`
+      node, whose own position is applied AFTER its scaling, so any model
+      whose bounds were not centred on the origin was displaced by
+      pivot·(1-scale) and drifted off its card ("positions off sometimes").
+    - A model deeper than the cell's depth budget slides TOWARD the camera
+      (free in an orthographic view, capped at 40 units so it cannot cross
+      the near plane) instead of being scaled down to fit.
+    Three more bugs the pixel checks exposed on the way:
+    - `AssetCache` only knew a post's metadata if its POSTER had been
+      requested, because `getPoster()` was the only writer of `byPostId`.
+      In 3D mode no poster is ever requested, so thread replies (and cards
+      scrolled in while the toggle was on) failed with "download failed",
+      latched as rejected and fell back to 2D forever. `noteMeta()` is now
+      called before every direct-3D request.
+    - The glTF loader auto-starts the first animation group
+      (`animationStartMode` defaults to FIRST). With autoplay OFF the model
+      still animated, and since `slot.playing` was false nothing could ever
+      pause it. The pool stops every group at load; play()/pause() own
+      playback from then on.
+    - Demand-driven rendering + first-render shader compilation = blank
+      cards: the frame that places a model draws nothing (its effect is
+      still compiling) and nothing asks for another frame. `hasWork()` now
+      reports work until every visible model's effects are ready, INCLUDING
+      the poll that flips them ready (that frame is the one that draws it),
+      with a 10 s deadline so a broken effect cannot pin the render loop.
+    - AMENDMENT 76's "overlays are always on top" only fixed the transparent
+      SORT; the depth test still ran (group 1 does not clear depth). A
+      poster has no depth, but a real model does, so a model sticking out
+      toward the camera covered its own ▶ button. Overlay materials
+      (`makeOverlayMaterial`) use `depthFunction = ALWAYS`; they never write
+      depth, so ignoring it is safe and is what 76 always meant.
+    Guards: `bun scripts/direct3d-camera-unit.mjs` (headless: the placed
+    model must match the authored camera's own view matrix — orientation,
+    size and composition — for camera 0, for a `preview-camera` index, and
+    after a re-place into another cell; auto-fit fallbacks stay centred and
+    inside the cell) and `node scripts/direct3d-camera.mjs` (pixels, against
+    the offline rig: the camera-framed flavour `a` must render RED and NO
+    green on the board AND in the thread, flavour `d` must honour
+    preview-camera=1 and render GREEN, and a model must stay centred and
+    cropped in its card while the feed scrolls).

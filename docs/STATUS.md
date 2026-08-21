@@ -4,6 +4,34 @@ Claim a task by moving it to **In progress** with your name/date, push, then
 move it to **Done** with a commit reference. One agent per area.
 
 ## Done
+- [x] **3D mode now really shows the model's MAIN CAMERA view** (agent arena,
+      2026-08-21, SPEC AMENDMENT 79): with "Show posts as 3D models" on, a
+      board card / thread node applied only the authored camera's ROTATION
+      and then auto-fitted the whole file's bounding box (further shrunk by
+      the depth budget), so cards showed a tiny off-centre speck of
+      everything the GLB contains instead of the view the author framed.
+      Framing moved to `src/model/framing.ts`: the authored camera's VIEW
+      matrix drives pivot + rotation, the camera's frame height at the
+      model's depth maps onto the cell height, only the meshes the camera
+      SEES set that depth, out-of-frame geometry is CROPPED by per-cell clip
+      planes (like a poster), deep models slide toward the camera instead of
+      shrinking, and the uniform scale moved to the root node (on `fit` it
+      was applied before that node's own position, so off-origin models
+      drifted off their card). No/blind camera → the poster's auto-fit at
+      0.86 fill. Same fix serves the board and the thread tree.
+      Four bugs found on the way: `AssetCache.byPostId` was only filled by
+      `getPoster()`, so 3D-only posts (every thread reply) failed to
+      download and latched back to 2D — `noteMeta()` now registers them; the
+      glTF loader's auto-started animation groups are stopped so autoplay
+      OFF means off; `Direct3DPool.hasWork()` keeps demand-driven frames
+      coming until each model's shaders are ready (otherwise cards stay
+      blank on a settled board); group-1 overlays use `depthFunction=ALWAYS`
+      so a model with real depth cannot cover its own ▶ button (AMENDMENT
+      76 only fixed the transparent sort). Guards:
+      `bun scripts/direct3d-camera-unit.mjs` (framing vs the authored view
+      matrix) and `node scripts/direct3d-camera.mjs` (pixel census against
+      the offline rig, board + thread + scroll).
+
 - [x] **Studio left the board clickable** (agent arena, 2026-08-21, SPEC
       AMENDMENT 78): opening the studio left board-only topbar controls
       (search / shuffle / 3D / create) clickable over the editor, a live

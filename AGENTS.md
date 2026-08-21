@@ -76,11 +76,17 @@ bun run build:standalone  # ONE self-contained form-zero-standalone.html
    posters/previews). See `poster.ts` / `previewPool.ts`.
 5. **No `scene.environmentTexture` (IBL)** — it rendered every PBR model black.
    Lights-only rig (hemispheric + directional + fill).
-6. **Posters use the model's authored camera when it has one** (the poster
-   must show the view the author framed); auto-fit (`worldBounds` +
-   `dominantFacing` + `fitDistance` in `model/facing.ts`) is the fallback for
-   models without a camera. Live previews follow the same policy
-   (`preview-camera` index → first imported camera → auto-fit).
+6. **The model's authored MAIN camera is the framing** — the view the author
+   composed must be what the user sees. It drives live previews, the viewer,
+   and 3D-mode cards/nodes, where it is applied as the MODEL's transform
+   against the static flat camera (`model/framing.ts`: pivot = camera
+   position, rotation = inverse camera rotation, the camera's frame height at
+   the model's depth = the cell height, four clip planes crop the model to
+   its card — spec AMENDMENT 79). The camera comes from the `preview-camera`
+   index → first imported camera. Auto-fit (`worldBounds` + `dominantFacing`
+   + `fitDistance` in `model/facing.ts`, 0.86 fill) is the fallback whenever
+   there is no usable camera — and, per AMENDMENT 6, is what POSTER
+   thumbnails always use.
 7. **Display rendering is double-sided** (`backFaceCulling = false`) so flat
    text/models are never invisible; never modify the source GLB.
 8. **Side-effect imports** are required for `scene.pick` (`@babylonjs/core/Culling/ray`)

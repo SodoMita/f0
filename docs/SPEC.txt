@@ -60,3 +60,20 @@ settings/network shapes are schema/type/range validated; sidecar imports are
 local-only and preflighted (128 files/20 MiB, GLB validate-before-load,
 glTF/OBJ complexity caps); embedded and data-URI image dimensions/MIME/decoded
 memory are checked before decode, with SVG/unknown formats failing closed.
+79 3D MODE = THE MODEL'S MAIN-CAMERA VIEW (the AMENDMENT 43 rule, now
+actually implemented): a 3D card/node is built from the authored camera's
+VIEW matrix — model pivoted at the camera position, rotated by the inverse of
+its rotation, scaled so the camera's frame height AT THE MODEL'S DEPTH maps
+onto the cell height (ortho cameras: orthoTop-orthoBottom). The optical axis
+lands at the cell centre; the flat camera stays "just a position". Only the
+meshes the camera SEES set the reference depth, geometry outside the frame is
+CROPPED by per-cell clip planes (a poster is cropped by the card too), and a
+deep model slides toward the camera instead of shrinking. No/blind camera ->
+auto-fit at 0.86 fill = the poster's fill. Scale lives on the ROOT node (on
+`fit` it was applied before that node's own position -> off-centre models).
+Also fixed: byPostId is populated by noteMeta() (3D never asks for a poster,
+so replies could not download at all), loader-auto-started animation groups
+are stopped (autoplay off must mean off), hasWork() keeps frames coming until
+shaders are ready (else cards stay blank on a settled board), overlays use
+depthFunction ALWAYS (a model with real depth covered its own buttons).
+Guards: bun scripts/direct3d-camera-unit.mjs · node scripts/direct3d-camera.mjs.
