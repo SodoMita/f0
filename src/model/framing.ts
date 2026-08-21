@@ -3,7 +3,7 @@ import { Plane } from '@babylonjs/core/Maths/math.plane'
 import { Camera } from '@babylonjs/core/Cameras/camera'
 import type { AssetContainer } from '@babylonjs/core/assetContainer'
 import type { AbstractMesh } from '@babylonjs/core/Meshes/abstractMesh'
-import { worldBox, dominantFacing } from './facing'
+import { worldBox, dominantFacing, frameDistance } from './facing'
 
 /**
  * 3D-MODE FRAMING (spec AMENDMENT 43 / 75).
@@ -33,9 +33,15 @@ import { worldBox, dominantFacing } from './facing'
  * cell).
  */
 
-/** How much of the cell an auto-fit model spans. Matches the poster/preview
- *  pipeline's `frameDistance(..., fill)` so toggling 2D↔3D keeps the size. */
+/** Fill passed to `frameDistance()` when building the auto-fit camera — the
+ *  SAME call, with the same value, that the poster pipeline makes, so a
+ *  camera-less post is exactly the same size in 2D and in 3D. (Note it is not
+ *  "86% of the card": frameDistance fits the model's NEAREST corners into the
+ *  frustum, so a deep model legitimately ends up smaller. Reproducing the
+ *  poster is the point.) */
 export const AUTOFIT_FILL = 0.86
+/** Vertical fov of the poster/preview camera (model/poster.ts, previewPool). */
+const AUTOFIT_FOV = 0.7
 /** Containment for AUTO-FIT models: they are framed by us, so they simply fit.
  *  Camera-framed models are cropped by the cell instead (see makeCellClip) —
  *  exactly what a poster does — because shrinking them to swallow geometry
@@ -54,9 +60,12 @@ export interface ModelFrame {
   /** Bounds of the model AFTER pivot+rot, BEFORE scale ("card space"). */
   min: Vector3
   max: Vector3
-  /** Height, in card-space units, that maps onto the full cell height.
-   *  null = auto-fit (the fit is derived from the bounds instead). */
-  frameHeight: number | null
+  /** Height, in card-space units, that maps onto the full cell height. */
+  frameHeight: number
+  /** true = the model's own authored camera; false = the auto-fit camera we
+   *  built for it (the poster's). Authored framings are never rescaled to
+   *  contain the model — they are cropped, like a poster. */
+  authored: boolean
 }
 
 /** Placement result: the transform for the root → orient → fit chain. */
@@ -113,21 +122,39 @@ function orientedBounds(
 }
 
 /**
- * Auto-fit frame: the model's dominant face turned toward the viewer, the
- * exact inverse of the camera the poster pipeline would build. A
- * `FromUnitVectorsToRef(facing, -Z)` shortcut is NOT equivalent — for
- * opposite vectors it picks an arbitrary 180° axis and flat models come out
- * upside-down or mirrored (the "inverted models" regression).
+ * Auto-fit frame: BUILD the camera the poster pipeline would build and then
+ * frame through it, exactly like an authored one. Dominant face toward the
+ * viewer, `frameDistance()` for the distance (same fov, same fill, aspect of
+ * the cell) — so a camera-less post is the same size on a poster and on a 3D
+ * card. Fitting the oriented box to a fraction of the cell instead looked
+ * right but was 65% too big for deep models: frameDistance fits the NEAREST
+ * corners, not the bounding box at its centre depth.
+ *
+ * `LookAtLH(eye=facing, target=0)` IS the inverse of that camera's world
+ * rotation. A `FromUnitVectorsToRef(facing, -Z)` shortcut is NOT equivalent —
+ * for opposite vectors it picks an arbitrary 180° axis and flat models come
+ * out upside-down or mirrored (the "inverted models" regression).
  */
-function autoFitFrame(container: AssetContainer, box: { min: Vector3; max: Vector3; center: Vector3 }): ModelFrame {
+function autoFitFrame(
+  container: AssetContainer,
+  box: { min: Vector3; max: Vector3; center: Vector3 },
+  aspect: number,
+): ModelFrame {
   const facing = dominantFacing(container).normalizeToNew()
   const up = Math.abs(facing.y) > 0.99 ? new Vector3(0, 0, 1) : Vector3.Up()
   const view = new Matrix()
   Matrix.LookAtLHToRef(facing, Vector3.Zero(), up, view)
   const rot = new Quaternion()
   Quaternion.FromRotationMatrixToRef(view, rot)
-  const bounds = orientedBounds(box, box.center, rot)
-  return { rot, pivot: box.center.clone(), min: bounds.min, max: bounds.max, frameHeight: null }
+  // The poster's camera: on the facing side, far enough to frame the model.
+  const dist = frameDistance(box.min, box.max, box.center, facing.scale(-1), AUTOFIT_FOV, aspect, AUTOFIT_FILL)
+  const pivot = box.center.add(facing.scale(dist))
+  const bounds = orientedBounds(box, pivot, rot)
+  const depth = (bounds.min.z + bounds.max.z) / 2
+  // Same rule as an authored camera: the frame height at the model's depth
+  // maps onto the cell height.
+  const frameHeight = 2 * Math.max(1e-4, depth) * Math.tan(AUTOFIT_FOV / 2)
+  return { rot, pivot, min: bounds.min, max: bounds.max, frameHeight, authored: false }
 }
 
 /** World-space AABB of one mesh, expressed in card space ((v - pivot)·rot). */
@@ -181,8 +208,9 @@ function projectsIntoFrame(
  */
 export function frameModel(container: AssetContainer, cameraIndex: number, cellAspect = 1.6): ModelFrame {
   const box = worldBox(container)
+  const aspect = Math.max(0.2, Math.min(5, cellAspect))
   const authored = pickCamera(container, cameraIndex)
-  if (!authored) return autoFitFrame(container, box)
+  if (!authored) return autoFitFrame(container, box, aspect)
 
   // Camera.computeWorldMatrix() takes no arguments (it only reads the cached
   // matrix) — force the recompute through the Node-level method, or a camera
@@ -204,14 +232,13 @@ export function frameModel(container: AssetContainer, cameraIndex: number, cellA
   const viaView = Vector3.TransformCoordinates(probe, view)
   const viaFrame = Vector3.TransformCoordinates(probe.subtract(pivot), rotM)
   if (Vector3.Distance(viaView, viaFrame) > 1e-3 * (1 + probe.length())) {
-    return autoFitFrame(container, box)
+    return autoFitFrame(container, box, aspect)
   }
 
-  const aspect = Math.max(0.2, Math.min(5, cellAspect))
   const tanY = Math.tan(Math.max(0.01, authored.fov || 0.7) / 2)
   const ortho = authored.mode === Camera.ORTHOGRAPHIC_CAMERA
   const orthoHalfH = ortho ? Math.abs(((authored.orthoTop ?? 1) - (authored.orthoBottom ?? -1)) / 2) : null
-  if (ortho && !(orthoHalfH! > 1e-6)) return autoFitFrame(container, box)
+  if (ortho && !(orthoHalfH! > 1e-6)) return autoFitFrame(container, box, aspect)
 
   // Scale reference = only what the camera actually SEES. A prop parked
   // outside the frame (or behind the lens) must not drag the reference depth
@@ -228,38 +255,39 @@ export function frameModel(container: AssetContainer, cameraIndex: number, cellA
   }
   // A camera that frames NOTHING (parked far away, aimed elsewhere, tiny fov)
   // gets the poster's treatment: auto-fit, never a blank card.
-  if (!visible) return autoFitFrame(container, box)
+  if (!visible) return autoFitFrame(container, box, aspect)
 
   const depth = (min.z + max.z) / 2
-  if (!ortho && !(depth > 1e-4)) return autoFitFrame(container, box)
+  if (!ortho && !(depth > 1e-4)) return autoFitFrame(container, box, aspect)
   const frameHeight = ortho ? orthoHalfH! * 2 : 2 * depth * tanY
-  if (!(frameHeight > 1e-6)) return autoFitFrame(container, box)
+  if (!(frameHeight > 1e-6)) return autoFitFrame(container, box, aspect)
   // Nothing but an invisible speck in the frame: auto-fit instead.
   const span = Math.max((max.x - min.x) / (frameHeight * aspect), (max.y - min.y) / frameHeight)
-  if (span < 0.02) return autoFitFrame(container, box)
+  if (span < 0.02) return autoFitFrame(container, box, aspect)
 
-  return { rot, pivot, min, max, frameHeight }
+  return { rot, pivot, min, max, frameHeight, authored: true }
 }
 
 /**
  * Place a framed model into a cell: uniform scale + position for the chain
  * root(scale, position) → orient(rot) → fit(-pivot).
  *
- * Camera framing maps the authored frame height onto the cell height, so the
- * model appears exactly as large — and as off-centre — as the author framed
- * it. Auto-fit spans `AUTOFIT_FILL` of the cell like a poster. Either way the
- * model is then contained: never wider/taller than its own cell, and shifted
- * toward the camera (free in an ortho view) rather than shrunk when it is
- * deeper than the cell's depth budget.
+ * Both framings work the same way: the camera's frame height at the model's
+ * depth maps onto the cell height, so the model appears exactly as large —
+ * and as off-centre — as that camera frames it. The difference is what
+ * happens when the model does not fit: an AUTHORED framing is cropped by the
+ * cell (a poster is too), an AUTO-FIT one is nudged/shrunk back in, since we
+ * chose it. Depth is handled by sliding the model toward the camera (free in
+ * an ortho view) rather than scaling it down.
  */
 export function placeFrame(frame: ModelFrame, cell: FrameCell): FramePlacement {
   const extX = Math.max(1e-4, frame.max.x - frame.min.x)
   const extY = Math.max(1e-4, frame.max.y - frame.min.y)
   const w = Math.max(1e-4, cell.w)
   const h = Math.max(1e-4, cell.h)
-  const camera = frame.frameHeight !== null
+  const camera = frame.authored
 
-  let scale = camera ? h / frame.frameHeight! : AUTOFIT_FILL * Math.min(w / extX, h / extY)
+  let scale = h / Math.max(1e-6, frame.frameHeight)
   // Auto-fit only: keep the model inside its cell. A camera-framed model is
   // cropped by the cell (like a poster), never rescaled — otherwise a single
   // prop parked outside the authored frame would shrink the whole view.

@@ -17,8 +17,10 @@ move it to **Done** with a commit reference. One agent per area.
       planes (like a poster), deep models slide toward the camera instead of
       shrinking, and the uniform scale moved to the root node (on `fit` it
       was applied before that node's own position, so off-origin models
-      drifted off their card). No/blind camera → the poster's auto-fit at
-      0.86 fill. Same fix serves the board and the thread tree.
+      drifted off their card). No/blind camera → the auto-fit BUILDS the
+      poster's own camera (frameDistance, fill 0.86) and frames through it,
+      so 2D and 3D show a camera-less model at the same size (115 px vs
+      117 px measured). Same fix serves the board and the thread tree.
       Four bugs found on the way: `AssetCache.byPostId` was only filled by
       `getPoster()`, so 3D-only posts (every thread reply) failed to
       download and latched back to 2D — `noteMeta()` now registers them; the

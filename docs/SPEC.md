@@ -1234,8 +1234,14 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
       cell ("the flat camera is just a position").
     - No camera, a camera that frames nothing (aimed away, tiny fov, model
       behind the lens), or a view matrix that fails the probe → auto-fit,
-      at `AUTOFIT_FILL` 0.86, the same fill the poster pipeline uses, so
-      toggling 2D↔3D does not resize the model.
+      which BUILDS the poster's own camera (dominantFacing + the same
+      `frameDistance(fov 0.7, cell aspect, fill 0.86)` call) and then frames
+      through it like an authored one. Fitting the oriented box to 86% of
+      the cell instead — the obvious shortcut — renders a deep model 65%
+      LARGER than its poster (frameDistance fits the model's nearest
+      corners, not its bounding box at centre depth): measured 193 px vs the
+      poster's 117 px, now 115 px vs 117 px. Toggling 2D↔3D no longer
+      resizes anything.
     - Geometry outside the authored frame is CROPPED by four world-space
       clip planes on the model's materials (`makeCellClip`/`updateCellClip`,
       updated on every scroll/pan) — a poster is cut off by the card's

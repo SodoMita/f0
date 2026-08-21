@@ -309,6 +309,57 @@ await page.waitForTimeout(1500)
   }
 }
 
+// 2D <-> 3D must not RESIZE a model. A camera-less post (rig flavour `b`) is
+// auto-fitted in both modes, so its poster and its 3D card have to show the
+// same thing at the same size — that is what AUTOFIT_FILL 0.86 (the poster
+// pipeline's own fill) buys. Same card, same rect, both modes.
+{
+  const shoot = async (name) => {
+    const r = await page.evaluate(() => {
+      const b = window.__form0.board
+      const eng = b.scene.getEngine()
+      const cssW = eng.getRenderWidth() * eng.getHardwareScalingLevel()
+      const cssH = eng.getRenderHeight() * eng.getHardwareScalingLevel()
+      const c = b.cards.find((c) => c.meta && c.meta.filename === 'b.glb' && c.mesh.isEnabled() &&
+        Math.abs(c.mesh.position.y) + c.h / 2 <= b.halfH)
+      if (!c) return null
+      const x = cssW / 2 + c.mesh.position.x * b.pxPerUnit
+      const y = ((b.halfH - c.mesh.position.y) / (2 * b.halfH)) * cssH
+      return { x: x - (c.w * b.pxPerUnit) / 2, y: y - (c.h * b.pxPerUnit) / 2, w: c.w * b.pxPerUnit, h: c.h * b.pxPerUnit }
+    })
+    if (!r) return null
+    const c = await census(r, name)
+    return c.model ? { ...c.model, cell: c.height } : null
+  }
+
+  await page.evaluate(() => window.__form0.setSearchQuery('b.glb'))
+  await page.evaluate(() => window.__form0.settings.set({ direct3D: false }))
+  await page.waitForTimeout(7000)
+  const flat = await shoot('board2d-card-b')
+  await page.evaluate(() => window.__form0.settings.set({ direct3D: true }))
+  await page.waitForFunction(() => {
+    const b = window.__form0.board
+    return b.cards.some((c) => c.meta && c.meta.filename === 'b.glb' && b.pool3d.isLive(c.meta.eventId))
+  }, { timeout: 60000 }).catch(() => {})
+  await page.waitForTimeout(3000)
+  const solid = await shoot('board3d-card-b')
+  await page.evaluate(() => window.__form0.setSearchQuery(''))
+  await page.waitForTimeout(2000)
+
+  if (!flat || !solid) {
+    check('a camera-less card (b.glb) rendered in both modes', false, `2D=${!!flat} 3D=${!!solid}`)
+  } else {
+    const dw = Math.abs(solid.w - flat.w) / flat.w
+    const dh = Math.abs(solid.h - flat.h) / flat.h
+    check('2D poster and 3D card show a camera-less model at the SAME size',
+      dw < 0.06 && dh < 0.06,
+      `poster ${flat.w}x${flat.h} vs 3D ${solid.w}x${solid.h} (${(dw * 100).toFixed(0)}% / ${(dh * 100).toFixed(0)}%)`)
+    check('2D poster and 3D card agree on the position too',
+      Math.abs(solid.cx - flat.cx) < 0.05 * flat.cell && Math.abs(solid.cy - flat.cy) < 0.05 * flat.cell,
+      `poster (${flat.cx},${flat.cy}) vs 3D (${solid.cx},${solid.cy})`)
+  }
+}
+
 // --------------------------------------------------------------- thread 3D
 // Root #1 of the rig owns the reply tree; its replies cycle c/b/a/x, so the
 // tree contains a camera-framed (a.glb) node.
