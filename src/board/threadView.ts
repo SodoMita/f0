@@ -16,7 +16,7 @@ import type { ThreadIndex, ThreadMeta } from '../protocol/thread-index'
 import { PreviewPool } from './previewPool'
 import { Direct3DPool, type Place3D } from './modelCard3d'
 import {
-  makeCardMaterial, setCardTexture, setCardTexture2, setCardTint, setCardTint2, setCardWhite,
+  makeCardMaterial, makeOverlayMaterial, setCardTexture, setCardTexture2, setCardTint, setCardTint2, setCardWhite,
   setCardFlip, setCardOpacity, setCardBlend, type CardTextureKind,
 } from './cardMaterial'
 import type { ShaderMaterial } from '@babylonjs/core/Materials/shaderMaterial'
@@ -762,6 +762,10 @@ export class ThreadView {
     if (!this.threeD || !this.assets) return
     const meta = n.meta
     if (meta.hashFailed || this.assets.isHashFailed(meta.eventId)) return
+    // The pool downloads by event id; without this the cache only knows the
+    // posts whose POSTER was requested, and a reply that went straight to 3D
+    // failed with "download failed" and fell back to 2D forever.
+    this.assets.noteMeta(meta)
     n.spinner.setEnabled(true)
     const ok = this.pool3d.request(meta.eventId, this.placeFor(n), this.visibleNodeIds())
     if (!ok) {
@@ -934,7 +938,7 @@ export class ThreadView {
       mesh.metadata = { tnode: meta }
 
       const spinner = MeshBuilder.CreatePlane(`tspin-${meta.eventId.slice(0, 8)}`, { width: 4, height: 4 }, this.scene)
-      const spinnerMat = makeCardMaterial(this.scene)
+      const spinnerMat = makeOverlayMaterial(this.scene)
       spinner.material = spinnerMat
       setCardTexture(spinnerMat, this.spinnerTex)
       setCardTint(spinnerMat, this.isDark ? theme.ink : '#3a3a44')
@@ -950,7 +954,7 @@ export class ThreadView {
       // reply pill, bottom-right, floating half out of the card like the
       // board badge; pickable and routed to the studio compose flow
       const reply = MeshBuilder.CreatePlane(`treply-${meta.eventId.slice(0, 8)}`, { width: 4, height: 4 }, this.scene)
-      const replyMat = makeCardMaterial(this.scene)
+      const replyMat = makeOverlayMaterial(this.scene)
       reply.material = replyMat
       setCardTexture(replyMat, this.replyTex)
       setCardWhite(replyMat)
@@ -969,7 +973,7 @@ export class ThreadView {
       // ▶/⏸ play button, bottom-left (mirrors the reply pill); toggles this
       // node's animation + embedded sound. Picked in tapAt before the node.
       const play = MeshBuilder.CreatePlane(`tplay-${meta.eventId.slice(0, 8)}`, { width: 4, height: 4 }, this.scene)
-      const playMat = makeCardMaterial(this.scene)
+      const playMat = makeOverlayMaterial(this.scene)
       play.material = playMat
       setCardTexture(playMat, this.playTexOff)
       setCardWhite(playMat)

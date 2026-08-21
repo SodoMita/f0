@@ -87,6 +87,20 @@ export class AssetCache {
     this.modelBytes.delete(sha)
   }
 
+  /**
+   * Remember a post so its model can be fetched by event id alone.
+   *
+   * `getPoster()` used to be the ONLY thing that filled this map, which made
+   * every by-post-id download depend on a poster having been requested
+   * first. In 3D mode no poster is ever requested, so cards/nodes that came
+   * into view while the toggle was on failed with "download failed", were
+   * latched as rejected and fell back to 2D forever (thread replies never
+   * went 3D at all — they had no poster from the board either).
+   */
+  noteMeta(meta: ThreadMeta): void {
+    this.byPostId.set(meta.eventId, meta)
+  }
+
   getModelBlobByPostId(postId: string): Promise<Blob | undefined> {
     const meta = this.byPostId.get(postId)
     return meta ? this.getModel(meta) : Promise.resolve(undefined)

@@ -19,8 +19,10 @@ NON-NEGOTIABLE (each cost real debugging):
  3 validate GLBs before Babylon loads (model/limits.ts) — crash guard
  4 offscreen renders via scene.render(), never rtt.render()+renderList
  5 no scene.environmentTexture (IBL blackened PBR) — lights-only
- 6 posters use the model's authored camera when it has one; auto-fit is
-   only the fallback (authored cameras also drive live previews + viewer)
+ 6 the model's authored MAIN camera is the framing: it drives live previews,
+   the viewer and 3D-mode cards/nodes (as a MODEL transform — model/framing.ts,
+   AMENDMENT 81); posters themselves always auto-fit (AMENDMENT 6), and
+   auto-fit is the fallback everywhere a model has no usable camera
  7 display double-sided; never modify source GLB
  8 side-effect imports: Culling/ray (pick), screenshotTools, loaders glTF
  9 per-path texture flip matrix (posters flip Y; RTT + badges don't)
@@ -29,6 +31,8 @@ NON-NEGOTIABLE (each cost real debugging):
 
 VERIFY (agents have no vision; pixel checks are the eyes):
  bun run build && smoke.mjs && features.mjs && capture.mjs + visual_critique.py
+ 3D mode / model framing: npm run check:3d (math + pixels + leak cycles).
+ Never pipe a guard into `tail` — you get tail's exit code, not the suite's.
 
 MULTI-AGENT: one agent per area, claim in STATUS, rebase before push, atomic
 commits, fix-forward (record bugs in SPEC AMENDMENTS + STATUS). Deploy is

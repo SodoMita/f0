@@ -60,3 +60,45 @@ settings/network shapes are schema/type/range validated; sidecar imports are
 local-only and preflighted (128 files/20 MiB, GLB validate-before-load,
 glTF/OBJ complexity caps); embedded and data-URI image dimensions/MIME/decoded
 memory are checked before decode, with SVG/unknown formats failing closed.
+79 PAGE ZOOM MUST NOT STRETCH OR SOFTEN 3D: browser zoom / DPI changes
+re-derive the drawing buffer (visualViewport-aware), manual resolution mode
+letterboxes instead of stretching, and every view re-measures its camera on
+the change. Guard: node scripts/zoom.mjs.
+80 QUAD/TRIANGLE PAINT BRUSHES + RUNTIME MODEL ICONS: the paint editor gained
+square/triangle stamps and the library shows real rendered thumbnails of each
+GLB. Guards: check:paint, check:paint-icons.
+81 3D MODE = THE MODEL'S MAIN-CAMERA VIEW (the AMENDMENT 43 rule, now
+actually implemented): a 3D card/node is built from the authored camera's
+VIEW matrix — model pivoted at the camera position, rotated by the inverse of
+its rotation, scaled so the camera's frame height AT THE MODEL'S DEPTH maps
+onto the cell height (ortho cameras: orthoTop-orthoBottom). The optical axis
+lands at the cell centre; the flat camera stays "just a position". Only the
+meshes the camera SEES set the reference depth, geometry outside the frame is
+CROPPED by per-cell clip planes (a poster is cropped by the card too), and a
+deep model slides toward the camera instead of shrinking. No/blind camera ->
+auto-fit, which BUILDS the poster's camera (dominantFacing + the same
+frameDistance(fov .7, cell aspect, fill .86) call) and frames through it, so
+2D and 3D show a camera-less model at the same size (measured 115 vs 117 px;
+the "86% of the cell" shortcut was 65% too big for deep models). Scale lives on the ROOT node (on
+`fit` it was applied before that node's own position -> off-centre models).
+Also fixed: byPostId is populated by noteMeta() (3D never asks for a poster,
+so replies could not download at all), loader-auto-started animation groups
+are stopped (autoplay off must mean off), hasWork() keeps frames coming until
+shaders are ready (else cards stay blank on a settled board), overlays use
+depthFunction ALWAYS (a model with real depth covered its own buttons), and
+released slots dispose their WHOLE transform chain (dispose(true) = do NOT
+recurse, so orient/fit nodes piled up on every 2D<->3D toggle), and the
+contact shadow follows the model's REAL footprint in the cell instead of a
+fixed ellipse in the middle of the card.
+Guards: bun scripts/direct3d-camera-unit.mjs · node scripts/direct3d-camera.mjs.
+82 EMPTY NODES POISONED EVERY FIT: worldBox/worldBounds/worldCenter/
+worldRadius unioned EVERY mesh, including Babylon's empty __root__ (the
+RH->LH conversion node) whose bounding box is a zero-size box AT THE ORIGIN.
+A model authored far from the origin was therefore framed together with all
+the empty space back to (0,0,0) and rendered as an invisible speck — in
+POSTERS and LIVE PREVIEWS as much as in 3D cards. Fits now skip meshes with
+no vertices (drawable()). A 3x4 plate at (100000,-50000,20000): frame
+distance 111177 -> 6.37, identical to the same model at the origin.
+Guard: bun scripts/framing-edge-unit.mjs (flat plates + mirror check, dust
+and kilometre scales, 100k offset, degenerate meshes, camera inside the
+model, macro close-up, extreme cell shapes).

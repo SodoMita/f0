@@ -6,12 +6,16 @@ optional audio.
 
 LAYOUT: board = responsive 1-3 column grid of transparent cards (aspect from
 each post's `dim`, default 16:10), scroll
-+ inertia, tap card -> viewer, reply badge (↩ N) -> thread. Thread = 2D tree
-map (pan/pinch/zoom, tidy tree, tap node) — PLANNED 3 modes (spec AMENDMENT 43):
-2D posters · tree view · 3D with ACTUAL GLB models, each shown through the
-model's own MAIN camera applied as the model transform vs a static thread
-camera (camera = just a position) so a centered model matches its main-camera
-view. Viewer = one model, orbit (A) or authored cameras (C), play/pause,
++ inertia, tap card -> viewer, reply badge (↩ N) -> thread. Thread = tree map
+(pan/pinch/zoom, tidy tree, tap node). 3D MODE (settings -> Interface -> "Show
+posts as 3D models", also the topbar cube) swaps BOTH the board and the tree
+from posters to the ACTUAL GLB models, each shown through the model's own MAIN
+camera applied as the model transform vs a static camera (camera = just a
+position), so a centered model matches its main-camera view: the model is
+pivoted at the camera, rotated by the inverse of its rotation and scaled so the
+camera's frame maps onto the card, cropped at the card's edges like a poster
+(spec AMENDMENTS 43/75/81, src/model/framing.ts). No camera -> auto-fit.
+Viewer = one model, orbit (A) or authored cameras (C), play/pause,
 metadata (M), download, thread (T), prev/next; VR = WebXR immersive 1:1 viewing
 (spec AMENDMENT 41), hidden when unsupported.
 
@@ -23,7 +27,9 @@ persistence), plus background color, scroll inertia, and upcoming thread-mode
 
 KEY FIXES: per-path texture flip (posters flip Y; RTT/badges don't) · transparent
 previews · visual pass (grid, shadows, rounded cards, glow) · black posters
-(scene.render() not rtt.render(); no IBL) · posters always auto-fit.
+(scene.render() not rtt.render(); no IBL) · posters always auto-fit (3D cards
+use the authored camera instead) · 3D cards framed by the model's main camera,
+cropped to the card, glued to it while scrolling.
 
 RUN (Bun): bun install · bun run dev · bun run build · bun run build:standalone ·
 bun scripts/smoke.mjs · bun scripts/features.mjs.
@@ -41,5 +47,5 @@ DOCS: start at AGENTS.md, then docs/{SPEC,ARCHITECTURE,STATUS,CONVENTIONS,
 RESEARCH-EDITORS}.
 
 NEXT: paint editor (hand-writing) -> animation editor -> audio recording ->
-phone-pose camera -> 3D thread view -> VR -> new settings entries -> low-poly
-text -> tests.
+phone-pose camera -> thread mode picker (2D/tree/3D as a setting) -> VR ->
+new settings entries -> low-poly text -> tests.

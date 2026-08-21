@@ -6,10 +6,12 @@ swap) · core/router (hash routes) · core/assets (poster/model cache by SHA,
 blossom (SHA verify + BUD-01), events, thread-index, storage (validated config +
 AES-GCM ownership envelopes/keyring), ownedSecrets} · model/{importSidecar
 (bounded local-only glTF/OBJ repack), draco (local), offline (blank CDN URLs),
-limits (pre-load GLB + image decode caps), facing (auto-fit math), poster} ·
+limits (pre-load GLB + image decode caps), facing (auto-fit math), framing
+(3D-mode main-camera view -> cell transform + crop planes), poster} ·
 board/{board (1-3 col grid, inertia, badges), cardMaterial
-(custom unlit shader), previewPool (RTT slots), threadView (2D tree map;
-planned 3D mode = actual models via main-camera-as-model-transform)}
+(custom unlit shader + overlay material), previewPool (RTT slots),
+modelCard3d (Direct3DPool: real GLBs in the visible scene, framed by
+model/framing), threadView (tree map; same pools as the board)}
 · viewer (orbit + authored cameras) · studio (stub).
 
 DATA FLOW: relays -> parseModelEvent -> ThreadIndex -> board (setMetas +
@@ -23,6 +25,16 @@ setActiveScene attaches input; must NOT reset clearColor (settings own bg).
 TEXTURE FLIP (verified, test/orient2.ts): shader always samples 1.0-uv.x.
 flip.y = 1 for posters(RawTexture), 0 for live RTT and badges(DynamicTexture).
 
+3D MODE (settings -> Interface -> "Show posts as 3D models"): board cards AND
+thread nodes swap poster/RTT for the real GLB in the visible scene. Each model
+carries its own MAIN CAMERA's view (model/framing.ts): pivot = camera position,
+rotation = inverse camera rotation, cell height = the camera's frame height at
+the model's depth, four clip planes crop it to the card. No camera -> the
+poster's auto-fit. Demand-driven rendering means the pool must ASK for frames
+until its shaders are ready (Direct3DPool.hasWork).
+
 KEY TRAPS: offscreen render via scene.render() (not rtt.render()); no IBL;
-posters auto-fit; whenReadyAsync() hangs on a never-rendered scene; nostr-tools
-SimplePool.subscribeMany is broken (use Relay).
+posters auto-fit (3D cards do NOT — they use the authored camera);
+whenReadyAsync() hangs on a never-rendered scene; nostr-tools
+SimplePool.subscribeMany is broken (use Relay); AssetCache only knows a post
+after getPoster/noteMeta (3D never renders posters).

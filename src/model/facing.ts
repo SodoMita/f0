@@ -1,6 +1,22 @@
 import { Matrix, Vector3 } from '@babylonjs/core/Maths/math.vector'
 import { VertexBuffer } from '@babylonjs/core/Buffers/buffer'
 import type { AssetContainer } from '@babylonjs/core/assetContainer'
+import type { AbstractMesh } from '@babylonjs/core/Meshes/abstractMesh'
+
+/**
+ * Meshes that actually have geometry.
+ *
+ * Babylon's glTF loader inserts an empty `__root__` mesh (it carries the
+ * right-handed → left-handed conversion) and authors leave empty group nodes
+ * around. Their bounding boxes are ZERO-SIZE BOXES AT THEIR OWN POSITION —
+ * usually the origin — and every fit below is a UNION, so a model authored
+ * 100k units away had its box stretched all the way back to the origin and
+ * was framed as an invisible speck (posters, live previews and 3D cards
+ * alike). Anything without vertices contributes nothing to a fit.
+ */
+function drawable(container: AssetContainer): AbstractMesh[] {
+  return container.meshes.filter((m) => m.getTotalVertices() > 0)
+}
 
 // Sampling budget. We STRIDE over the whole model instead of taking the first
 // N triangles: same answer, a fraction of the work, and no bias toward
@@ -34,7 +50,7 @@ export function dominantFacing(container: AssetContainer, out?: Vector3): Vector
   const a = new Vector3(), b = new Vector3(), c = new Vector3()
   const e1 = new Vector3(), e2 = new Vector3(), geo = new Vector3()
   const n0 = new Vector3(), n1 = new Vector3(), n2 = new Vector3(), nAuthored = new Vector3()
-  for (const mesh of container.meshes) {
+  for (const mesh of drawable(container)) {
     if (triangles >= MAX_TRIANGLES) break
     const data = mesh.getVerticesData(VertexBuffer.PositionKind)
     const indices = mesh.getIndices()
@@ -120,7 +136,7 @@ export function worldCenter(container: AssetContainer, out?: Vector3): Vector3 {
   const c = out ?? new Vector3()
   c.set(0, 0, 0)
   let n = 0
-  for (const mesh of container.meshes) {
+  for (const mesh of drawable(container)) {
     mesh.computeWorldMatrix(true)
     const info = mesh.getBoundingInfo()
     if (!info) continue
@@ -133,7 +149,7 @@ export function worldCenter(container: AssetContainer, out?: Vector3): Vector3 {
 
 export function worldRadius(container: AssetContainer): number {
   let r = 0
-  for (const mesh of container.meshes) {
+  for (const mesh of drawable(container)) {
     mesh.computeWorldMatrix(true)
     const info = mesh.getBoundingInfo()
     if (!info) continue
@@ -152,7 +168,7 @@ export function worldBounds(container: AssetContainer): { center: Vector3; radiu
   const min = new Vector3(Infinity, Infinity, Infinity)
   const max = new Vector3(-Infinity, -Infinity, -Infinity)
   let any = false
-  for (const mesh of container.meshes) {
+  for (const mesh of drawable(container)) {
     mesh.computeWorldMatrix(true)
     const info = mesh.getBoundingInfo()
     if (!info) continue
@@ -187,7 +203,7 @@ export function worldBox(container: AssetContainer): { min: Vector3; max: Vector
   const min = new Vector3(Infinity, Infinity, Infinity)
   const max = new Vector3(-Infinity, -Infinity, -Infinity)
   let any = false
-  for (const mesh of container.meshes) {
+  for (const mesh of drawable(container)) {
     mesh.computeWorldMatrix(true)
     const info = mesh.getBoundingInfo()
     if (!info) continue

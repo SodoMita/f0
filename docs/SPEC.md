@@ -1270,3 +1270,135 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     `TARGET_URL=http://localhost:5173/ bun run check:paint-icons` (asserts the
     quad/triangle source geometry, selection, packed-store round-trip,
     ≥42px targets, no SVGs, and non-zero alpha in every runtime texture).
+
+81. 3D MODE REALLY IS THE MODEL'S MAIN-CAMERA VIEW (2026-08-21): AMENDMENT
+    43/75 promised that a 3D board card / thread node shows the post's real
+    model THROUGH THE MODEL'S MAIN CAMERA. Only the camera's ROTATION was
+    applied. Everything else about the view — where the camera stands, how
+    much of the model it frames, what it leaves out of frame — was thrown
+    away and replaced with a bounding-box auto-fit of the WHOLE file, then
+    shrunk again by the depth budget. Result on screen: a tiny, off-centre
+    speck of the entire scene (a model whose author framed one prop in
+    close-up rendered every other prop too, at ~28% of the card).
+    The framing now lives in `src/model/framing.ts`:
+    - `frameModel()` takes the authored camera's VIEW matrix as the ground
+      truth: `pivot` = the camera's position, `rot` = the inverse of its
+      rotation, `frameHeight` = the camera's frame height AT THE MODEL's
+      depth (ortho cameras use orthoTop-orthoBottom). A sanity probe checks
+      that `(v - pivot)·rot` really reproduces `v·view` — Babylon's glTF
+      loader mirrors the imported scene and gives cameras
+      `ignoreParentScaling`, so a hand-derived rotation can silently
+      disagree — and falls back to auto-fit if it does not.
+    - The scale reference uses ONLY the meshes the camera actually sees
+      (per-mesh projection test against the frame). A prop parked outside
+      the frame used to drag the reference depth out with it and turned a
+      close-up into a distant speck.
+    - `placeFrame()` maps that frame onto the card/node cell: cell height =
+      frame height, so the model is exactly as large — and as off-centre —
+      as the author framed it. The optical axis lands at the centre of the
+      cell ("the flat camera is just a position").
+    - No camera, a camera that frames nothing (aimed away, tiny fov, model
+      behind the lens), or a view matrix that fails the probe → auto-fit,
+      which BUILDS the poster's own camera (dominantFacing + the same
+      `frameDistance(fov 0.7, cell aspect, fill 0.86)` call) and then frames
+      through it like an authored one. Fitting the oriented box to 86% of
+      the cell instead — the obvious shortcut — renders a deep model 65%
+      LARGER than its poster (frameDistance fits the model's nearest
+      corners, not its bounding box at centre depth): measured 193 px vs the
+      poster's 117 px, now 115 px vs 117 px. Toggling 2D↔3D no longer
+      resizes anything.
+    - Geometry outside the authored frame is CROPPED by four world-space
+      clip planes on the model's materials (`makeCellClip`/`updateCellClip`,
+      updated on every scroll/pan) — a poster is cut off by the card's
+      edges, so a real model must be too. Shrinking the model to swallow
+      out-of-frame props (the old behaviour) destroys the framing.
+    - Uniform scale now lives on the ROOT node. It used to sit on the `fit`
+      node, whose own position is applied AFTER its scaling, so any model
+      whose bounds were not centred on the origin was displaced by
+      pivot·(1-scale) and drifted off its card ("positions off sometimes").
+    - A model deeper than the cell's depth budget slides TOWARD the camera
+      (free in an orthographic view, capped at 40 units so it cannot cross
+      the near plane) instead of being scaled down to fit.
+    Three more bugs the pixel checks exposed on the way:
+    - `AssetCache` only knew a post's metadata if its POSTER had been
+      requested, because `getPoster()` was the only writer of `byPostId`.
+      In 3D mode no poster is ever requested, so thread replies (and cards
+      scrolled in while the toggle was on) failed with "download failed",
+      latched as rejected and fell back to 2D forever. `noteMeta()` is now
+      called before every direct-3D request.
+    - The glTF loader auto-starts the first animation group
+      (`animationStartMode` defaults to FIRST). With autoplay OFF the model
+      still animated, and since `slot.playing` was false nothing could ever
+      pause it. The pool stops every group at load; play()/pause() own
+      playback from then on.
+    - Demand-driven rendering + first-render shader compilation = blank
+      cards: the frame that places a model draws nothing (its effect is
+      still compiling) and nothing asks for another frame. `hasWork()` now
+      reports work until every visible model's effects are ready, INCLUDING
+      the poll that flips them ready (that frame is the one that draws it),
+      with a 10 s deadline so a broken effect cannot pin the render loop.
+    - AMENDMENT 76's "overlays are always on top" only fixed the transparent
+      SORT; the depth test still ran (group 1 does not clear depth). A
+      poster has no depth, but a real model does, so a model sticking out
+      toward the camera covered its own ▶ button. Overlay materials
+      (`makeOverlayMaterial`) use `depthFunction = ALWAYS`; they never write
+      depth, so ignoring it is safe and is what 76 always meant.
+    - `TransformNode.dispose(true)` means doNotRecurse, so every released
+      model left its orient + fit nodes behind (46 orphans after a few 2D↔3D
+      toggles). Released slots now dispose the whole chain.
+    - The 3D contact shadow was a FIXED ellipse in the middle of the card
+      ("the poster footprint is 2D-only"). With main-camera framing a model
+      can sit anywhere in its cell, so the shadow floated next to it.
+      `placeFrame()` now returns the model's real footprint (cell-relative
+      centre, bottom and width) and the board's shadow follows it, refreshed
+      on every re-place — the same shape the poster pipeline measures.
+    Housekeeping: `scripts/offline-verify.mjs` still asserted the
+    pre-AMENDMENT-6 poster policy ("poster from authored camera", "poster
+    uses cam0"). Those two checks had failed on every run for months — a
+    permanently red suite hides real regressions — and now assert the
+    current contract (posters ALWAYS auto-fit; authored cameras drive the
+    viewer, live previews and 3D cards). The suite is green end to end again.
+    Guards (`npm run check:3d` runs all three):
+    `bun scripts/direct3d-unit.mjs` (pool lifecycle, AMENDMENT 77),
+    `bun scripts/direct3d-camera-unit.mjs` (headless: the placed
+    model must match the authored camera's own view matrix — orientation,
+    size and composition — for camera 0, for a `preview-camera` index, and
+    after a re-place into another cell; auto-fit fallbacks stay centred and
+    inside the cell) and `node scripts/direct3d-camera.mjs` (pixels, against
+    the offline rig: the camera-framed flavour `a` must render RED and NO
+    green on the board AND in the thread, flavour `d` must honour
+    preview-camera=1 and render GREEN, a model must stay centred and cropped
+    in its card while the feed scrolls, a 2D↔3D round trip must leave no
+    orphan nodes, a tap on a 3D card must still open the viewer, a
+    camera-less post must be the SAME size in 2D and 3D, and a settled 3D
+    board must render ZERO frames while still animating with autoplay on),
+    plus `node scripts/direct3d-leak.mjs` — four on/off cycles must return
+    the scene to its exact baseline (meshes, materials, textures, transform
+    chains, animation groups, sounds, heap): a browser-only imageboard is a
+    long-running tab and this toggle loads real GLBs into the live scene.
+
+82. EMPTY NODES POISONED EVERY FIT (2026-08-21): `model/facing.ts`'s
+    `worldBox` / `worldBounds` / `worldCenter` / `worldRadius` unioned the
+    bounding box of EVERY mesh in the container — including Babylon's
+    `__root__` (the empty mesh its glTF loader inserts to convert
+    right-handed → left-handed) and any empty group node the author left
+    behind. An empty mesh's bounding box is a ZERO-SIZE BOX AT ITS OWN
+    POSITION, usually the world origin, so a model authored FAR from the
+    origin had its box stretched all the way back to (0,0,0): the fit framed
+    that whole empty span and the model rendered as an invisible speck in
+    the middle of the card. This hit the POSTER and LIVE-PREVIEW pipelines
+    (both call worldBox/frameDistance) as much as the 3D cards — a
+    "why is this post blank?" bug, not a 3D-mode bug. Fix: every fit
+    iterates `drawable(container)` = meshes with `getTotalVertices() > 0`.
+    Measured on a 3×4 plate parked at (100000, -50000, 20000): frame
+    distance 111177 → 6.37, i.e. the same framing as the identical model at
+    the origin (guard asserts the two land within 2% of each other).
+    Guard: `bun scripts/framing-edge-unit.mjs` — the framing math against
+    the models real relays actually carry: flat plates (which must never
+    come out MIRRORED: the guard compares the signed area of an asymmetric
+    outline in the model's own front view against the card), dust-sized
+    (0.0005 u) and kilometre-sized (4000 u) models, geometry 100k units off
+    the origin, degenerate zero-size meshes, a camera INSIDE the model, a
+    macro close-up, and extreme cell shapes (6×20, 40×3). Every case must
+    produce a finite transform, a visible model and a back plane in front of
+    the backdrop.
