@@ -30,6 +30,7 @@
     "check:thread-open": "bun scripts/thread-open-unit.mjs",
     "check:thread-open-browser": "node scripts/thread-open.mjs",
     "check:studio-open": "node scripts/studio-open.mjs",
+    "check:zoom": "node scripts/zoom.mjs",
     "check:studio-error": "node scripts/studio-error-wrap.mjs",
     "check:overflow": "node scripts/overflow-scan.mjs",
     "check:library": "node scripts/library-unit.mjs",
