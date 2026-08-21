@@ -1272,6 +1272,9 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
       toward the camera covered its own ▶ button. Overlay materials
       (`makeOverlayMaterial`) use `depthFunction = ALWAYS`; they never write
       depth, so ignoring it is safe and is what 76 always meant.
+    - `TransformNode.dispose(true)` means doNotRecurse, so every released
+      model left its orient + fit nodes behind (46 orphans after a few 2D↔3D
+      toggles). Released slots now dispose the whole chain.
     Guards: `bun scripts/direct3d-camera-unit.mjs` (headless: the placed
     model must match the authored camera's own view matrix — orientation,
     size and composition — for camera 0, for a `preview-camera` index, and
@@ -1279,5 +1282,6 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     inside the cell) and `node scripts/direct3d-camera.mjs` (pixels, against
     the offline rig: the camera-framed flavour `a` must render RED and NO
     green on the board AND in the thread, flavour `d` must honour
-    preview-camera=1 and render GREEN, and a model must stay centred and
-    cropped in its card while the feed scrolls).
+    preview-camera=1 and render GREEN, a model must stay centred and cropped
+    in its card while the feed scrolls, a 2D↔3D round trip must leave no
+    orphan nodes, and a tap on a 3D card must still open the viewer).

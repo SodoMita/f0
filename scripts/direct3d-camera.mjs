@@ -201,6 +201,52 @@ if (twoCamCards.length) {
 await page.evaluate(() => window.__form0.setSearchQuery(''))
 await page.waitForTimeout(1500)
 
+// Toggling back to 2D must remove every direct model from the scene (no
+// orphan meshes floating over the posters), and toggling on must bring them
+// back — the mode generation counter guards the async poster/3D race.
+{
+  await page.evaluate(() => window.__form0.settings.set({ direct3D: false }))
+  await page.waitForTimeout(3000)
+  const off = await page.evaluate(() => ({
+    d3Nodes: window.__form0.board.scene.transformNodes.filter((n) => n.name.startsWith('d3-')).length,
+    live: window.__form0.board.cards.filter((c) => c.meta && window.__form0.board.pool3d.isLive(c.meta.eventId)).length,
+    posters: window.__form0.board.cards.filter((c) => c.meta && c.poster).length,
+  }))
+  check('2D again: no direct-3D models left in the scene', off.d3Nodes === 0 && off.live === 0, JSON.stringify(off))
+  check('2D again: cards fall back to posters', off.posters > 0, `${off.posters} posters`)
+
+  await page.evaluate(() => window.__form0.settings.set({ direct3D: true }))
+  await page.waitForFunction(() => {
+    const b = window.__form0.board
+    return b.cards.filter((c) => c.meta && b.pool3d.isLive(c.meta.eventId)).length >= 3
+  }, { timeout: 60000 }).catch(() => {})
+  await page.waitForTimeout(2500)
+  const back = await page.evaluate(() => {
+    const b = window.__form0.board
+    const c = b.cards.find((c) => c.meta && c.meta.filename === 'a.glb' && b.pool3d.isLive(c.meta.eventId))
+    const eng = b.scene.getEngine()
+    const cssW = eng.getRenderWidth() * eng.getHardwareScalingLevel()
+    const cssH = eng.getRenderHeight() * eng.getHardwareScalingLevel()
+    if (!c) return null
+    const x = cssW / 2 + c.mesh.position.x * b.pxPerUnit
+    const y = ((b.halfH - c.mesh.position.y) / (2 * b.halfH)) * cssH
+    return { id: c.meta.eventId, x: x - (c.w * b.pxPerUnit) / 2, y: y - (c.h * b.pxPerUnit) / 2, w: c.w * b.pxPerUnit, h: c.h * b.pxPerUnit, cx: x, cy: y }
+  })
+  check('3D again: models come back', !!back)
+  if (back) {
+    const c = await census(back, 'board3d-card-a-retoggled')
+    check('3D again: still the main-camera view', c.red > 0.10 && c.green < 0.01,
+      `red=${(c.red * 100).toFixed(1)}% green=${(c.green * 100).toFixed(1)}%`)
+    // A 3D model must not swallow taps: the card quad below it opens the post.
+    await page.mouse.click(Math.round(back.cx), Math.round(back.cy))
+    await page.waitForTimeout(1500)
+    const hash = await page.evaluate(() => window.location.hash)
+    check('tapping a 3D card opens the viewer', hash.startsWith('#/viewer/'), hash)
+    await page.evaluate(() => { window.location.hash = '#/' })
+    await page.waitForTimeout(2500)
+  }
+}
+
 // --------------------------------------------------------------- thread 3D
 // Root #1 of the rig owns the reply tree; its replies cycle c/b/a/x, so the
 // tree contains a camera-framed (a.glb) node.

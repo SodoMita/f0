@@ -455,7 +455,11 @@ export class Direct3DPool {
       slot.container.dispose()
       slot.container = null
     }
-    if (slot.root) { slot.root.dispose(true); slot.root = null; slot.orient = null; slot.fit = null }
+    // Recurse: `dispose(true)` means doNotRecurse, so the orient + fit nodes
+    // survived every release and piled up in the scene (46 orphan nodes after
+    // a few 2D↔3D toggles). The container's own roots were unparented above,
+    // so recursing only reaches this pool's two helper nodes.
+    if (slot.root) { slot.root.dispose(); slot.root = null; slot.orient = null; slot.fit = null }
     slot.clip = null
     slot.warm = false
     slot.warmUntil = 0

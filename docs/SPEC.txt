@@ -75,5 +75,7 @@ Also fixed: byPostId is populated by noteMeta() (3D never asks for a poster,
 so replies could not download at all), loader-auto-started animation groups
 are stopped (autoplay off must mean off), hasWork() keeps frames coming until
 shaders are ready (else cards stay blank on a settled board), overlays use
-depthFunction ALWAYS (a model with real depth covered its own buttons).
+depthFunction ALWAYS (a model with real depth covered its own buttons), and
+released slots dispose their WHOLE transform chain (dispose(true) = do NOT
+recurse, so orient/fit nodes piled up on every 2D<->3D toggle).
 Guards: bun scripts/direct3d-camera-unit.mjs · node scripts/direct3d-camera.mjs.

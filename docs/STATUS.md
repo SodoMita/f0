@@ -27,7 +27,8 @@ move it to **Done** with a commit reference. One agent per area.
       coming until each model's shaders are ready (otherwise cards stay
       blank on a settled board); group-1 overlays use `depthFunction=ALWAYS`
       so a model with real depth cannot cover its own ▶ button (AMENDMENT
-      76 only fixed the transparent sort). Guards:
+      76 only fixed the transparent sort); released slots dispose their whole
+      transform chain (`dispose(true)` = do NOT recurse). Guards:
       `bun scripts/direct3d-camera-unit.mjs` (framing vs the authored view
       matrix) and `node scripts/direct3d-camera.mjs` (pixel census against
       the offline rig, board + thread + scroll).
