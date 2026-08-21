@@ -7,7 +7,7 @@ import { History } from '../src/studio/paint/history.ts'
 import { walkGrid, rayPlane } from '../src/studio/paint/dda.ts'
 import { stampAlong, smoothPath, widthFromPressure, effectivePressure } from '../src/studio/paint/stroke.ts'
 import { IDENTITY_QUAT, quatAlign } from '../src/studio/paint/math.ts'
-import { GRID, MAX_STAMPS, SHAPES, SHAPE_ID, UNDO_CAP } from '../src/studio/paint/types.ts'
+import { GRID, MAX_STAMPS, UNDO_CAP } from '../src/studio/paint/types.ts'
 
 const fails = []
 const check = (name, ok, detail = '') => {
@@ -32,19 +32,6 @@ const check = (name, ok, detail = '') => {
   check('swap-last leaves the other stamp', store.count === 1 && store.at(0).id === 2)
   check('index map follows the swapped stamp', store.get(2)?.shape === 'sphere')
   check('remove missing id is null', store.removeId(99) === null)
-}
-
-{
-  check('quad and triangle are paint brushes', SHAPES.includes('quad') && SHAPES.includes('triangle'))
-  check('paint shape ids stay unique', new Set(Object.values(SHAPE_ID)).size === SHAPES.length)
-  const store = new StampStore()
-  for (const shape of ['quad', 'triangle']) {
-    store.add({
-      shape, px: 0, py: 0, pz: 0, qx: 0, qy: 0, qz: 0, qw: 1,
-      sx: 1, sy: 1, sz: 0.02, r: 1, g: 1, b: 1, a: 1,
-    })
-  }
-  check('quad and triangle round-trip through packed store', store.at(0).shape === 'quad' && store.at(1).shape === 'triangle')
 }
 
 {

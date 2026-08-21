@@ -33,34 +33,26 @@ src/
     draco.ts         local Draco decoders (data: URIs), numWorkers:0
     offline.ts       blank KTX2/MSC CDN URLs (zero-CDN guarantee)
     limits.ts        validateGLB() — pre-load GLB complexity caps (crash guard)
-    facing.ts        worldBox (union AABB) + dominantFacing (thin-axis / authored
-                     normals) + frameDistance (aspect-aware tight fit); auto-fit math
-    framing.ts       3D-MODE framing (AMENDMENT 81): frameModel() turns a
-                     model's authored MAIN camera into a model transform
-                     (pivot = camera position, rot = inverse camera rotation,
-                     frame height at the model's depth), placeFrame() maps it
-                     onto a card/node cell, makeCellClip() crops it there;
-                     auto-fit (0.86 fill, like the poster) is the fallback
+    facing.ts        worldBox (union AABB of drawable meshes) + dominantFacing
+                     (thin-axis / authored normals) + frameDistance
+    framing.ts       3D-card main-camera / auto-fit frame + cell clip planes
     poster.ts        GLB → dedicated transparent RTT via scene.render() +
                      camera.outputRenderTarget, rendered at the post's `dim`
                      (default 448×280); format v4: never fetched, never a PNG
   board/
     board.ts         responsive 1–3 col grid, scroll+inertia, tap→viewer, reply badges
+    cardFade.ts      120 ms two-texture crossfade (board + thread)
+    playIntent.ts    ▶/⏸ autoplay vs manual vs paused (board + thread)
+    overlays.ts      overlay group, glass pill, vector ↩, play textures
     cardMaterial.ts  unlit quad ShaderMaterial (tex.rgb*tint, tex.a*opacity),
-                     needAlphaBlending OPTION, deterministic zero flips;
-                     makeOverlayMaterial() = the same quad with
-                     depthFunction ALWAYS for group-1 overlays (badge, ▶,
-                     spinner) so a 3D model cannot cover its own buttons
+                     needAlphaBlending OPTION, deterministic zero flips
     previewPool.ts   bounded live-preview RTT slots (REUSED, evicted when
                      offscreen); scene.render() per slot; authored-camera aware
-    threadView.ts    reply-tree map: tidy tree + elbow edges, native-pointer
+    livePool.ts      ONE PreviewPool + per-scene Direct3D pools; board and
+                     thread share the stage; activate() keeps only one 3D pool
+    threadView.ts    2D reply-tree map: tidy tree + elbow edges, native-pointer
                      pan / pinch / wheel-zoom-about-cursor, fit-to-content;
-                     live previews for animated nodes, direct-3D models when
-                     the 3D toggle is on
-    modelCard3d.ts   Direct3DPool: the post's REAL GLB in the visible board /
-                     thread scene (no poster, no RTT) — bounded slots,
-                     viewport-gated loads, eviction, audio claiming; framed by
-                     model/framing.ts and cropped to its card by clip planes
+                     live previews for animated nodes (same PreviewPool as board)
   viewer/
     viewer.ts        detail viewer: orbit + authored cameras, lights, camera-
                      parented spotlight backdrop, contact shadow, stats
@@ -98,7 +90,7 @@ relays ──(kind 1063 + 5)──▶ RelayPool ─▶ parseModelEvent ─▶ Th
 |---|---|---|
 | board | `Board` | ortho; card planes (XY), badges, shadows |
 | viewer | `Viewer` | one model; orbit + authored cameras |
-| thread | `ThreadView` | ortho; reply tree map (2D posters or direct-3D models) |
+| thread | `ThreadView` | ortho; 2D reply map (future: 3D models mode) |
 | studio | `Studio` | editor scene (stub) |
 | ui | `FormEngine` | fallback overlay (autoClear=false) |
 

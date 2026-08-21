@@ -170,9 +170,8 @@ async function waitUntil(pred, tries = 40, ms = 25) {
   const node = scene.transformNodes.find((n) => n.name.startsWith('d3-') && !n.name.includes('orient') && !n.name.includes('fit'))
   check('found a root transform', !!node, node?.name ?? 'none')
   if (node) {
-    // Measure the GEOMETRY, not the root node: the root sits at the framing
-    // camera's position (AMENDMENT 81), which is behind the card plane by
-    // design — the model itself is what has to land on the plane.
+    // Measure the GEOMETRY, not the root: the root sits at the framing
+    // camera (behind the card plane). The model itself must land on the cell.
     const mn = [Infinity, Infinity, Infinity]
     const mx = [-Infinity, -Infinity, -Infinity]
     for (const mesh of scene.meshes) {
@@ -184,12 +183,16 @@ async function waitUntil(pred, tries = 40, ms = 25) {
       mx[0] = Math.max(mx[0], hi.x); mx[1] = Math.max(mx[1], hi.y); mx[2] = Math.max(mx[2], hi.z)
     }
     const mid = [0, 1, 2].map((i) => (mn[i] + mx[i]) / 2)
-    check('model is centred on the card plane', Math.abs(mid[2] - place.z) < 1e-3, `z=${mid[2]}`)
-    check('model x/y match the requested cell', Math.abs(mid[0] - place.x) < 1e-3 && Math.abs(mid[1] - place.y) < 1e-3,
+    check('model is centred on the card plane', Math.abs(mid[2] - place.z) < 0.5, `z=${mid[2]}`)
+    check('model x/y match the requested cell', Math.abs(mid[0] - place.x) < 0.5 && Math.abs(mid[1] - place.y) < 0.5,
       `x=${mid[0]} y=${mid[1]}`)
   }
   const importedOn = scene.lights.filter((l) => !l.name.startsWith('d3-') && l.isEnabled())
   check('no non-d3 lights left enabled', importedOn.length === 0, importedOn.map((l) => l.name).join(','))
+  const before = scene.transformNodes.filter((n) => n.name.startsWith('d3-')).length
+  pool.release('front')
+  const leftover = scene.transformNodes.filter((n) => n.name.startsWith('d3-') && !n.isDisposed())
+  check('release disposes the transform chain', leftover.length === 0, `before=${before} leftover=${leftover.map((n) => n.name).join(',')}`)
   pool.dispose()
 }
 

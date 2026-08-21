@@ -15,18 +15,22 @@ import type { AssetCache } from '../core/assets'
 import type { ThreadIndex, ThreadMeta } from '../protocol/thread-index'
 import { PreviewPool } from './previewPool'
 import { Direct3DPool, type Place3D } from './modelCard3d'
+import type { LivePool } from './livePool'
 import {
-  makeCardMaterial, makeOverlayMaterial, setCardTexture, setCardTexture2, setCardTint, setCardTint2, setCardWhite,
-  setCardFlip, setCardOpacity, setCardBlend, type CardTextureKind,
+  makeCardMaterial, setCardTexture, setCardTexture2, setCardTint, setCardTint2, setCardWhite,
+  setCardFlip, setCardOpacity, type CardTextureKind,
 } from './cardMaterial'
 import type { ShaderMaterial } from '@babylonjs/core/Materials/shaderMaterial'
-import { flatCamera, makeBackdropTexture, paintBackdrop, makeSpinnerTexture, roundRect, luminance, shade } from '../core/gfx'
+import { flatCamera, makeBackdropTexture, paintBackdrop, makeSpinnerTexture, paintPlayButtons, luminance, shade, roundRect } from '../core/gfx'
 import { theme } from '../theme'
 import { nodeWorthTexture } from './threadGate'
+import { type CardFade, finishFade, setOpacityNow, crossfadeTo, tickFade } from './cardFade'
+import { PlayIntent, playVisible } from './playIntent'
+import { disableOverlayAutoClear, makeOverlayMaterial, makePlayTextures, paintGlassPill, strokeReplyArrow, inkFor } from './overlays'
 
 export { nodeWorthTexture } from './threadGate'
 
-interface TNode {
+interface TNode extends CardFade {
   meta: ThreadMeta
   mesh: Mesh
   mat: ShaderMaterial
@@ -34,36 +38,17 @@ interface TNode {
   frameMat: ShaderMaterial
   spinner: Mesh
   spinnerMat: ShaderMaterial
-  // reply button (bottom-right pill): tap -> studio compose for THIS node
   reply: Mesh
   replyMat: ShaderMaterial
-  // ▶/⏸ play button (bottom-left pill): toggles this node's live preview
-  // animation AND its embedded sound (AMENDMENT 69)
   play: Mesh
   playMat: ShaderMaterial
-  // poster texture (reapplied when the live preview is released)
   poster: TextureT | null
-  // live animated preview (same pipeline as the board's cards)
   live: RenderTargetTexture | null
   x: number
   y: number
   w: number
   h: number
   depth: number
-  // 120ms two-texture crossfade plate -> poster -> live (SPEC CARD
-  // "Crossfade 120ms"): the shader mixes tex/tex2 by `blend`, so node
-  // transitions are real crossfades — hard swaps were the black-flicker
-  // regression while the map built.
-  opacity: number
-  fadeFrom: number
-  fadeTo: number
-  fadeStart: number
-  blend: number
-  fadeFromBlend: number
-  fadeToBlend: number
-  fadeTex2: TextureT | null
-  fadeTint2Hex: string
-  fadeFlip: CardTextureKind
 }
 
 interface TEdge { parent: string; child: string }
@@ -144,80 +129,61 @@ export class ThreadView {
   readonly previewPool: PreviewPool
   /** Direct-3D models rendered in the visible thread scene (no RTT). */
   readonly pool3d: Direct3DPool
+  private live: LivePool
   private threeD = false
   /** Bumped on every 2D↔3D switch; async poster jobs capture it so a poster
    *  that resolves after the toggle cannot paint over a direct 3D model. */
   private modeGen = 0
-  /** Autoplay (settings → Interface): see Board.setAutoplay. */
-  autoplay = true
-  /** posts the user started with ▶ (kept playing even with autoplay off) */
-  private manualPlay = new Set<string>()
-  /** posts the user paused (autoplay must not re-start them) */
-  private pausedByUser = new Set<string>()
+  private intent = new PlayIntent()
+  get autoplay(): boolean { return this.intent.autoplay }
   /** 2D poster render failed this tree — do not retry every frame (that was a freeze). */
   private posterFailed = new Set<string>()
 
-  constructor(engine: FormEngine) {
+  constructor(engine: FormEngine, live: LivePool) {
     this.form = engine
+    this.live = live
     this.scene = new Scene(engine.engine)
     this.scene.clearColor = Color4.FromHexString(this.background + 'FF')
     this.scene.skipPointerMovePicking = true
-    // Overlay group (reply pill / play / spinner) draws after nodes + 3D
-    // models so a post can never paint over its buttons. Don't clear.
-    this.scene.setRenderingAutoClearDepthStencil(1, false)
+    disableOverlayAutoClear(this.scene)
     this.camera = flatCamera(this.scene, 'thread-cam', 30)
 
-    // Animated nodes get live previews, same bounded pool as the board.
-    // (Before, the thread map only ever showed static posters — animated
-    // models were frozen in the tree.)
-    this.previewPool = new PreviewPool(
-      engine.engine,
-      (postId) => this.assets?.getModelBytesByPostId(postId) ?? Promise.resolve(undefined),
-      { maxSlots: 3, rttWidth: 384, rttHeight: 240, slotsPerFrame: 1, targetFps: 15 },
-    )
-    this.previewPool.onLive = (postId, rtt) => {
-      const n = this.nodes.get(postId)
-      if (!n || n.mesh.isDisposed()) return
-      n.live = rtt
-      n.spinner.setEnabled(false)
-      this.crossfadeTo(n, rtt, '#FFFFFF', 'rtt')
-      this.positionPlayButton(n) // ▶ flips to ⏸
-      this.form.kick()
-    }
-    this.previewPool.onRelease = (postId) => {
-      const n = this.nodes.get(postId)
-      if (!n || !n.live) return
-      n.live = null
-      this.showNodePoster(n)
-      this.positionPlayButton(n) // ⏸ flips back to ▶
-      this.form.kick()
-    }
-    // Pool rebuilt its RTTs (settings → Textures → "Card / preview width"):
-    // swap the node material's texture handle in place, no fade.
-    this.previewPool.onResize = (postId, newRtt) => {
-      const n = this.nodes.get(postId)
-      if (!n || !n.live || n.mesh.isDisposed()) return
-      n.live = newRtt
-      if (n.fadeStart) this.finishNodeFade(n)
-      setCardTexture(n.mat, newRtt)
-      setCardWhite(n.mat)
-      setCardTexture2(n.mat, null)
-      setCardTint2(n.mat, '#FFFFFF')
-      setCardFlip(n.mat, 'rtt')
-      this.form.kick()
-    }
-    this.previewPool.onLoadDone = () => {
-      this.syncPreviews()
-      this.form.kick()
-    }
+    this.previewPool = live.preview
+    this.previewPool.watch({
+      onLive: (postId, rtt) => {
+        const n = this.nodes.get(postId)
+        if (!n || n.mesh.isDisposed()) return
+        if (n.live === rtt) { this.positionPlayButton(n); return }
+        n.live = rtt
+        n.spinner.setEnabled(false)
+        this.crossfadeTo(n, rtt, '#FFFFFF', 'rtt')
+        this.positionPlayButton(n)
+        this.form.kick()
+      },
+      onRelease: (postId) => {
+        const n = this.nodes.get(postId)
+        if (!n || !n.live) return
+        n.live = null
+        this.showNodePoster(n)
+        this.positionPlayButton(n)
+        this.form.kick()
+      },
+      onResize: (postId, newRtt) => {
+        const n = this.nodes.get(postId)
+        if (!n || !n.live || n.mesh.isDisposed()) return
+        n.live = newRtt
+        if (n.fadeStart) this.finishNodeFade(n)
+        setCardTexture(n.mat, newRtt)
+        setCardWhite(n.mat)
+        setCardTexture2(n.mat, null)
+        setCardTint2(n.mat, '#FFFFFF')
+        setCardFlip(n.mat, 'rtt')
+        this.form.kick()
+      },
+      onLoadDone: () => { if (this.attached) { this.syncPreviews(); this.form.kick() } },
+    })
 
-    // Direct-3D pool for the thread map: real meshes in the visible scene
-    // (no poster, no render-to-texture), active while the 3D toggle is on.
-    this.pool3d = new Direct3DPool(
-      this.scene,
-      (postId) => this.assets?.getModelBytesByPostId(postId) ?? Promise.resolve(undefined),
-      { maxSlots: 6 },
-    )
+    this.pool3d = live.attach3d('thread', this.scene, 6)
     this.pool3d.onPlaced = (postId) => {
       const n = this.nodes.get(postId)
       if (!n || n.mesh.isDisposed()) return
@@ -233,6 +199,7 @@ export class ThreadView {
       this.drivePoster2D(n)
     }
     this.pool3d.onLoadDone = () => {
+      if (!this.attached) return
       this.sync3D()
       this.form.kick()
     }
@@ -252,9 +219,9 @@ export class ThreadView {
     this.replyTex = new DynamicTexture('thread-reply-tex', { width: 256, height: 128 }, this.scene, true)
     this.replyTex.hasAlpha = true
     this.paintReplyTexture()
-    this.playTexOff = new DynamicTexture('thread-play-off', { width: 128, height: 128 }, this.scene, true)
-    this.playTexOn = new DynamicTexture('thread-play-on', { width: 128, height: 128 }, this.scene, true)
-    this.paintPlayTextures()
+    const playTex = makePlayTextures(this.scene, 'thread-play', this.isDark)
+    this.playTexOff = playTex.off
+    this.playTexOn = playTex.on
 
     this.applyCamera()
 
@@ -268,8 +235,8 @@ export class ThreadView {
 
   /** Settings → Memory: how many thread nodes may animate at once. */
   setLivePreviewSlots(n: number): void {
-    this.previewPool.setMaxSlots(n)
-    this.syncPreviews()
+    this.live.setMaxSlots(n)
+    if (this.attached) this.syncPreviews()
   }
 
   /** Settings → Textures: card / preview width. Height follows the 16:10
@@ -300,13 +267,14 @@ export class ThreadView {
    * notch.
    */
   private applyPreviewScale(): void {
+    if (!this.attached) return
     const raw = this.basePreviewWidth / Math.max(0.05, this.zoom)
     const w = Math.min(ThreadView.RTT_MAX_W, Math.max(ThreadView.RTT_MIN_W, Math.round(raw)))
     const snapped = Math.round(w / 32) * 32
     if (snapped === this.appliedRttWidth) return
     this.appliedRttWidth = snapped
     const h = Math.max(16, Math.round(snapped * (10 / 16)))
-    this.previewPool.setRttSize(snapped, h)
+    this.live.setThreadRttSize(snapped, h)
   }
 
   /** Zoom the map by a factor about the viewport centre (HUD buttons / + − keys). */
@@ -368,7 +336,7 @@ export class ThreadView {
    * models itself and remembers them.
    */
   private syncPreviews(): void {
-    if (!this.assets) return
+    if (!this.assets || !this.attached || this.live.view !== 'thread') return
     // In 3D mode the direct-model pool (sync3D) owns node rendering; a node
     // that fell back to its poster stays a static poster, never a live RTT.
     if (this.threeD) return
@@ -392,58 +360,14 @@ export class ThreadView {
       if (!(animated ?? (n.meta.animHint || n.meta.cameraCount > 0))) continue
       // AMENDMENT 69: autoplay starts nodes silently; user-started nodes keep
       // their sound; a user-paused node stays paused until ▶ is pressed.
-      const manual = this.manualPlay.has(id)
-      const auto = this.autoplay && !this.pausedByUser.has(id)
-      if (auto || manual) this.previewPool.request(id, visible, manual)
+      if (this.intent.wantsPlay(id)) this.previewPool.request(id, visible, this.intent.isManual(id))
     }
   }
 
-  /** Snap the node to its current crossfade target (mid-fade interrupt). */
-  private finishNodeFade(n: TNode): void {
-    n.fadeStart = 0
-    n.opacity = n.fadeTo
-    setCardOpacity(n.mat, n.opacity)
-    n.blend = 0
-    // reset the material uniform too (same all-white regression as the board)
-    setCardBlend(n.mat, 0)
-    if (n.fadeTex2) {
-      setCardTexture(n.mat, n.fadeTex2)
-      setCardTint(n.mat, n.fadeTint2Hex)
-      setCardTexture2(n.mat, null)
-      setCardTint2(n.mat, '#FFFFFF')
-      setCardFlip(n.mat, n.fadeFlip)
-      n.fadeTex2 = null
-    }
-  }
-
-  /** Set node card state right now, dropping any in-flight crossfade. */
-  private setNodeOpacityNow(n: TNode, v: number): void {
-    n.opacity = v
-    n.fadeStart = 0
-    n.blend = 0
-    setCardBlend(n.mat, 0)
-    if (n.fadeTex2) {
-      setCardTexture2(n.mat, null)
-      setCardTint2(n.mat, '#FFFFFF')
-      n.fadeTex2 = null
-    }
-    setCardOpacity(n.mat, v)
-  }
-
-  /** Crossfade the node to a NEW texture over 120ms (SPEC CARD crossfade). */
-  private crossfadeTo(n: TNode, tex2: TextureT | null, tint2Hex: string, flip: CardTextureKind, toOpacity = 1): void {
-    if (n.fadeStart) this.finishNodeFade(n)
-    setCardTexture2(n.mat, tex2)
-    setCardTint2(n.mat, tint2Hex)
-    n.fadeTex2 = tex2
-    n.fadeTint2Hex = tint2Hex
-    n.fadeFlip = flip
-    n.fadeFrom = n.opacity
-    n.fadeTo = toOpacity
-    n.fadeFromBlend = 0
-    n.fadeToBlend = 1
-    n.fadeStart = performance.now()
-    this.form.kick()
+  private finishNodeFade(n: TNode): void { finishFade(n, n.mat) }
+  private setNodeOpacityNow(n: TNode, v: number): void { setOpacityNow(n, n.mat, v) }
+  private crossfadeTo(n: TNode, tex2: TextureT | null, tint: string, flip: CardTextureKind, to = 1): void {
+    crossfadeTo(n, n.mat, tex2, tint, flip, to); this.form.kick()
   }
 
   /** Show the node's poster texture (fallback after its live preview is released). */
@@ -477,7 +401,7 @@ export class ThreadView {
     this.paintFrame(this.frameTex, false)
     this.paintFrame(this.rootFrameTex, true)
     this.paintReplyTexture()
-    this.paintPlayTextures()
+    paintPlayButtons(this.playTexOff, this.playTexOn, this.isDark, theme.ink)
     const edge = Color3.FromHexString(shade(hex, this.isDark ? 0.3 : -0.3))
     for (const l of this.lineMeshes) l.color = edge
   }
@@ -511,88 +435,20 @@ export class ThreadView {
     const { width: w, height: h } = tex.getSize()
     const ctx = tex.getContext() as CanvasRenderingContext2D
     ctx.clearRect(0, 0, w, h)
-    const dark = this.isDark
-    const pad = Math.round(h * 0.08)
-    const bw = w - pad * 2
-    const bh = h - pad * 2
-    ctx.fillStyle = dark ? 'rgba(12,12,14,0.62)' : 'rgba(250,250,252,0.72)'
-    ctx.strokeStyle = dark ? 'rgba(255,255,255,0.30)' : 'rgba(0,0,0,0.28)'
-    ctx.lineWidth = Math.max(2, h * 0.03)
-    roundRect(ctx, pad, pad, bw, bh, bh / 2)
-    ctx.fill()
-    ctx.stroke()
-
-    const ink = dark ? theme.ink : '#101014'
-    const cy = h / 2
-    // ↩ arrow (vector, same construction as the board badge)
-    const ax = w * 0.40
-    const s = bh * 0.30
+    const pad = Math.round(h * 0.08), bh = h - pad * 2
+    paintGlassPill(ctx, pad, pad, w - pad * 2, bh, this.isDark)
+    const ink = inkFor(this.isDark), cy = h / 2, ax = w * 0.40, s = bh * 0.30
     ctx.strokeStyle = ink
     ctx.lineWidth = Math.max(2.5, h * 0.05)
     ctx.lineCap = 'round'
     ctx.lineJoin = 'round'
-    ctx.beginPath()
-    ctx.moveTo(ax + s, cy - s * 0.85)
-    ctx.lineTo(ax + s * 0.15, cy - s * 0.85)
-    ctx.quadraticCurveTo(ax - s * 0.75, cy - s * 0.85, ax - s * 0.75, cy + s * 0.05)
-    ctx.lineTo(ax - s * 0.75, cy + s * 0.5)
-    ctx.stroke()
-    ctx.beginPath()
-    ctx.moveTo(ax - s * 0.75 - s * 0.5, cy + s * 0.05)
-    ctx.lineTo(ax - s * 0.75, cy + s * 0.6)
-    ctx.lineTo(ax - s * 0.75 + s * 0.5, cy + s * 0.05)
-    ctx.stroke()
-    // "+" — compose, not navigate (distinguishes it from the count badge)
-    const px = w * 0.66
-    const ps = bh * 0.22
+    strokeReplyArrow(ctx, ax, cy, s)
+    const px = w * 0.66, ps = bh * 0.22
     ctx.beginPath()
     ctx.moveTo(px - ps, cy); ctx.lineTo(px + ps, cy)
     ctx.moveTo(px, cy - ps); ctx.lineTo(px, cy + ps)
     ctx.stroke()
     tex.update()
-  }
-
-  /** Shared ▶/⏸ button textures (vector strokes, never font glyphs). */
-  private paintPlayTextures(): void {
-    const paint = (tex: DynamicTexture, playing: boolean): void => {
-      const { width: w, height: h } = tex.getSize()
-      const ctx = tex.getContext() as CanvasRenderingContext2D
-      ctx.clearRect(0, 0, w, h)
-      const dark = this.isDark
-      const pad = Math.round(h * 0.07)
-      const bw = w - pad * 2
-      const bh = h - pad * 2
-      ctx.fillStyle = dark ? 'rgba(12,12,14,0.62)' : 'rgba(250,250,252,0.72)'
-      ctx.strokeStyle = dark ? 'rgba(255,255,255,0.30)' : 'rgba(0,0,0,0.28)'
-      ctx.lineWidth = Math.max(2, h * 0.03)
-      roundRect(ctx, pad, pad, bw, bh, bh * 0.28)
-      ctx.fill()
-      ctx.stroke()
-      const ink = dark ? theme.ink : '#101014'
-      const cx = w / 2
-      const cy = h / 2
-      const s = h * 0.24
-      if (playing) {
-        const barW = s * 0.34
-        const gap = s * 0.24
-        ctx.fillStyle = ink
-        roundRect(ctx, cx - gap / 2 - barW, cy - s, barW, s * 2, barW * 0.45)
-        ctx.fill()
-        roundRect(ctx, cx + gap / 2, cy - s, barW, s * 2, barW * 0.45)
-        ctx.fill()
-      } else {
-        ctx.fillStyle = ink
-        ctx.beginPath()
-        ctx.moveTo(cx - s * 0.5, cy - s)
-        ctx.lineTo(cx - s * 0.5, cy + s)
-        ctx.lineTo(cx + s * 0.92, cy)
-        ctx.closePath()
-        ctx.fill()
-      }
-      tex.update()
-    }
-    paint(this.playTexOff, false)
-    paint(this.playTexOn, true)
   }
 
   /** Point a node's button at the right shared texture (▶ or ⏸). */
@@ -606,14 +462,11 @@ export class ThreadView {
    * posts, and never when livePreviews = 0 (a dead control).
    */
   private playButtonVisible(n: TNode): boolean {
-    if (this.threeD) {
-      return this.pool3d.isLive(n.meta.eventId) && this.pool3d.hasAnims(n.meta.eventId)
-    }
-    if (!n.poster) return false
-    if (this.previewPool.isRejected(n.meta.eventId)) return false
-    if (this.previewPool.opts.maxSlots <= 0) return false
-    const animated = this.assets?.isAnimated(n.meta)
-    return animated === true || (animated === undefined && (n.meta.animHint || n.meta.cameraCount > 0))
+    return playVisible(
+      this.threeD, this.pool3d.isLive(n.meta.eventId), this.pool3d.hasAnims(n.meta.eventId),
+      !!n.poster, this.previewPool.isRejected(n.meta.eventId), this.previewPool.opts.maxSlots,
+      this.assets?.isAnimated(n.meta), !!(n.meta.animHint || n.meta.cameraCount > 0),
+    )
   }
 
   /**
@@ -622,28 +475,13 @@ export class ThreadView {
    * plays and explicit pauses are always respected.
    */
   setAutoplay(on: boolean): void {
-    if (this.autoplay === on) return
-    this.autoplay = on
-    if (this.threeD) {
-      for (const n of this.nodes.values()) {
-        const id = n.meta.eventId
-        if (!this.pool3d.isLive(id) || !this.pool3d.hasAnims(id)) continue
-        if (on && !this.pausedByUser.has(id) && !this.pool3d.isPlaying(id)) this.pool3d.play(id)
-        else if (!on && !this.manualPlay.has(id) && this.pool3d.isPlaying(id)) this.pool3d.pause(id)
-      }
-      for (const n of this.nodes.values()) this.positionPlayButton(n)
-      this.form.kick()
-      return
-    }
-    for (const n of this.nodes.values()) {
-      const id = n.meta.eventId
-      if (!n.live) continue
-      if (on && !this.pausedByUser.has(id) && !this.previewPool.isPlaying(id)) {
-        this.previewPool.resume(id) // silent: autoplay never starts sound
-      } else if (!on && !this.manualPlay.has(id) && this.previewPool.isPlaying(id)) {
-        this.previewPool.pause(id)
-      }
-    }
+    const ids = [...this.nodes.keys()]
+    const changed = this.threeD
+      ? this.intent.setAutoplay(on, ids.filter((id) => this.pool3d.isLive(id) && this.pool3d.hasAnims(id)),
+        (id) => this.pool3d.isPlaying(id), (id) => this.pool3d.play(id), (id) => this.pool3d.pause(id))
+      : this.intent.setAutoplay(on, ids.filter((id) => this.nodes.get(id)?.live),
+        (id) => this.previewPool.isPlaying(id), (id) => this.previewPool.resume(id), (id) => this.previewPool.pause(id))
+    if (!changed) return
     for (const n of this.nodes.values()) this.positionPlayButton(n)
     this.form.kick()
   }
@@ -660,7 +498,7 @@ export class ThreadView {
     this.modeGen++ // invalidate in-flight poster jobs from the old mode
     // Free the pipeline we are leaving (never both resident at once).
     if (was) this.pool3d.releaseAll()
-    else this.previewPool.releaseAll()
+    else if (this.live.ownsPreview('thread')) this.previewPool.releaseAll()
     for (const n of this.nodes.values()) {
       n.poster = null
       n.live = null
@@ -723,7 +561,7 @@ export class ThreadView {
    */
   private static readonly POSTER_START_PER_PASS = 2
   private syncPosters(): void {
-    if (this.threeD || !this.assets) return
+    if (this.threeD || !this.assets || !this.attached) return
     let started = 0
     for (const n of this.nodes.values()) {
       const want = this.nodeInView(n, 1.8) && this.nodeWorthTexture(n)
@@ -762,10 +600,6 @@ export class ThreadView {
     if (!this.threeD || !this.assets) return
     const meta = n.meta
     if (meta.hashFailed || this.assets.isHashFailed(meta.eventId)) return
-    // The pool downloads by event id; without this the cache only knows the
-    // posts whose POSTER was requested, and a reply that went straight to 3D
-    // failed with "download failed" and fell back to 2D forever.
-    this.assets.noteMeta(meta)
     n.spinner.setEnabled(true)
     const ok = this.pool3d.request(meta.eventId, this.placeFor(n), this.visibleNodeIds())
     if (!ok) {
@@ -815,7 +649,7 @@ export class ThreadView {
     // with the cube toggle off, so opening a thread as posters also parsed
     // every in-view GLB into the map (main-thread freeze) and left overflow
     // spinners running forever (isAnimating latched → 30 fps forever).
-    if (!this.threeD || !this.assets) return
+    if (!this.threeD || !this.assets || !this.attached || this.live.view !== 'thread') return
     const idle = this.pointers.size === 0
     for (const n of this.nodes.values()) {
       const id = n.meta.eventId
@@ -830,10 +664,9 @@ export class ThreadView {
         continue
       }
       if (this.pool3d.isLive(id) && this.pool3d.hasAnims(id)) {
-        const manual = this.manualPlay.has(id)
-        const auto = this.autoplay && !this.pausedByUser.has(id)
-        if ((auto || manual) && !this.pool3d.isPlaying(id)) this.pool3d.play(id, manual)
-        else if (!(auto || manual) && this.pool3d.isPlaying(id)) this.pool3d.pause(id)
+        const want = this.intent.wantsPlay(id)
+        if (want && !this.pool3d.isPlaying(id)) this.pool3d.play(id, this.intent.isManual(id))
+        else if (!want && this.pool3d.isPlaying(id)) this.pool3d.pause(id)
       }
     }
   }
@@ -875,14 +708,7 @@ export class ThreadView {
         const phase = Math.floor(now / 85) * ((Math.PI * 2) / 12)
         for (const n of this.nodes.values()) {
           if (n.spinner.isEnabled()) n.spinner.rotation.z = -phase
-          if (n.fadeStart) {
-            const t = Math.min(1, (now - n.fadeStart) / 120)
-            n.opacity = n.fadeFrom + (n.fadeTo - n.fadeFrom) * t
-            setCardOpacity(n.mat, n.opacity)
-            n.blend = n.fadeFromBlend + (n.fadeToBlend - n.fadeFromBlend) * t
-            setCardBlend(n.mat, n.blend)
-            if (t >= 1) this.finishNodeFade(n)
-          }
+          tickFade(n, n.mat, now)
         }
         if (this.threeD) {
           this.sync3D()
@@ -904,9 +730,7 @@ export class ThreadView {
     if (metas.length === 0) return
     // play-intent bookkeeping belongs to this tree: drop entries for posts
     // that are no longer part of it (the map rebuilt)
-    const inTree = new Set(metas.map((m) => m.eventId))
-    for (const id of [...this.manualPlay]) if (!inTree.has(id)) this.manualPlay.delete(id)
-    for (const id of [...this.pausedByUser]) if (!inTree.has(id)) this.pausedByUser.delete(id)
+    this.intent.prune(new Set(metas.map((m) => m.eventId)))
 
     const pos = this.layout(metas, rootId)
 
@@ -973,7 +797,7 @@ export class ThreadView {
       // ▶/⏸ play button, bottom-left (mirrors the reply pill); toggles this
       // node's animation + embedded sound. Picked in tapAt before the node.
       const play = MeshBuilder.CreatePlane(`tplay-${meta.eventId.slice(0, 8)}`, { width: 4, height: 4 }, this.scene)
-      const playMat = makeOverlayMaterial(this.scene)
+      const playMat = makeCardMaterial(this.scene)
       play.material = playMat
       setCardTexture(playMat, this.playTexOff)
       setCardWhite(playMat)
@@ -1103,6 +927,8 @@ export class ThreadView {
     this.backdrop.position.set(this.panX, this.panY, 4)
     // zoom changed -> the sharpness a node needs changed -> rescale the RTTs
     this.applyPreviewScale()
+    // Hidden map must not steal the shared pool or the poster queue.
+    if (!this.attached) return
     // viewport changed -> posters / live previews / 3D models follow
     if (this.threeD) this.sync3D()
     else {
@@ -1191,14 +1017,17 @@ export class ThreadView {
     canvas.addEventListener('pointerleave', this.onUp)
     canvas.addEventListener('wheel', this.onWheel, { passive: false })
     this.attached = true
+    this.applyPreviewScale()
   }
 
   detach(): void {
     // Leaving the thread route: stop the live node previews AND dispose
     // their idle RTTs (the pool is capped by the shared livePreviews
     // budget; its slots are re-created lazily when the map reopens).
-    this.previewPool.releaseAll()
-    this.previewPool.prune()
+    // Pool occupancy is LivePool.activate()'s job — pruning here would
+    // dispose RTTs the board is about to reuse. Forget the last zoom-scaled
+    // width so attach() reapplies against whatever size the board restored.
+    this.appliedRttWidth = -1
     this.pool3d.releaseAll()
     const canvas = this.canvas
     if (!canvas) { this.attached = false; return }
@@ -1236,7 +1065,7 @@ export class ThreadView {
       this.moved += Math.abs(dx) + Math.abs(dy)
       this.panX -= dx * upx
       this.panY += dy * upx
-            prev.x = ev.clientX
+      prev.x = ev.clientX
       prev.y = ev.clientY
       return
     }
@@ -1313,29 +1142,16 @@ export class ThreadView {
     const n = this.nodes.get(meta.eventId)
     if (!n) return
     const id = meta.eventId
+    const playing = this.threeD ? this.pool3d.isPlaying(id) : !!(n.live && this.previewPool.isPlaying(id))
+    const start = this.intent.toggle(id, playing)
     if (this.threeD) {
-      if (this.pool3d.isPlaying(id)) {
-        this.pool3d.pause(id)
-        this.pausedByUser.add(id)
-        this.manualPlay.delete(id)
-      } else {
-        this.pausedByUser.delete(id)
-        this.manualPlay.add(id)
-        this.pool3d.play(id, true)
-      }
-      this.positionPlayButton(n)
-      this.form.kick()
-      return
-    }
-    if (n.live && this.previewPool.isPlaying(id)) {
-      this.previewPool.pause(id)
-      this.pausedByUser.add(id)
-      this.manualPlay.delete(id)
-    } else {
-      this.pausedByUser.delete(id)
-      this.manualPlay.add(id)
+      if (start) this.pool3d.play(id, true)
+      else this.pool3d.pause(id)
+    } else if (start) {
       if (n.live) this.previewPool.resume(id, true)
       else this.previewPool.request(id, this.visibleNodeIds(), true)
+    } else {
+      this.previewPool.pause(id)
     }
     this.positionPlayButton(n)
     this.form.kick()
@@ -1372,7 +1188,9 @@ export class ThreadView {
 
   clear(): void {
     this.generation++
-    this.previewPool.releaseAll()
+    // Shared preview stays: request() rebinds in-tree posts and the new
+    // visible set evicts the rest. releaseAll here used to discard a board
+    // parse the player had just been looking at.
     this.pool3d.releaseAll()
     for (const n of this.nodes.values()) {
       n.mesh.dispose(); n.mat.dispose(); n.frame.dispose(); n.frameMat.dispose()
@@ -1395,8 +1213,6 @@ export class ThreadView {
   dispose(): void {
     this.detach()
     this.clear()
-    this.previewPool.dispose()
-    this.pool3d.dispose()
     this.scene.dispose()
   }
 }

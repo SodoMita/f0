@@ -4,15 +4,11 @@ import type { AssetContainer } from '@babylonjs/core/assetContainer'
 import type { AbstractMesh } from '@babylonjs/core/Meshes/abstractMesh'
 
 /**
- * Meshes that actually have geometry.
- *
- * Babylon's glTF loader inserts an empty `__root__` mesh (it carries the
- * right-handed → left-handed conversion) and authors leave empty group nodes
- * around. Their bounding boxes are ZERO-SIZE BOXES AT THEIR OWN POSITION —
- * usually the origin — and every fit below is a UNION, so a model authored
- * 100k units away had its box stretched all the way back to the origin and
- * was framed as an invisible speck (posters, live previews and 3D cards
- * alike). Anything without vertices contributes nothing to a fit.
+ * Meshes that actually have geometry. Babylon's glTF loader inserts an empty
+ * `__root__` (right-handed → left-handed) and authors leave empty group nodes;
+ * those boxes are zero-size at their own position (usually the origin). Every
+ * fit below is a UNION, so a model authored far from the origin had its box
+ * stretched back to 0 and framed as a speck — posters, live previews and 3D.
  */
 function drawable(container: AssetContainer): AbstractMesh[] {
   return container.meshes.filter((m) => m.getTotalVertices() > 0)
@@ -27,14 +23,6 @@ const MAX_TRIANGLES = 12_000
 /** Diagnostics for test/facing.ts (never used in production paths). */
 export let lastFacingDebug: { sum: Vector3; mag: Vector3; triangles: number } | null = null
 
-/**
- * Dominant facing direction of a model: the axis with the most surface area,
- * signed by the net outward normal. Area-weighted normals of closed shapes
- * (thin boxes, capsules) cancel out, so the magnitude is accumulated
- * component-wise (|area|) to pick the axis, and the sign is taken from the
- * signed sum. Auto-fit cameras sit on this side or flat content (text)
- * renders mirrored (spec 05b §2.7), and closed shapes render edge-on.
- */
 /**
  * Dominant facing direction of a model: the axis with the most surface area,
  * signed by the net outward normal (authored normals when the GLB has them,
@@ -99,7 +87,6 @@ export function dominantFacing(container: AssetContainer, out?: Vector3): Vector
   }
 
   lastFacingDebug = { sum: sum.clone(), mag: mag.clone(), triangles }
-  lastFacingDebug = { sum: sum.clone(), mag: mag.clone(), triangles }
 
   // Axis: a clearly FLAT model is faced along its thin axis (a sign, a screen,
   // a text plate); otherwise take the axis carrying the most surface area.
@@ -157,45 +144,6 @@ export function worldRadius(container: AssetContainer): number {
     if (d > r) r = d
   }
   return r || 1
-}
-
-/**
- * True world-space bounds of the whole model: union of every mesh's world AABB.
- * Averaging per-mesh centers (worldCenter) or per-mesh sphere radii can miss
- * offset models and frame the camera on the wrong point.
- */
-export function worldBounds(container: AssetContainer): { center: Vector3; radius: number } {
-  const min = new Vector3(Infinity, Infinity, Infinity)
-  const max = new Vector3(-Infinity, -Infinity, -Infinity)
-  let any = false
-  for (const mesh of drawable(container)) {
-    mesh.computeWorldMatrix(true)
-    const info = mesh.getBoundingInfo()
-    if (!info) continue
-    const mi = info.boundingBox.minimumWorld
-    const ma = info.boundingBox.maximumWorld
-    min.x = Math.min(min.x, mi.x); min.y = Math.min(min.y, mi.y); min.z = Math.min(min.z, mi.z)
-    max.x = Math.max(max.x, ma.x); max.y = Math.max(max.y, ma.y); max.z = Math.max(max.z, ma.z)
-    any = true
-  }
-  if (!any) return { center: Vector3.Zero(), radius: 1 }
-  // NOTE: do not mutate min before computing both values (a previous
-  // `min.add(max)` bug halved the radius and over-zoomed every camera).
-  const center = new Vector3((min.x + max.x) / 2, (min.y + max.y) / 2, (min.z + max.z) / 2)
-  const radius = Math.max(0.001, Vector3.Distance(min, max) / 2)
-  return { center, radius }
-}
-
-/**
- * Camera distance that frames a bounding sphere of `radius` with margin for a
- * perspective camera with the given vertical fov.
- *
- * Prefer `frameDistance()` — this sphere fit wastes most of a 16:10 frame for
- * wide/flat models (a wide sign has a huge bounding sphere, so it was pushed
- * far away and rendered as a postage stamp in the middle of the card).
- */
-export function fitDistance(radius: number, fov: number): number {
-  return Math.max(radius * 2, (radius / Math.tan(fov / 2)) * 1.25)
 }
 
 /** World-space AABB of the whole model. */

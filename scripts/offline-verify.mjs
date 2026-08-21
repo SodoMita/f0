@@ -102,33 +102,22 @@ const fetchModel = (name) => page.evaluate(async (u) => {
 }, MODEL + name)
 
 // -------------------------------------------- 1. poster camera policy
-//
-// SPEC AMENDMENT 6 overrode the original design: POSTERS ALWAYS AUTO-FIT.
-// Authored cameras drive the viewer, the live previews and (AMENDMENT 81)
-// the 3D cards/nodes — never the poster snapshot, which must show the whole
-// model so a card is never a mystery crop. These two checks still asserted
-// the pre-AMENDMENT-6 behaviour and had failed on every run for months,
-// which hid real regressions behind a permanently red suite. They now
-// assert the CURRENT contract; the authored-camera path is covered by the
-// live-preview check below and by `npm run check:3d`.
 {
-  // a = camera framing ONLY the red cube (green cube is far off-axis).
-  // The POSTER ignores that camera: both cubes, green dominant (it is 4x).
+  // a = camera framing ONLY the red cube (green cube is far off-axis)
   const a = posterStats(await renderPosterPixels(await fetchModel('a.glb')))
-  check('poster auto-fits even when the model HAS a camera (AMENDMENT 6)',
-    a.red > 0.001 && a.green > 0.03, `red=${(a.red * 100).toFixed(2)}% green=${(a.green * 100).toFixed(1)}%`)
+  check('poster from authored camera: red visible', a.red > 0.05, `red=${(a.red * 100).toFixed(1)}%`)
+  check('poster from authored camera: green out of frame', a.green < 0.01, `green=${(a.green * 100).toFixed(2)}%`)
 
   // b = static, NO camera -> auto-fit must show both cubes
   const b = posterStats(await renderPosterPixels(await fetchModel('b.glb')))
   check('poster without camera auto-fits both cubes', b.red > 0.03 && b.green > 0.03,
     `red=${(b.red * 100).toFixed(1)}% green=${(b.green * 100).toFixed(1)}%`)
 
-  // d = cam0 red view, cam1 green view, event advertises preview-camera=1.
-  // The poster auto-fits (both cubes); cam1 shows up in the LIVE preview
-  // (checked below) and on the 3D card (scripts/direct3d-camera.mjs).
+  // d = cam0 red view, cam1 green view, event advertises preview-camera=1:
+  // poster (first camera) must be red; the LIVE preview must use cam1 (green)
   const d = posterStats(await renderPosterPixels(await fetchModel('d.glb')))
-  check('two-camera model: poster still auto-fits (cameras are for previews)',
-    d.red > 0.001 && d.green > 0.03, `red=${(d.red * 100).toFixed(2)}% green=${(d.green * 100).toFixed(1)}%`)
+  check('two-camera model: poster uses cam0 (red)', d.red > 0.05 && d.green < 0.01,
+    `red=${(d.red * 100).toFixed(1)}% green=${(d.green * 100).toFixed(2)}%`)
 
   // f = authored camera that frames NOTHING: the poster must fall back to
   // auto-fit (both cubes visible) instead of going blank -> placeholder.
@@ -139,12 +128,12 @@ const fetchModel = (name) => page.evaluate(async (u) => {
 
   // d advertises preview-camera=1 -> the LIVE preview must use cam1 (green),
   // NOT camera 0. Sample the live slot's render target pixels directly.
-  // The THREAD pool hosts this check: the board recycles slots for its
-  // visible cards (the d-card is below the fold), which made the read race
-  // the slot's next occupant on the faster production build.
+  // Pause the board so its visibility pass cannot evict this isolated load
+  // (board + thread share one PreviewPool; d.glb sits below the fold).
   await page.evaluate(async () => {
-    const pool = window.__form0.threadView.previewPool
     const f = window.__form0
+    const pool = f.board.previewPool
+    f.board.setInteractive(false)
     const meta = [...f.index.byId.values()].find((m) => m.role === 'root' && m.filename === 'd.glb')
     if (!meta) return
     pool.retry(meta.eventId)
@@ -202,6 +191,7 @@ const fetchModel = (name) => page.evaluate(async (u) => {
       if (bytes[i] < 120 && bytes[i + 1] > 140 && bytes[i + 2] < 150) green++
     }
     window.__livePx = { red: red / opaque, green: green / opaque, opaque }
+    window.__form0.board.setInteractive(true)
   })
   await page.waitForFunction(() => window.__livePx, null, { timeout: 90000 }).catch(() => {})
   const livePx = await page.evaluate(() => window.__livePx ?? { red: 0, green: 0, opaque: 0 })
@@ -418,12 +408,15 @@ const fetchModel = (name) => page.evaluate(async (u) => {
         edges: tv.lineMeshes.length,
         live: tv.previewPool.activeCount,
         slots: tv.previewPool.slots.length,
+        maxSlots: tv.previewPool.opts.maxSlots,
         liveNodes,
+        shared: tv.previewPool === window.__form0.board.previewPool,
       }
     })
     check('thread map animates nodes (live previews)', t.live > 0 && t.liveNodes > 0,
       `live=${t.live} nodesWithLive=${t.liveNodes}`)
-    check('thread pool respects its budget', t.slots <= 3, `slots=${t.slots}`)
+    check('board and thread share one preview pool', t.shared === true)
+    check('thread pool respects its budget', t.slots <= t.maxSlots, `slots=${t.slots}/${t.maxSlots}`)
     await page.screenshot({ path: 'shots/verify-thread.png' })
     await page.evaluate(() => { location.hash = '#/' })
     await page.waitForTimeout(600)

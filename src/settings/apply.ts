@@ -96,14 +96,10 @@ export function applySettings(w: Wiring, v: SettingsValues, changed: string[] | 
     w.assets.setBudgets({ modelRamMiB: Number(v.modelRamBudget ?? 48), textures: Number(v.textureBudget ?? 32) })
   }
   if (touched('livePreviews')) {
-    // ONE budget, two viewports: board and thread each cap at the setting,
-    // but only the ACTIVE route renders, its slots are created lazily and
-    // the thread pool prunes its RTTs on detach — so the effective cost is
-    // a single pool's worth, not two permanent allocations.
+    // ONE PreviewPool (one stage scene, one RTT set) shared by board + thread.
     const slots = Number(v.livePreviews ?? 5)
     w.board.setLivePreviewSlots(slots)
-    // the thread map gets a small share of the same budget
-    w.threadView.setLivePreviewSlots(Math.max(0, Math.min(3, slots)))
+    w.threadView.setLivePreviewSlots(slots)
   }
   if (touched('previewWidth')) {
     // Width is the only knob the user sees; height is locked to the poster

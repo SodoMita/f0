@@ -3,8 +3,12 @@ import { Mesh } from '@babylonjs/core/Meshes/mesh'
 import { Matrix, Quaternion, Vector3 } from '@babylonjs/core/Maths/math.vector'
 import { Color3 } from '@babylonjs/core/Maths/math.color'
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial'
+import { CreateBox } from '@babylonjs/core/Meshes/Builders/boxBuilder'
+import { CreateSphere } from '@babylonjs/core/Meshes/Builders/sphereBuilder'
+import { CreateCylinder } from '@babylonjs/core/Meshes/Builders/cylinderBuilder'
+import { CreatePlane } from '@babylonjs/core/Meshes/Builders/planeBuilder'
+import { CreatePolyhedron } from '@babylonjs/core/Meshes/Builders/polyhedronBuilder'
 import { SHAPES, STRIDE, type ShapeKind, type Stamp } from './types'
-import { createPaintShapeMesh } from './shapes'
 import type { StampStore } from './store'
 
 const NAME = 'studio-paint-'
@@ -20,7 +24,7 @@ export class PaintInstances {
    *  `appendNew` to flush only the delta during a stroke (old path rebuilt
    *  the entire matrix+color buffer every frame, scaling O(N) per frame
    *  — at a few hundred stamps the studio became unworkable). */
-  private flushedPerShape: Record<ShapeKind, number> = emptyShapeCounts()
+  private flushedPerShape: Record<ShapeKind, number> = { cube: 0, sphere: 0, cylinder: 0, tetra: 0, quad: 0 }
   private readonly tmpS = new Vector3()
   private readonly tmpP = new Vector3()
   private readonly tmpQ = new Quaternion()
@@ -48,9 +52,11 @@ export class PaintInstances {
       mesh.isVisible = true
       return mesh
     }
-    for (const shape of SHAPES) {
-      this.meshes.set(shape, mk(shape, createPaintShapeMesh(shape, scene)))
-    }
+    this.meshes.set('cube', mk('cube', CreateBox('p-cube', { size: 1 }, scene)))
+    this.meshes.set('sphere', mk('sphere', CreateSphere('p-sphere', { diameter: 1, segments: 8 }, scene)))
+    this.meshes.set('cylinder', mk('cylinder', CreateCylinder('p-cyl', { height: 1, diameter: 1, tessellation: 8 }, scene)))
+    this.meshes.set('tetra', mk('tetra', CreatePolyhedron('p-tetra', { type: 0, size: 0.5 }, scene)))
+    this.meshes.set('quad', mk('quad', CreatePlane('p-quad', { size: 1 }, scene)))
 
     this.matrices = emptyBuf()
     this.colors = emptyBuf()
@@ -125,7 +131,9 @@ export class PaintInstances {
   flush(store: StampStore): void {
     if (!this.dirty) return
     this.dirty = false
-    const buckets = emptyShapeBuckets()
+    const buckets: Record<ShapeKind, Stamp[]> = {
+      cube: [], sphere: [], cylinder: [], tetra: [], quad: [],
+    }
     for (let i = 0; i < store.count; i++) {
       const s = store.at(i)
       buckets[s.shape].push(s)
@@ -175,15 +183,8 @@ export class PaintInstances {
 }
 
 function emptyBuf(): Record<ShapeKind, Float32Array> {
-  return Object.fromEntries(SHAPES.map((shape) => [shape, new Float32Array(0)])) as Record<ShapeKind, Float32Array>
-}
-
-function emptyShapeCounts(): Record<ShapeKind, number> {
-  return Object.fromEntries(SHAPES.map((shape) => [shape, 0])) as Record<ShapeKind, number>
-}
-
-function emptyShapeBuckets(): Record<ShapeKind, Stamp[]> {
-  return Object.fromEntries(SHAPES.map((shape) => [shape, [] as Stamp[]])) as unknown as Record<ShapeKind, Stamp[]>
+  const z = () => new Float32Array(0)
+  return { cube: z(), sphere: z(), cylinder: z(), tetra: z(), quad: z() }
 }
 
 function nextPow2(n: number): number {

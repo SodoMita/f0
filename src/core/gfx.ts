@@ -208,6 +208,37 @@ export function makeSpinnerTexture(scene: Scene, name: string): DynamicTexture {
   return tex
 }
 
+/** Paint shared play/pause button textures used by cards and thread nodes. */
+export function paintPlayButtons(off: DynamicTexture, on: DynamicTexture, dark: boolean, ink: string): void {
+  for (const [tex, playing] of [[off, false], [on, true]] as const) {
+    const { width: w, height: h } = tex.getSize()
+    const ctx = tex.getContext() as CanvasRenderingContext2D
+    ctx.clearRect(0, 0, w, h)
+    const pad = Math.round(h * 0.07)
+    const bh = h - pad * 2
+    ctx.fillStyle = dark ? 'rgba(12,12,14,0.62)' : 'rgba(250,250,252,0.72)'
+    ctx.strokeStyle = dark ? 'rgba(255,255,255,0.30)' : 'rgba(0,0,0,0.28)'
+    ctx.lineWidth = Math.max(2, h * 0.03)
+    roundRect(ctx, pad, pad, w - pad * 2, bh, bh * 0.28)
+    ctx.fill(); ctx.stroke()
+
+    const cx = w / 2, cy = h / 2, s = h * 0.24
+    ctx.fillStyle = dark ? ink : '#101014'
+    if (playing) {
+      const barW = s * 0.34, gap = s * 0.24
+      roundRect(ctx, cx - gap / 2 - barW, cy - s, barW, s * 2, barW * 0.45); ctx.fill()
+      roundRect(ctx, cx + gap / 2, cy - s, barW, s * 2, barW * 0.45); ctx.fill()
+    } else {
+      ctx.beginPath()
+      ctx.moveTo(cx - s * 0.5, cy - s)
+      ctx.lineTo(cx - s * 0.5, cy + s)
+      ctx.lineTo(cx + s * 0.92, cy)
+      ctx.closePath(); ctx.fill()
+    }
+    tex.update()
+  }
+}
+
 /** Rounded-rect path helper for canvas 2D (badges, node frames). */
 export function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
   const rr = Math.min(r, w / 2, h / 2)

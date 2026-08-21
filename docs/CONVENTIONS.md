@@ -97,10 +97,6 @@ input change works:
 | `node scripts/facing.mjs <url>` | which side of a model is the readable one |
 | `node scripts/offline-verify.mjs` | deterministic pixel/state checks of the poster camera policy, live-slot reuse, thread animation, card crossfades and studio view tools (runs against `scripts/offline-rig.mjs`, no real relays needed) |
 | `node scripts/verify-publish.mjs` | publish round-trip on the rig: export → Blossom upload (model only) → relay OK → live feed event with `dim` → SHA-verified re-download → kind-5 delete → live tombstone |
-| `npm run check:3d` | 3D mode end to end (AMENDMENT 81/82): pool lifecycle, the framing math against the authored camera's own view matrix, edge-case models (flat plates and mirrors, dust/kilometre scales, 100k-unit offsets, degenerate meshes, cameras inside the model), pixels against the rig (board + tree + scroll + crop + shadows + idle render loop) and a four-cycle leak check |
-
-Run guards **without a pipe**: `bun script.mjs | tail` reports tail's exit
-code, and a red suite has been committed that way before.
 
 When relays/CDNs are unreachable (sandboxes), see `docs/SANDBOX-VERIFY.md`:
 how to obtain a headless Chromium from the npm registry alone (NSS libs from

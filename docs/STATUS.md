@@ -4,6 +4,32 @@ Claim a task by moving it to **In progress** with your name/date, push, then
 move it to **Done** with a commit reference. One agent per area.
 
 ## Done
+- [x] **3D view bugs from arena/01a02366-f0, kept short** (agent arena, 2026-08-21,
+      SPEC AMENDMENT 81): empty `__root__` meshes no longer stretch every fit
+      to the origin (specks); overlay materials ignore depth so 3D models
+      cannot cover ▶/↩; Direct3DPool `hasWork` keeps drawing while shaders
+      compile (blank cards on a settled board); clip planes crop close-ups
+      to the card; scale lives on the root (off-origin drift); `dispose()`
+      recurses (orient/fit leaked); loader-started anims are stopped so the
+      pool owns play/pause; contact shadow follows the real footprint.
+      Did NOT take the 357-line per-mesh frustum rewrite.
+
+- [x] **One preview/3D pool across board + thread** (agent arena, 2026-08-21,
+      SPEC AMENDMENT 80): `LivePool` owns the single PreviewPool stage (one
+      scene, one RTT set) and the per-scene Direct3D pools. `activate(view)`
+      keeps preview RTTs across board↔thread hops (request() rebinds via
+      onLive; the incoming view evicts what it cannot see) and for viewer
+      acquire() hand-off; studio drops everything. Inactive views must not
+      request or release the shared pool (a resize/onLoadDone used to steal
+      slots). Graphics registers the stage once. tsc clean.
+
+- [x] **Shorter board/thread + audit** (agent arena, 2026-08-21): extracted shared
+      `cardFade` / `playIntent` / `overlays` so board and thread no longer each
+      own a copy of the 120 ms crossfade, ▶/⏸ intent, and glass-pill drawing
+      (the class of bug that produced the all-white-card regression in one
+      viewport). PreviewPool now un-cancels an in-flight load on scroll-back
+      (parity with Direct3DPool). Audit: `docs/AUDIT.md`. tsc clean.
+
 - [x] **Page zoom stretched / softened 3D content** (agent arena, 2026-08-21,
       SPEC AMENDMENT 79): zooming the page left the drawing buffer at the
       device pixel ratio sampled at boot — `FormEngine.resize()` re-read the
@@ -22,62 +48,6 @@ move it to **Done** with a commit reference. One agent per area.
       manual resolution with `aspectLock` off now LETTERBOXES the canvas
       instead of stretching a mismatched buffer to fill the window.
       Guard: `node scripts/zoom.mjs`.
-- [x] **Quad/triangle paint brushes + runtime model thumbnails** (agent arena,
-      2026-08-21, SPEC AMENDMENT 80, commit 165a81f): the paint editor now has
-      named quad and triangle plate brushes. Paint buttons and every Shapes
-      library cell show a transparent RTT capture of the exact mesh/GLB they
-      use instead of a font glyph or hand-drawn SVG. Library captures are
-      lazy and all jobs share one offscreen scene on the existing Engine.
-      Guards: `bun scripts/paint-unit.mjs` + `TARGET_URL=… bun run
-      check:paint-icons` (visible-pixel checks included).
-
-- [x] **Empty nodes poisoned every model fit** (agent arena, 2026-08-21, SPEC
-      AMENDMENT 82): `model/facing.ts` unioned the bounding box of every mesh
-      including Babylon's empty `__root__`, whose box is a zero-size box at
-      the ORIGIN. Any model authored far from the origin was framed together
-      with the empty space back to (0,0,0) and rendered as an invisible speck
-      — posters and live previews too, not just 3D cards. Fits now skip
-      vertex-less meshes. Guard: `bun scripts/framing-edge-unit.mjs` (flat
-      plates + a mirror check, dust/kilometre scales, a 100k-unit offset,
-      degenerate meshes, a camera inside the model, macro close-ups, extreme
-      cell shapes).
-
-- [x] **3D mode now really shows the model's MAIN CAMERA view** (agent arena,
-      2026-08-21, SPEC AMENDMENT 81): with "Show posts as 3D models" on, a
-      board card / thread node applied only the authored camera's ROTATION
-      and then auto-fitted the whole file's bounding box (further shrunk by
-      the depth budget), so cards showed a tiny off-centre speck of
-      everything the GLB contains instead of the view the author framed.
-      Framing moved to `src/model/framing.ts`: the authored camera's VIEW
-      matrix drives pivot + rotation, the camera's frame height at the
-      model's depth maps onto the cell height, only the meshes the camera
-      SEES set that depth, out-of-frame geometry is CROPPED by per-cell clip
-      planes (like a poster), deep models slide toward the camera instead of
-      shrinking, and the uniform scale moved to the root node (on `fit` it
-      was applied before that node's own position, so off-origin models
-      drifted off their card). No/blind camera → the auto-fit BUILDS the
-      poster's own camera (frameDistance, fill 0.86) and frames through it,
-      so 2D and 3D show a camera-less model at the same size (115 px vs
-      117 px measured). Same fix serves the board and the thread tree.
-      Four bugs found on the way: `AssetCache.byPostId` was only filled by
-      `getPoster()`, so 3D-only posts (every thread reply) failed to
-      download and latched back to 2D — `noteMeta()` now registers them; the
-      glTF loader's auto-started animation groups are stopped so autoplay
-      OFF means off; `Direct3DPool.hasWork()` keeps demand-driven frames
-      coming until each model's shaders are ready (otherwise cards stay
-      blank on a settled board); group-1 overlays use `depthFunction=ALWAYS`
-      so a model with real depth cannot cover its own ▶ button (AMENDMENT
-      76 only fixed the transparent sort); released slots dispose their whole
-      transform chain (`dispose(true)` = do NOT recurse); the 3D contact
-      shadow follows the model's real footprint in its cell instead of a
-      fixed ellipse. Guards:
-      `bun scripts/direct3d-camera-unit.mjs` (framing vs the authored view
-      matrix) and `node scripts/direct3d-camera.mjs` (pixel census against
-      the offline rig, board + thread + scroll). Also un-rotted
-      `scripts/offline-verify.mjs`: its two "poster from authored camera"
-      checks predated AMENDMENT 6 (posters ALWAYS auto-fit) and had been
-      failing on every run, hiding real regressions — they now assert the
-      current contract and the suite is green end to end (43/43).
 
 - [x] **Studio left the board clickable** (agent arena, 2026-08-21, SPEC
       AMENDMENT 78): opening the studio left board-only topbar controls

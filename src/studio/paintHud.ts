@@ -1,7 +1,6 @@
 import type { Studio } from './studio'
 import type { PaintToolKind, ShapeKind } from './paint/types'
 import { hexToRgba, rgbaToHex, SHAPES } from './paint/types'
-import { runtimeModelIcons } from './runtimeModelIcons'
 
 /**
  * Bind the paint inspector. Kept out of main.ts so the boot file does not
@@ -15,25 +14,6 @@ export function bindPaintHud(studio: Studio, onChange: () => void): { refresh():
   const snapBtn = document.getElementById('paint-snap')
   const lockBtn = document.getElementById('paint-lock')
   const surfBtn = document.getElementById('paint-surf')
-  const icons = runtimeModelIcons(studio.scene.getEngine())
-
-  // Paint icons are RTT captures of these exact source meshes (shapes.ts),
-  // never font approximations. Start them immediately: there are only six.
-  document.querySelectorAll<HTMLButtonElement>('[data-shape]').forEach((button) => {
-    const shape = button.dataset.shape as ShapeKind
-    if (!SHAPES.includes(shape)) return
-    const image = document.createElement('img')
-    image.alt = ''
-    image.setAttribute('aria-hidden', 'true')
-    button.replaceChildren(image)
-    void icons.paint(shape).then((url) => {
-      image.src = url
-      button.classList.add('icon-ready')
-    }).catch((error) => {
-      button.classList.add('icon-error')
-      console.warn(`paint icon failed: ${shape}`, error)
-    })
-  })
 
   const refresh = (): void => {
     const o = studio.paint.opts

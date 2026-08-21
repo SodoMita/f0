@@ -8,13 +8,12 @@ import type { Plane } from '@babylonjs/core/Maths/math.plane'
 import type { AssetContainer } from '@babylonjs/core/assetContainer'
 import type { AnimationGroup } from '@babylonjs/core/Animations/animationGroup'
 import type { Sound } from '@babylonjs/core/Audio/sound'
-// Registers the scene's mainSoundTrack (MSFT_audio_emitter sounds land there).
-import '@babylonjs/core/Audio/audioSceneComponent'
 import '../model/gltf'
 import { configureDraco } from '../model/draco'
 import { frameModel, placeFrame, makeCellClip, updateCellClip, type ModelFrame } from '../model/framing'
 import { validateGLBCached } from '../model/limits'
 import { graphics } from '../render/graphics'
+import { claimModelSounds, playModelSounds } from './modelSounds'
 
 /** Model bytes + content hash + the authored camera index (v3 `preview-camera`). */
 export interface DirectModel {
@@ -51,16 +50,11 @@ interface Slot {
   anims: AnimationGroup[]
   sounds: Sound[]
   soundTimer: number | null
-  /** how the model is framed: main-camera view (pivot/rot/frame height) or
-   *  auto-fit, plus the oriented bounds the cell fit is computed from. */
   frame: ModelFrame | null
-  /** the four planes that crop this model to its card / node rect */
   clip: Plane[] | null
-  /** where the model sits inside its cell (contact shadow) */
   footprint: { cx: number; bottom: number; w: number } | null
-  /** false while the model's shaders are still compiling (see hasWork) */
+  /** false while the model's shaders are still compiling (see hasWork). */
   warm: boolean
-  /** give up waiting for a never-ready effect at this timestamp */
   warmUntil: number
   place: Place3D | null
   placedAt: number
@@ -76,12 +70,10 @@ const WARMUP_MS = 10_000
  * models as they scroll or pan out of the viewport (same pipeline budget
  * as the poster/preview path).
  *
- * Framing (spec AMENDMENT 43, see model/framing.ts): each model is
- * transformed by its own MAIN CAMERA's view — rotated by the inverse of the
- * camera's rotation about the CAMERA's position, then scaled so the camera's
- * frame maps onto the card cell. The static flat camera therefore shows
- * exactly what the author framed, at the size and offset they framed it.
- * Models without a usable camera fall back to the poster's auto-fit.
+ * Framing (spec AMENDMENT 43 / 81, see model/framing.ts): each model is
+ * shown through its MAIN CAMERA (rotated about the camera position, scaled
+ * so that frame maps onto the card). No camera → the poster's auto-fit.
+ * Close-up models are cropped to the card with clip planes.
  */
 export class Direct3DPool {
   private slots: Slot[] = []
@@ -135,7 +127,6 @@ export class Direct3DPool {
   isLive(postId: string): boolean { return this.byPost.has(postId) }
   isLoading(postId: string): boolean { return this.loading.has(postId) }
   isRejected(postId: string): boolean { return this.rejected.has(postId) }
-  /** Where a live model sits inside its cell (0..1), for the contact shadow. */
   footprintOf(postId: string): { cx: number; bottom: number; w: number } | null {
     return this.byPost.get(postId)?.footprint ?? null
   }
@@ -229,7 +220,7 @@ export class Direct3DPool {
     if (slot.started) for (const a of slot.anims) a.play(true)
     else { for (const a of slot.anims) a.start(true); slot.started = true }
     slot.playing = true
-    if (sound) this.playSounds(slot)
+    if (sound) playModelSounds(slot)
   }
 
   pause(postId: string): void {
@@ -245,14 +236,9 @@ export class Direct3DPool {
 
   /**
    * True while any VISIBLE model still needs frames: it is animating, or its
-   * shaders have not finished compiling.
-   *
-   * The second half matters as much as the first. The board and the thread
-   * render ON DEMAND, and a material is only compiled when it is first
-   * rendered — so the frame that placed a model draws nothing, and without
-   * this the next frame never comes: cards stayed BLANK on a settled board
-   * until the user scrolled (very visible on software GL, where compiling a
-   * PBR shader takes hundreds of ms).
+   * shaders have not finished compiling. Demand-driven rendering only compiles
+   * a material on first draw, so without this the place-frame draws nothing
+   * and the next frame never comes — cards stayed blank until the user scrolled.
    */
   hasWork(visible?: ReadonlySet<string>): boolean {
     let work = false
@@ -262,11 +248,9 @@ export class Direct3DPool {
       if (visible && !visible.has(slot.postId)) continue
       if (slot.playing && slot.anims.length > 0) work = true
       if (!slot.warm) {
-        // A broken effect must not pin the render loop at the animation FPS
-        // forever, hence the deadline. NOTE: ask for a frame even on the poll
-        // that FLIPS warm — that frame is the one that finally draws the
-        // model. Returning false as soon as the shader is ready left the
-        // card blank until the next unrelated redraw.
+        // Keep asking on the poll that FLIPS warm — that frame is the one
+        // that finally draws the model. A broken effect must not pin 30 fps
+        // forever, hence the deadline.
         slot.warm = now > slot.warmUntil || this.effectsReady(slot)
         work = true
       }
@@ -322,15 +306,10 @@ export class Direct3DPool {
   }
 
   /**
-   * Apply a cell to a resident model. The framing (main-camera view or
-   * auto-fit) was computed once at load; this only maps it onto the current
-   * card / node rect, so scroll, pan, zoom and resize are pure transforms.
-   *
-   * The chain is root(scale + position) → orient(rotation) → fit(-pivot):
-   * the SCALE lives on the root so the pivot translation below it is scaled
-   * too. (It used to sit on `fit`, whose own position is applied AFTER its
-   * scaling — an off-origin model was then displaced by pivot·(1-scale) and
-   * drifted off its card, which is why models looked "positioned wrong".)
+   * Apply a cell to a resident model. Framing was computed once at load;
+   * this only maps it onto the current card / node. SCALE lives on the root
+   * so the pivot translation below it is scaled too (scale on `fit` drifted
+   * off-origin models by pivot·(1-scale)).
    */
   private applyPlace(slot: Slot, place: Place3D): void {
     slot.place = place
@@ -340,7 +319,6 @@ export class Direct3DPool {
     slot.root.scaling.setAll(at.scale)
     slot.root.position.set(at.x, at.y, at.z)
     slot.footprint = at.footprint
-    // The crop follows the cell: scrolling a card moves its window too.
     if (slot.clip) updateCellClip(slot.clip, place)
   }
 
@@ -360,12 +338,6 @@ export class Direct3DPool {
       container.addAllToScene()
       slot.container = container // clearSlot() owns the cleanup from here on
       graphics.applyToContainer(container)
-      // Crop every material to the card / node rect (the planes are filled in
-      // by applyPlace). A poster is cut off by the card's edges; a real model
-      // has to be too, or a close-up framing paints over its neighbours.
-      // Assigned BEFORE the first render: the board scene sets
-      // blockMaterialDirtyMechanism, so a later assignment would never make
-      // it into the shader defines.
       const clip = makeCellClip()
       for (const mat of container.materials) {
         mat.clipPlane = clip[0]
@@ -383,10 +355,6 @@ export class Direct3DPool {
       for (const l of container.lights) l.setEnabled(false)
       for (const c of container.cameras) c.setEnabled(false)
 
-      // Framing is computed BEFORE reparenting: the authored camera's world
-      // matrix must reflect its authored transform, not the fit chain. The
-      // cell's aspect matters because the authored camera's horizontal frame
-      // follows the target it is rendered into (same rule as the poster).
       const cell = this.pendingPlace.get(postId)
       const aspect = cell && cell.h > 0 ? cell.w / cell.h : 1.6
       const frame = frameModel(container, model.cameraIndex ?? 0, aspect)
@@ -397,12 +365,8 @@ export class Direct3DPool {
       orient.parent = root
       fit.parent = orient
       orient.rotationQuaternion = frame.rot
-      // The model is shown from the camera's position: that point, not the
-      // bounding-box centre, is what lands in the middle of the cell.
       fit.position = frame.pivot.scale(-1)
       for (const n of container.rootNodes) n.parent = fit
-      // Reparenting dirtied the whole chain — force it or the first frame
-      // renders the model at its pre-fit transform.
       root.computeWorldMatrix(true)
       orient.computeWorldMatrix(true)
       fit.computeWorldMatrix(true)
@@ -415,15 +379,8 @@ export class Direct3DPool {
       slot.fit = fit
       slot.clip = clip
       slot.anims = container.animationGroups.filter((g) => g.targetedAnimations.length > 0)
-      // The glTF loader auto-starts the first animation group (its
-      // animationStartMode defaults to FIRST). The POOL owns playback — the
-      // board/thread call play()/pause() from the autoplay setting and the ▶
-      // button — so a loader-started group would animate a card that the
-      // user explicitly left paused, and `slot.playing` (false) would never
-      // let anyone stop it. Stop before the first render: no frame has been
-      // evaluated yet, so the model keeps its authored pose.
       for (const g of container.animationGroups) g.stop()
-      slot.sounds = this.claimSounds(container, soundBaseline)
+      slot.sounds = claimModelSounds(this.scene, container, soundBaseline, this.claimedSounds)
       slot.frame = frame
       slot.postId = postId
       slot.started = false
@@ -462,10 +419,9 @@ export class Direct3DPool {
       slot.container.dispose()
       slot.container = null
     }
-    // Recurse: `dispose(true)` means doNotRecurse, so the orient + fit nodes
-    // survived every release and piled up in the scene (46 orphan nodes after
-    // a few 2D↔3D toggles). The container's own roots were unparented above,
-    // so recursing only reaches this pool's two helper nodes.
+    // Recurse: dispose(true) means doNotRecurse, so orient+fit leaked
+    // (46 orphan nodes after a few 2D↔3D toggles). Container roots were
+    // unparented above, so this only reaches the two helper nodes.
     if (slot.root) { slot.root.dispose(); slot.root = null; slot.orient = null; slot.fit = null }
     slot.clip = null
     slot.footprint = null
@@ -477,42 +433,4 @@ export class Direct3DPool {
     slot.visible = false
   }
 
-  /** Find the MSFT_audio_emitter Sounds this container's load created
-   *  (same ownership inference as the preview pool: node-attached emitters
-   *  first, then a bounded delta of unattached ones). */
-  private claimSounds(container: AssetContainer, baseline: number): Sound[] {
-    const all = this.scene.mainSoundTrack.soundCollection
-    const meshes = new Set(container.meshes)
-    const owned: Sound[] = []
-    const attachedOf = (s: Sound): TransformNode | null =>
-      (s as unknown as { _connectedTransformNode?: TransformNode })._connectedTransformNode ?? null
-    for (const s of all) {
-      if (this.claimedSounds.has(s)) continue
-      const node = attachedOf(s)
-      if (node && meshes.has(node as never)) { this.claimedSounds.add(s); owned.push(s) }
-    }
-    for (const s of all.slice(baseline)) {
-      if (this.claimedSounds.has(s) || owned.includes(s)) continue
-      if (!attachedOf(s)) { this.claimedSounds.add(s); owned.push(s) }
-    }
-    return owned
-  }
-
-  /** Start a slot's sounds, retrying briefly for clips still decoding. */
-  private playSounds(slot: Slot): void {
-    if (slot.soundTimer !== null) { clearInterval(slot.soundTimer); slot.soundTimer = null }
-    const pending = slot.sounds.filter((s) => !s.isReady())
-    for (const s of slot.sounds) if (s.isReady()) s.play()
-    if (!pending.length) return
-    let tries = 0
-    slot.soundTimer = window.setInterval(() => {
-      if (slot.soundTimer === null) return
-      tries++
-      for (const s of pending) if (s.isReady()) s.play()
-      if (pending.every((s) => s.isReady()) || tries >= 15) {
-        clearInterval(slot.soundTimer)
-        slot.soundTimer = null
-      }
-    }, 200)
-  }
 }

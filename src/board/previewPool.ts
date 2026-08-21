@@ -15,14 +15,12 @@ import type { AssetContainer } from '@babylonjs/core/assetContainer'
 import type { AnimationGroup } from '@babylonjs/core/Animations/animationGroup'
 import type { Mesh } from '@babylonjs/core/Meshes/mesh'
 import type { Sound } from '@babylonjs/core/Audio/sound'
-// Registers the scene's mainSoundTrack/sounds (Babylon sounds land there);
-// also brings the Scene type augmentation for mainSoundTrack.
-import '@babylonjs/core/Audio/audioSceneComponent'
 import '../model/gltf'
 import { configureDraco } from '../model/draco'
 import { dominantFacing, worldBox, frameDistance } from '../model/facing'
 import { validateGLBCached } from '../model/limits'
 import { graphics } from '../render/graphics'
+import { claimModelSounds, playModelSounds } from './modelSounds'
 
 /** Model bytes + the preferred authored camera (v3 `preview-camera` index). */
 export interface PreviewModel {
@@ -67,6 +65,13 @@ export interface PreviewPoolOptions {
   targetFps: number
 }
 
+export interface PreviewHooks {
+  onLive?: (postId: string, rtt: RenderTargetTexture) => void
+  onRelease?: (postId: string) => void
+  onResize?: (postId: string, rtt: RenderTargetTexture) => void
+  onLoadDone?: () => void
+}
+
 /**
  * Bounded RenderTargetTexture pool (step 6 / 03 §5). One hidden stage scene;
  * each slot gets its own camera + RTT. Refresh is interleaved (00 §3.12).
@@ -105,6 +110,27 @@ export class PreviewPool {
   onResize: ((postId: string, rtt: RenderTargetTexture) => void) | null = null
   /** A load finished (success or not) — callers may retry queued requests. */
   onLoadDone: (() => void) | null = null
+  private hooks: PreviewHooks[] = []
+
+  /** Extra listeners (board + thread share one pool). */
+  watch(h: PreviewHooks): void { this.hooks.push(h) }
+
+  private emitLive(postId: string, rtt: RenderTargetTexture): void {
+    this.onLive?.(postId, rtt)
+    for (const h of this.hooks) h.onLive?.(postId, rtt)
+  }
+  private emitRelease(postId: string): void {
+    this.onRelease?.(postId)
+    for (const h of this.hooks) h.onRelease?.(postId)
+  }
+  private emitResize(postId: string, rtt: RenderTargetTexture): void {
+    this.onResize?.(postId, rtt)
+    for (const h of this.hooks) h.onResize?.(postId, rtt)
+  }
+  private emitLoadDone(): void {
+    this.onLoadDone?.()
+    for (const h of this.hooks) h.onLoadDone?.()
+  }
 
   constructor(
     engine: AbstractEngine,
@@ -165,7 +191,7 @@ export class PreviewPool {
       slot.rtt.clearColor = new Color4(0, 0, 0, 0)
       // Card material still holds the OLD RTT handle; tell the board to swap
       // immediately. Empty slots (no live post) need no notification.
-      if (slot.postId) this.onResize?.(slot.postId, slot.rtt)
+      if (slot.postId) this.emitResize(slot.postId, slot.rtt)
       oldRtt.dispose()
     }
   }
@@ -236,7 +262,7 @@ export class PreviewPool {
     // play() restarts paused animatables from their pause point instead of
     // resetting to frame 0 (AnimationGroup.start would).
     for (const a of slot.anims) a.play(true)
-    if (sound) this.playSounds(slot)
+    if (sound) playModelSounds(slot)
     slot.playing = true
   }
 
@@ -270,7 +296,21 @@ export class PreviewPool {
    * browser's autoplay policy AND the SPEC "no autoplay" audio line).
    */
   request(postId: string, visible?: ReadonlySet<string>, sound = false): boolean {
-    if (this.byPost.has(postId) || this.loading.has(postId) || this.cancelled.has(postId)) return true
+    const live = this.byPost.get(postId)
+    if (live) {
+      // Already resident (view hop board↔thread): re-emit so the incoming
+      // view binds the RTT. Without this, request() returned true and the
+      // new card/node stayed on its poster forever.
+      this.emitLive(postId, live.rtt)
+      return true
+    }
+    // Scroll-back while a parse is in flight: un-cancel so the result is kept
+    // (Direct3DPool does this; leaving cancelled discarded a still-wanted load).
+    if (this.loading.has(postId)) {
+      this.cancelled.delete(postId)
+      return true
+    }
+    if (this.cancelled.has(postId)) return true
     if (this.rejected.has(postId)) return false
     // Reuse a released slot first — the old code counted spent slots against
     // the budget forever, so past the first screenful NOTHING could animate.
@@ -301,7 +341,7 @@ export class PreviewPool {
     }
     const had = this.byPost.delete(postId)
     this.clearSlotModel(slot)
-    if (had) this.onRelease?.(postId)
+    if (had) this.emitRelease(postId)
   }
 
   /**
@@ -403,7 +443,7 @@ export class PreviewPool {
         // fall back to posters. byPost is removed last so the slot is still
         // "intact" until every local ref is cleared.
         self.byPost.delete(postId)
-        self.onRelease?.(postId)
+        self.emitRelease(postId)
       },
       rollback(): void {
         if (state !== 'open') return
@@ -412,7 +452,7 @@ export class PreviewPool {
         // above). The slot stays in byPost, so tick() will re-render it
         // once the anims spin back up.
         for (const a of anims) a.start(true)
-        self.playSounds(slot)
+        playModelSounds(slot)
         slot.playing = true
       },
     }
@@ -501,66 +541,6 @@ export class PreviewPool {
       facing: new Vector3(0, 0, 1), lastRenderAt: 0,
     }
     return slot
-  }
-
-  /**
-   * Find the MSFT_audio_emitter Sounds this container's load created. The
-   * extension registers every Sound on the stage scene's mainSoundTrack
-   * (not on the container), so ownership is inferred two ways:
-   *   1. the sound's private `_connectedTransformNode` is one of the
-   *      container's meshes (node-attached emitters — the common case), or
-   *   2. it was created after this load started and has NO attached node
-   *      (scene-level emitters), a bounded delta.
-   * `claimedSounds` guarantees one owner per sound even when two loads race.
-   */
-  private claimSounds(container: AssetContainer, baseline: number): Sound[] {
-    const all = this.stage.mainSoundTrack.soundCollection
-    const meshes = new Set(container.meshes)
-    const owned: Sound[] = []
-    const attachedOf = (s: Sound): TransformNode | null =>
-      (s as unknown as { _connectedTransformNode?: TransformNode })._connectedTransformNode ?? null
-    for (const s of all) {
-      if (this.claimedSounds.has(s)) continue
-      const node = attachedOf(s)
-      if (node && meshes.has(node as Mesh)) {
-        this.claimedSounds.add(s)
-        owned.push(s)
-      }
-    }
-    for (const s of all.slice(baseline)) {
-      if (this.claimedSounds.has(s) || owned.includes(s)) continue
-      if (!attachedOf(s)) {
-        this.claimedSounds.add(s)
-        owned.push(s)
-      }
-    }
-    return owned
-  }
-
-  /**
-   * Start a slot's sounds. A clip may still be decoding when the ▶ button is
-   * pressed (the emitter fetches audio during parse); retry briefly instead
-   * of dropping the sound forever. The retry dies with the slot (pause /
-   * release / dispose all clear slot.soundTimer).
-   */
-  private playSounds(slot: Slot): void {
-    if (slot.soundTimer !== null) {
-      clearInterval(slot.soundTimer)
-      slot.soundTimer = null
-    }
-    const pending = slot.sounds.filter((s) => !s.isReady())
-    for (const s of slot.sounds) if (s.isReady()) s.play()
-    if (!pending.length) return
-    let tries = 0
-    slot.soundTimer = window.setInterval(() => {
-      if (slot.soundTimer === null) return // released mid-retry
-      tries++
-      for (const s of pending) if (s.isReady()) s.play()
-      if (pending.every((s) => s.isReady()) || tries >= 15) {
-        clearInterval(slot.soundTimer)
-        slot.soundTimer = null
-      }
-    }, 200)
   }
 
   private async load(slot: Slot, postId: string, sound: boolean): Promise<void> {
@@ -656,7 +636,7 @@ export class PreviewPool {
       // Claim the model's sounds even for STATIC posts so clearSlotModel can
       // dispose them — otherwise they stay registered (and silent) in the
       // stage scene's mainSoundTrack for the whole session.
-      slot.sounds = this.claimSounds(container, soundBaseline)
+      slot.sounds = claimModelSounds(this.stage, container, soundBaseline, this.claimedSounds)
       slot.postId = postId
 
       // Render the first frame through the scene path (compiles shaders).
@@ -675,9 +655,9 @@ export class PreviewPool {
       for (const a of slot.anims) a.start(true)
       // Sound only ever starts from the per-card ▶ button (a user gesture):
       // autoplay animation stays silent (SPEC: audio "no autoplay").
-      if (sound) this.playSounds(slot)
+      if (sound) playModelSounds(slot)
       this.byPost.set(postId, slot)
-      this.onLive?.(postId, slot.rtt)
+      this.emitLive(postId, slot.rtt)
     } catch {
       this.clearSlotModel(slot)
       // Do not mark a post FAILED when the slot itself was recycled mid-load
@@ -688,7 +668,7 @@ export class PreviewPool {
       this.cancelled.delete(postId)
       slot.pending = false
       this.loading.delete(postId)
-      this.onLoadDone?.()
+      this.emitLoadDone()
     }
   }
 }
