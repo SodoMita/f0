@@ -233,6 +233,36 @@ if (twoCamCards.length) {
 await page.evaluate(() => window.__form0.setSearchQuery(''))
 await page.waitForTimeout(1500)
 
+// Demand-driven rendering must survive 3D mode: a settled board with paused
+// models draws ZERO frames, and an animating one draws again. The warm-up
+// loop that fixed blank cards must not latch (AMENDMENT 77 had exactly that
+// bug in the other direction: isAnimating latched -> 30 fps forever).
+{
+  const renders = () => page.evaluate(() => window.__form0.engine.perfStats().renders)
+  await page.waitForTimeout(2000)
+  const idle0 = await renders()
+  await page.waitForTimeout(2500)
+  const idle1 = await renders()
+  check('3D mode goes idle when nothing moves (no runaway render loop)',
+    idle1 - idle0 <= 5, `${idle1 - idle0} frames in 2.5s`)
+
+  await page.evaluate(() => window.__form0.settings.set({ autoplayAnimations: true }))
+  await page.waitForTimeout(1500)
+  const play0 = await renders()
+  await page.waitForTimeout(2000)
+  const play1 = await renders()
+  check('3D models still animate (frames keep coming with autoplay on)',
+    play1 - play0 >= 15, `${play1 - play0} frames in 2s`)
+
+  await page.evaluate(() => window.__form0.settings.set({ autoplayAnimations: false }))
+  await page.waitForTimeout(2500)
+  const paused0 = await renders()
+  await page.waitForTimeout(2500)
+  const paused1 = await renders()
+  check('turning autoplay back off stops the render loop again',
+    paused1 - paused0 <= 5, `${paused1 - paused0} frames in 2.5s`)
+}
+
 // Toggling back to 2D must remove every direct model from the scene (no
 // orphan meshes floating over the posters), and toggling on must bring them
 // back — the mode generation counter guards the async poster/3D race.
