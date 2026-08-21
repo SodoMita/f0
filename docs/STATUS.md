@@ -22,9 +22,9 @@ move it to **Done** with a commit reference. One agent per area.
       manual resolution with `aspectLock` off now LETTERBOXES the canvas
       instead of stretching a mismatched buffer to fill the window.
       Guard: `node scripts/zoom.mjs`.
-- [x] **Square/triangle paint brushes + runtime model thumbnails** (agent arena,
-      2026-08-21, SPEC AMENDMENT 80, commit cd91f2e): the paint editor now has
-      named square and triangle plate brushes. Paint buttons and every Shapes
+- [x] **Quad/triangle paint brushes + runtime model thumbnails** (agent arena,
+      2026-08-21, SPEC AMENDMENT 80, commit 165a81f): the paint editor now has
+      named quad and triangle plate brushes. Paint buttons and every Shapes
       library cell show a transparent RTT capture of the exact mesh/GLB they
       use instead of a font glyph or hand-drawn SVG. Library captures are
       lazy and all jobs share one offscreen scene on the existing Engine.

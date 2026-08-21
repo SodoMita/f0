@@ -35,16 +35,16 @@ const check = (name, ok, detail = '') => {
 }
 
 {
-  check('square and triangle are paint brushes', SHAPES.includes('square') && SHAPES.includes('triangle'))
+  check('quad and triangle are paint brushes', SHAPES.includes('quad') && SHAPES.includes('triangle'))
   check('paint shape ids stay unique', new Set(Object.values(SHAPE_ID)).size === SHAPES.length)
   const store = new StampStore()
-  for (const shape of ['square', 'triangle']) {
+  for (const shape of ['quad', 'triangle']) {
     store.add({
       shape, px: 0, py: 0, pz: 0, qx: 0, qy: 0, qz: 0, qw: 1,
       sx: 1, sy: 1, sz: 0.02, r: 1, g: 1, b: 1, a: 1,
     })
   }
-  check('square and triangle round-trip through packed store', store.at(0).shape === 'square' && store.at(1).shape === 'triangle')
+  check('quad and triangle round-trip through packed store', store.at(0).shape === 'quad' && store.at(1).shape === 'triangle')
 }
 
 {

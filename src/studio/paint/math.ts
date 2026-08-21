@@ -38,7 +38,7 @@ export function quatAlign(tangent: Vec3, normal: Vec3): Quat {
   return quatFromBasis(x, y, z)
 }
 
-/** Rotation taking local +Z → normal, local +X → tangent (for square/triangle plates). */
+/** Rotation taking local +Z → normal, local +X → tangent (for quad/triangle plates). */
 export function quatFacing(normal: Vec3, tangent: Vec3): Quat {
   const z = norm(normal)
   let x = tangent

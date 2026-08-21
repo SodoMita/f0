@@ -103,7 +103,7 @@ export class RuntimeModelIcons {
     mesh.material = material
     mesh.isPickable = false
     try {
-      return await this.capture([mesh], shape === 'square' || shape === 'triangle')
+      return await this.capture([mesh], shape === 'quad' || shape === 'triangle')
     } finally {
       mesh.dispose(false, true)
     }

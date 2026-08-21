@@ -8,10 +8,10 @@ export const CUBE = 0.25
 export const MAX_STAMPS = 50_000
 export const UNDO_CAP = 100
 
-export const SHAPES = ['cube', 'sphere', 'cylinder', 'tetra', 'square', 'triangle'] as const
+export const SHAPES = ['cube', 'sphere', 'cylinder', 'tetra', 'quad', 'triangle'] as const
 export type ShapeKind = (typeof SHAPES)[number]
 export const SHAPE_ID: Record<ShapeKind, number> = {
-  cube: 0, sphere: 1, cylinder: 2, tetra: 3, square: 4, triangle: 5,
+  cube: 0, sphere: 1, cylinder: 2, tetra: 3, quad: 4, triangle: 5,
 }
 export const SHAPE_FROM_ID: readonly ShapeKind[] = SHAPES
 

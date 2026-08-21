@@ -1,4 +1,4 @@
-// Browser guard for runtime editor model thumbnails + square/triangle brushes.
+// Browser guard for runtime editor model thumbnails + quad/triangle brushes.
 // Run against a dev/preview/offline-rig URL:
 //   TARGET_URL=http://localhost:5173/ node scripts/paint-icons.mjs
 import { launchFormBrowser } from './browser.mjs'
@@ -50,35 +50,35 @@ const paintIcons = await page.evaluate(() => {
   })
 })
 const shapeNames = paintIcons.map((icon) => icon.shape)
-check('paint has square + triangle brushes', shapeNames.includes('square') && shapeNames.includes('triangle'), shapeNames.join(','))
+check('paint has quad + triangle brushes', shapeNames.includes('quad') && shapeNames.includes('triangle'), shapeNames.join(','))
 check('all six paint icons are runtime blob images', paintIcons.length === 6 && paintIcons.every((icon) => icon.src.startsWith('blob:') && icon.svg === 0))
 check('all paint model textures contain visible pixels', paintIcons.every((icon) => icon.alpha > 0), JSON.stringify(paintIcons.map(({ shape, alpha }) => [shape, alpha])))
 check('paint model buttons keep 42px touch targets', paintIcons.every((icon) => icon.width >= 42 && icon.height >= 42))
 
-await page.click('[data-shape="square"]')
-const squareSelected = await page.evaluate(() => window.__form0.studio.paint.opts.shape)
+await page.click('[data-shape="quad"]')
+const quadSelected = await page.evaluate(() => window.__form0.studio.paint.opts.shape)
 await page.click('[data-shape="triangle"]')
 const triangleSelected = await page.evaluate(() => window.__form0.studio.paint.opts.shape)
-check('square brush selects', squareSelected === 'square', squareSelected)
+check('quad brush selects', quadSelected === 'quad', quadSelected)
 check('triangle brush selects', triangleSelected === 'triangle', triangleSelected)
 
 const painted = await page.evaluate(() => {
   const paint = window.__form0.studio.paint
   paint.clear()
   const point = (x) => ({ x, y: 0, z: 0, pressure: 1, t: x * 10 })
-  paint.setOpts({ shape: 'square' })
+  paint.setOpts({ shape: 'quad' })
   paint.drawStroke([point(0)])
   paint.setOpts({ shape: 'triangle' })
   paint.drawStroke([point(1)])
   return {
     shapes: paint.store.toArray().map((stamp) => stamp.shape),
-    squareVertices: paint.instances.meshes.get('square')?.getTotalVertices() ?? 0,
+    quadVertices: paint.instances.meshes.get('quad')?.getTotalVertices() ?? 0,
     triangleVertices: paint.instances.meshes.get('triangle')?.getTotalVertices() ?? 0,
     triangleIndices: paint.instances.meshes.get('triangle')?.getTotalIndices() ?? 0,
   }
 })
-check('square + triangle strokes use their own source meshes',
-  painted.shapes.join(',') === 'square,triangle' && painted.squareVertices >= 4 && painted.triangleVertices === 3 && painted.triangleIndices === 3,
+check('quad + triangle strokes use their own source meshes',
+  painted.shapes.join(',') === 'quad,triangle' && painted.quadVertices >= 4 && painted.triangleVertices === 3 && painted.triangleIndices === 3,
   JSON.stringify(painted))
 
 await page.click('button[data-tab="symbols"]')

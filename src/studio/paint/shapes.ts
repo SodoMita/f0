@@ -13,7 +13,7 @@ import type { ShapeKind } from './types'
  *
  * Both the editor and the runtime icon renderer call this function, so a
  * brush button can never drift into being an approximate glyph of the shape
- * it actually paints. Square and triangle are XY plates facing +Z; the paint
+ * it actually paints. Quad and triangle are XY plates facing +Z; the paint
  * session rotates that local +Z onto the writing surface.
  */
 export function createPaintShapeMesh(shape: ShapeKind, scene: Scene): Mesh {
@@ -22,7 +22,7 @@ export function createPaintShapeMesh(shape: ShapeKind, scene: Scene): Mesh {
     case 'sphere': return CreateSphere('p-sphere', { diameter: 1, segments: 8 }, scene)
     case 'cylinder': return CreateCylinder('p-cylinder', { height: 1, diameter: 1, tessellation: 8 }, scene)
     case 'tetra': return CreatePolyhedron('p-tetra', { type: 0, size: 0.5 }, scene)
-    case 'square': return CreatePlane('p-square', { size: 1 }, scene)
+    case 'quad': return CreatePlane('p-quad', { size: 1 }, scene)
     case 'triangle': return createTriangle(scene)
   }
 }
