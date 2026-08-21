@@ -1281,7 +1281,9 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     - `TransformNode.dispose(true)` means doNotRecurse, so every released
       model left its orient + fit nodes behind (46 orphans after a few 2D↔3D
       toggles). Released slots now dispose the whole chain.
-    Guards: `bun scripts/direct3d-camera-unit.mjs` (headless: the placed
+    Guards (`npm run check:3d` runs all three):
+    `bun scripts/direct3d-unit.mjs` (pool lifecycle, AMENDMENT 77),
+    `bun scripts/direct3d-camera-unit.mjs` (headless: the placed
     model must match the authored camera's own view matrix — orientation,
     size and composition — for camera 0, for a `preview-camera` index, and
     after a re-place into another cell; auto-fit fallbacks stay centred and
@@ -1290,4 +1292,6 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     green on the board AND in the thread, flavour `d` must honour
     preview-camera=1 and render GREEN, a model must stay centred and cropped
     in its card while the feed scrolls, a 2D↔3D round trip must leave no
-    orphan nodes, and a tap on a 3D card must still open the viewer).
+    orphan nodes, a tap on a 3D card must still open the viewer, a
+    camera-less post must be the SAME size in 2D and 3D, and a settled 3D
+    board must render ZERO frames while still animating with autoplay on).

@@ -170,9 +170,23 @@ async function waitUntil(pred, tries = 40, ms = 25) {
   const node = scene.transformNodes.find((n) => n.name.startsWith('d3-') && !n.name.includes('orient') && !n.name.includes('fit'))
   check('found a root transform', !!node, node?.name ?? 'none')
   if (node) {
-    check('model is centred on the card plane', Math.abs(node.position.z - place.z) < 1e-4, `z=${node.position.z}`)
-    check('model x/y match the requested cell', Math.abs(node.position.x - place.x) < 1e-4 && Math.abs(node.position.y - place.y) < 1e-4,
-      `x=${node.position.x} y=${node.position.y}`)
+    // Measure the GEOMETRY, not the root node: the root sits at the framing
+    // camera's position (AMENDMENT 79), which is behind the card plane by
+    // design — the model itself is what has to land on the plane.
+    const mn = [Infinity, Infinity, Infinity]
+    const mx = [-Infinity, -Infinity, -Infinity]
+    for (const mesh of scene.meshes) {
+      if (mesh.getTotalVertices() <= 0) continue
+      mesh.computeWorldMatrix(true)
+      const bb = mesh.getBoundingInfo().boundingBox
+      const lo = bb.minimumWorld, hi = bb.maximumWorld
+      mn[0] = Math.min(mn[0], lo.x); mn[1] = Math.min(mn[1], lo.y); mn[2] = Math.min(mn[2], lo.z)
+      mx[0] = Math.max(mx[0], hi.x); mx[1] = Math.max(mx[1], hi.y); mx[2] = Math.max(mx[2], hi.z)
+    }
+    const mid = [0, 1, 2].map((i) => (mn[i] + mx[i]) / 2)
+    check('model is centred on the card plane', Math.abs(mid[2] - place.z) < 1e-3, `z=${mid[2]}`)
+    check('model x/y match the requested cell', Math.abs(mid[0] - place.x) < 1e-3 && Math.abs(mid[1] - place.y) < 1e-3,
+      `x=${mid[0]} y=${mid[1]}`)
   }
   const importedOn = scene.lights.filter((l) => !l.name.startsWith('d3-') && l.isEnabled())
   check('no non-d3 lights left enabled', importedOn.length === 0, importedOn.map((l) => l.name).join(','))

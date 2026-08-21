@@ -15,7 +15,10 @@ unlit shader for 2D quads (StandardMaterial unreliable). Transparent previews:
 RTTs clear alpha 0, shader passes alpha.
 
 VERIFY BEFORE DONE: bun run build -> bun scripts/smoke.mjs -> features.mjs ->
-capture.mjs + python3 scripts/visual_critique.py. Visual claims need screenshots
+capture.mjs + python3 scripts/visual_critique.py. Touching 3D mode / framing:
+npm run check:3d (pool units + framing math + pixels vs the offline rig).
+Run guards WITHOUT a pipe (`| tail` hides the exit code — that is how a red
+suite got committed once). Visual claims need screenshots
 + critique output (agents have no vision). Zero-CDN assert. Live tests must
 degrade gracefully on flaky relays.
 
