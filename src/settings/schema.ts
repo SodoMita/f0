@@ -17,7 +17,7 @@ export interface SettingDef {
   max?: number
   step?: number
   unit?: string
-  options?: { value: string; label: string }[]
+  options?: SettingOption[]
   /** Device-backed selects (audio input/output) may persist an option that is discovered at runtime. */
   allowCustomOption?: boolean
   hint?: string
@@ -48,31 +48,28 @@ export const GROUPS: { id: GroupId; label: string; icon: string }[] = [
 ]
 
 export type SettingsValues = Record<string, string | number | boolean>
+type SettingOption = { value: string; label: string }
 
+const choices = (...pairs: [string, string][]): SettingOption[] =>
+  pairs.map(([value, label]) => ({ value, label }))
 const pct = { min: 0, max: 100, step: 1, unit: '%' }
 
 export const SETTINGS: SettingDef[] = [
   // ------------------------------------------------------------ presets
   {
     id: 'preset', label: 'Preset', group: 'presets', kind: 'select', default: 'high',
-    options: [
-      { value: 'low', label: 'Low' },
-      { value: 'medium', label: 'Medium' },
-      { value: 'high', label: 'High' },
-      { value: 'ultra', label: 'Ultra' },
-      { value: 'custom', label: 'Custom' },
-    ],
+    options: choices(
+      ['low', 'Low'], ['medium', 'Medium'],
+      ['high', 'High'], ['ultra', 'Ultra'],
+      ['custom', 'Custom'],
+    ),
     hint: 'Changing any setting below switches this to Custom.',
   },
 
   // ------------------------------------------------------------ display
   {
     id: 'resolutionMode', label: 'Resolution', group: 'display', kind: 'select', default: 'auto',
-    options: [
-      { value: 'auto', label: 'Auto (display ratio, adaptive)' },
-      { value: 'scale', label: 'Scale factor' },
-      { value: 'manual', label: 'Manual (exact pixels)' },
-    ],
+    options: choices(['auto', 'Auto (display ratio, adaptive)'], ['scale', 'Scale factor'], ['manual', 'Manual (exact pixels)']),
   },
   {
     id: 'renderScale', label: 'Render scale', group: 'display', kind: 'slider', default: 100,
@@ -106,16 +103,12 @@ export const SETTINGS: SettingDef[] = [
   },
   {
     id: 'displayMode', label: 'Display mode', group: 'display', kind: 'select', default: 'windowed',
-    options: [{ value: 'windowed', label: 'Windowed' }, { value: 'fullscreen', label: 'Fullscreen' }],
+    options: choices(['windowed', 'Windowed'], ['fullscreen', 'Fullscreen']),
     unavailable: (c) => (c.fullscreen ? null : 'This browser blocks the Fullscreen API here.'),
   },
   {
     id: 'powerPreference', label: 'GPU power preference', group: 'display', kind: 'select', default: 'high-performance',
-    options: [
-      { value: 'default', label: 'Default (browser decides)' },
-      { value: 'high-performance', label: 'High performance' },
-      { value: 'low-power', label: 'Low power' },
-    ],
+    options: choices(['default', 'Default (browser decides)'], ['high-performance', 'High performance'], ['low-power', 'Low power']),
     hint: 'A context-creation hint: on dual-GPU laptops it picks integrated vs. discrete. Takes effect on the next launch.',
     deferred: true,
   },
@@ -128,12 +121,10 @@ export const SETTINGS: SettingDef[] = [
   { id: 'contrast', label: 'Contrast', group: 'display', kind: 'slider', default: 100, min: 50, max: 200, step: 1, unit: '%' },
   {
     id: 'toneMapping', label: 'Tone mapping', group: 'display', kind: 'select', default: 'none',
-    options: [
-      { value: 'none', label: 'Off' },
-      { value: 'standard', label: 'Standard' },
-      { value: 'aces', label: 'ACES filmic' },
-      { value: 'pbrNeutral', label: 'Khronos PBR Neutral' },
-    ],
+    options: choices(
+      ['none', 'Off'], ['standard', 'Standard'],
+      ['aces', 'ACES filmic'], ['pbrNeutral', 'Khronos PBR Neutral'],
+    ),
     hint: 'Khronos PBR Neutral is the glTF reference curve: mid-tones stay colour-accurate while highlights roll off gently.',
   },
   {
@@ -164,10 +155,10 @@ export const SETTINGS: SettingDef[] = [
   // ----------------------------------------------------------------- AA
   {
     id: 'msaa', label: 'MSAA', group: 'aa', kind: 'select', default: '4',
-    options: [
-      { value: '1', label: 'Off' }, { value: '2', label: '2×' },
-      { value: '4', label: '4×' }, { value: '8', label: '8×' },
-    ],
+    options: choices(
+      ['1', 'Off'], ['2', '2×'],
+      ['4', '4×'], ['8', '8×'],
+    ),
     unavailable: (c) => (c.maxSamples > 1 ? null : 'This GPU/driver reports no multisample support.'),
   },
   { id: 'fxaa', label: 'FXAA', group: 'aa', kind: 'toggle', default: false, hint: 'Cheap post-process edge smoothing; softens the whole image.' },
@@ -179,21 +170,16 @@ export const SETTINGS: SettingDef[] = [
   { id: 'taaSamples', label: 'TAA samples', group: 'aa', kind: 'slider', default: 8, min: 2, max: 32, step: 1, showIf: (v) => !!v.taa },
   {
     id: 'upscaler', label: 'Upscaler', group: 'aa', kind: 'select', default: 'off',
-    options: [
-      { value: 'off', label: 'Off (native)' },
-      { value: 'spatial', label: 'Spatial (render scale + sharpen)' },
-    ],
+    options: choices(['off', 'Off (native)'], ['spatial', 'Spatial (render scale + sharpen)']),
     hint: 'DLSS / FSR / XeSS are native-only; this is the WebGL equivalent.',
   },
   {
     id: 'upscalerMode', label: 'Upscaler mode', group: 'aa', kind: 'select', default: 'quality',
-    options: [
-      { value: 'ultraQuality', label: 'Ultra quality (77%)' },
-      { value: 'quality', label: 'Quality (67%)' },
-      { value: 'balanced', label: 'Balanced (59%)' },
-      { value: 'performance', label: 'Performance (50%)' },
-      { value: 'ultraPerformance', label: 'Ultra performance (33%)' },
-    ],
+    options: choices(
+      ['ultraQuality', 'Ultra quality (77%)'], ['quality', 'Quality (67%)'],
+      ['balanced', 'Balanced (59%)'], ['performance', 'Performance (50%)'],
+      ['ultraPerformance', 'Ultra performance (33%)'],
+    ),
     showIf: (v) => v.upscaler === 'spatial',
   },
   { id: 'sharpness', label: 'Sharpness', group: 'aa', kind: 'slider', default: 30, ...pct, showIf: (v) => v.upscaler === 'spatial' || !!v.sharpen },
@@ -212,20 +198,21 @@ export const SETTINGS: SettingDef[] = [
   { id: 'pbrReflections', label: 'Reflections', group: 'textures', kind: 'toggle', default: true, showIf: (v) => !!v.pbr },
   {
     id: 'textureQuality', label: 'Skip models with textures over', group: 'textures', kind: 'select', default: '0',
-    options: [
-      { value: '512', label: '512 px' }, { value: '1024', label: '1024 px' },
-      { value: '2048', label: '2048 px' }, { value: '4096', label: '4096 px' },
-      { value: '0', label: 'No extra limit' },
-    ],
+    options: choices(
+      ['512', '512 px'], ['1024', '1024 px'],
+      ['2048', '2048 px'], ['4096', '4096 px'],
+      ['0', 'No extra limit'],
+    ),
     hint: 'WebGL cannot downscale a model\'s textures after decode, so this is a load-time guard: posts above the cap are skipped instead of thrashing VRAM. The spec cap (4096 px / 128 MiB decoded) always applies.',
     deferred: true,
   },
   {
     id: 'anisotropy', label: 'Anisotropic filtering', group: 'textures', kind: 'select', default: '4',
-    options: [
-      { value: '1', label: 'Off' }, { value: '2', label: '2×' }, { value: '4', label: '4×' },
-      { value: '8', label: '8×' }, { value: '16', label: '16×' },
-    ],
+    options: choices(
+      ['1', 'Off'], ['2', '2×'],
+      ['4', '4×'], ['8', '8×'],
+      ['16', '16×'],
+    ),
     unavailable: (c) => (c.maxAnisotropy > 1 ? null : 'No EXT_texture_filter_anisotropic on this GPU.'),
   },
   { id: 'mipmaps', label: 'Mipmapping', group: 'textures', kind: 'toggle', default: true, deferred: true },
@@ -239,30 +226,26 @@ export const SETTINGS: SettingDef[] = [
   // ----------------------------------------------------------- lighting
   {
     id: 'shadows', label: 'Shadows', group: 'lighting', kind: 'select', default: 'contact',
-    options: [
-      { value: 'off', label: 'Off' },
-      { value: 'contact', label: 'Contact shadows only' },
-      { value: 'dynamic', label: 'Dynamic (self-shadowing)' },
-      { value: 'cascaded', label: 'Cascaded (large scenes)' },
-    ],
+    options: choices(
+      ['off', 'Off'], ['contact', 'Contact shadows only'],
+      ['dynamic', 'Dynamic (self-shadowing)'], ['cascaded', 'Cascaded (large scenes)'],
+    ),
   },
   {
     id: 'shadowQuality', label: 'Shadow map resolution', group: 'lighting', kind: 'select', default: '1024',
-    options: [
-      { value: '512', label: '512' }, { value: '1024', label: '1024' },
-      { value: '2048', label: '2048' }, { value: '4096', label: '4096' },
-    ],
+    options: choices(
+      ['512', '512'], ['1024', '1024'],
+      ['2048', '2048'], ['4096', '4096'],
+    ),
     showIf: (v) => v.shadows === 'dynamic' || v.shadows === 'cascaded',
   },
   { id: 'shadowSoftness', label: 'Shadow softness', group: 'lighting', kind: 'slider', default: 40, ...pct, showIf: (v) => v.shadows === 'dynamic' },
   {
     id: 'shadowFilter', label: 'Shadow filtering', group: 'lighting', kind: 'select', default: 'blurESM',
-    options: [
-      { value: 'blurESM', label: 'Blur exponential (smooth)' },
-      { value: 'esm', label: 'Exponential (sharpest)' },
-      { value: 'pcf', label: 'PCF (percentage closer)' },
-      { value: 'pcss', label: 'PCSS (contact hardening)' },
-    ],
+    options: choices(
+      ['blurESM', 'Blur exponential (smooth)'], ['esm', 'Exponential (sharpest)'],
+      ['pcf', 'PCF (percentage closer)'], ['pcss', 'PCSS (contact hardening)'],
+    ),
     showIf: (v) => v.shadows === 'dynamic',
     hint: 'PCSS softens shadows the further they land from the caster. Cascaded mode filters itself (PCF + cascade blend).',
   },
@@ -279,11 +262,7 @@ export const SETTINGS: SettingDef[] = [
   { id: 'contactShadowStrength', label: 'Contact shadow strength', group: 'lighting', kind: 'slider', default: 55, ...pct, showIf: (v) => v.shadows !== 'off' },
   {
     id: 'ao', label: 'Ambient occlusion', group: 'lighting', kind: 'select', default: 'off',
-    options: [
-      { value: 'off', label: 'Off' },
-      { value: 'ssao', label: 'SSAO (cheap)' },
-      { value: 'ssao2', label: 'SSAO2 / HBAO-class' },
-    ],
+    options: choices(['off', 'Off'], ['ssao', 'SSAO (cheap)'], ['ssao2', 'SSAO2 / HBAO-class']),
     unavailable: (c) => (c.webgl2 ? null : 'SSAO2 needs WebGL2 (depth textures + MRT).'),
   },
   { id: 'aoStrength', label: 'AO strength', group: 'lighting', kind: 'slider', default: 100, min: 0, max: 200, step: 1, unit: '%', showIf: (v) => v.ao !== 'off' },
@@ -297,12 +276,10 @@ export const SETTINGS: SettingDef[] = [
   { id: 'lightIntensity', label: 'Light rig intensity', group: 'lighting', kind: 'slider', default: 100, min: 20, max: 200, step: 1, unit: '%' },
   {
     id: 'fog', label: 'Fog', group: 'lighting', kind: 'select', default: 'off',
-    options: [
-      { value: 'off', label: 'Off' },
-      { value: 'linear', label: 'Linear' },
-      { value: 'exp', label: 'Exponential' },
-      { value: 'exp2', label: 'Exponential squared' },
-    ],
+    options: choices(
+      ['off', 'Off'], ['linear', 'Linear'],
+      ['exp', 'Exponential'], ['exp2', 'Exponential squared'],
+    ),
     hint: 'Camera-distance atmosphere in the viewer and studio.',
   },
   { id: 'fogDensity', label: 'Fog density', group: 'lighting', kind: 'slider', default: 40, min: 1, max: 200, step: 1, showIf: (v) => v.fog === 'exp' || v.fog === 'exp2' },
@@ -315,10 +292,10 @@ export const SETTINGS: SettingDef[] = [
   { id: 'bloomStrength', label: 'Bloom strength', group: 'post', kind: 'slider', default: 40, ...pct, showIf: (v) => !!v.bloom },
   {
     id: 'bloomQuality', label: 'Bloom quality', group: 'post', kind: 'select', default: 'medium',
-    options: [
-      { value: 'low', label: 'Low (kernel 16)' }, { value: 'medium', label: 'Medium (kernel 32)' },
-      { value: 'high', label: 'High (kernel 64)' }, { value: 'ultra', label: 'Ultra (kernel 128)' },
-    ],
+    options: choices(
+      ['low', 'Low (kernel 16)'], ['medium', 'Medium (kernel 32)'],
+      ['high', 'High (kernel 64)'], ['ultra', 'Ultra (kernel 128)'],
+    ),
     showIf: (v) => !!v.bloom,
   },
   { id: 'bloomThreshold', label: 'Bloom threshold', group: 'post', kind: 'slider', default: 80, ...pct, showIf: (v) => !!v.bloom },
@@ -338,11 +315,7 @@ export const SETTINGS: SettingDef[] = [
   { id: 'dofFocus', label: 'Focus distance', group: 'post', kind: 'slider', default: 2000, min: 100, max: 20000, step: 50, unit: 'mm', showIf: (v) => !!v.dof },
   {
     id: 'dofQuality', label: 'Blur quality', group: 'post', kind: 'select', default: 'medium',
-    options: [
-      { value: 'low', label: 'Low (subtle)' },
-      { value: 'medium', label: 'Medium (standard)' },
-      { value: 'high', label: 'High (fine)' },
-    ],
+    options: choices(['low', 'Low (subtle)'], ['medium', 'Medium (standard)'], ['high', 'High (fine)']),
     showIf: (v) => !!v.dof,
   },
   {
@@ -392,12 +365,12 @@ export const SETTINGS: SettingDef[] = [
   // -------------------------------------------------------------- audio
   {
     id: 'audioOutput', label: 'Output device', group: 'audio', kind: 'select', default: 'default',
-    options: [{ value: 'default', label: 'System default' }], allowCustomOption: true,
+    options: choices(['default', 'System default']), allowCustomOption: true,
     unavailable: (c) => (c.audioOutputSelection ? null : 'This browser does not support choosing an audio output device (setSinkId).'),
   },
   {
     id: 'audioInput', label: 'Input device', group: 'audio', kind: 'select', default: 'default',
-    options: [{ value: 'default', label: 'System default' }], allowCustomOption: true,
+    options: choices(['default', 'System default']), allowCustomOption: true,
     unavailable: (c) => (c.audioInputSelection ? null : 'No media device enumeration in this browser.'),
     hint: 'Used by in-app recording (spec 05b) once it lands.',
   },
@@ -408,12 +381,10 @@ export const SETTINGS: SettingDef[] = [
   { id: 'volUi', label: 'Interface', group: 'audio', kind: 'slider', default: 60, ...pct },
   {
     id: 'spatialAudio', label: 'Spatial audio', group: 'audio', kind: 'select', default: 'stereo',
-    options: [
-      { value: 'mono', label: 'Mono' },
-      { value: 'stereo', label: 'Stereo' },
-      { value: 'hrtf', label: '3D spatial (HRTF)' },
-      { value: 'surround', label: 'Surround passthrough (5.1 / 7.1)' },
-    ],
+    options: choices(
+      ['mono', 'Mono'], ['stereo', 'Stereo'],
+      ['hrtf', '3D spatial (HRTF)'], ['surround', 'Surround passthrough (5.1 / 7.1)'],
+    ),
     hint: 'Dolby Atmos / Windows Sonic are applied by the OS on the selected output device.',
   },
   { id: 'audioBackground', label: 'Play audio when unfocused', group: 'audio', kind: 'toggle', default: false },

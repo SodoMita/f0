@@ -125,22 +125,6 @@ export function saveNetworkConfig(config: NetworkConfig): Promise<void> {
   })
 }
 
-/** Legacy helpers; the full settings schema/store is used by the application. */
-export interface Settings { background: string; inertia: number }
-export async function loadSettings(): Promise<Settings> {
-  const raw = await get<unknown>('settings', 'default')
-  const fallback = { background: '#0B0B0C', inertia: 0.7 }
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return fallback
-  const record = raw as Record<string, unknown>
-  return {
-    background: typeof record.background === 'string' && /^#[0-9a-f]{6}$/i.test(record.background) ? record.background : fallback.background,
-    inertia: typeof record.inertia === 'number' && Number.isFinite(record.inertia) && record.inertia >= 0 && record.inertia <= 1
-      ? record.inertia : fallback.inertia,
-  }
-}
-export function saveSettings(s: Settings): Promise<void> {
-  return put('settings', 'default', s)
-}
 
 /**
  * Searchable snapshot of a post this browser published (AMENDMENT 70). Enough

@@ -433,5 +433,3 @@ export class AssetCache {
     this.poster.dispose()
   }
 }
-
-export { sha256Hex }

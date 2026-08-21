@@ -137,13 +137,3 @@ export class StampStore {
     this.ids = nextIds
   }
 }
-
-export function stampFromParts(
-  shape: ShapeKind,
-  px: number, py: number, pz: number,
-  qx: number, qy: number, qz: number, qw: number,
-  sx: number, sy: number, sz: number,
-  r: number, g: number, b: number, a: number,
-): Omit<Stamp, 'id'> {
-  return { shape, px, py, pz, qx, qy, qz, qw, sx, sy, sz, r, g, b, a }
-}

@@ -94,7 +94,3 @@ const EMPTY: readonly number[] = []
 export function cellKey(ix: number, iy: number, iz: number): string {
   return ix + ',' + iy + ',' + iz
 }
-
-export function cellOf(x: number, y: number, z: number, cell = GRID): [number, number, number] {
-  return [Math.floor(x / cell), Math.floor(y / cell), Math.floor(z / cell)]
-}
