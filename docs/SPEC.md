@@ -1338,3 +1338,35 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     can never leave the controls locked (fallback clears busy, edits reset).
     Guards: `check:codec` fine-settings units + `check:codec-browser`
     (preview, dials, visibility).
+
+86. EXPORT REVIEW: CARD SIZE, MODEL NAME, BITS DIAL (2026-08-21): the review
+    (AMENDMENT 84/85) owns everything the author decides at publish time:
+    - CARD ASPECT + SIZE dials restamp `previewDim`, which publish writes
+      into the post's `dim` tag — the frame every client renders the card at.
+      Aspect is a slider over the format bounds (0.5–2.0, step 0.05, labelled
+      with the nearest named preset: 1:1, 4:3, 16:9…); resolution is the LONG
+      edge in px (64–4096, step 8, label shows the computed W×H). The short
+      edge follows the aspect and is floored so it never drops under
+      posterDimMin. Changing the dials re-renders the lossy preview at the
+      new size; the GLB BYTES never change (dim is a tag, not part of the
+      model).
+    - MODEL NAME text input pre-fills exactly what the old code derived
+      (file base name or first text line) and publish uses the typed value
+      (sanitised + capped at LIMITS.contentChars, NIP-50 searchable content).
+    - GEOMETRY BITS: the 14/12/10 preset buttons (AMENDMENT 85) are one
+      slider now (6–16, default 12). It sets POSITION directly and scales the
+      other attribute kinds from the balanced ratios — dracoBits(12) is byte-
+      identical to the old `balanced` preset; the note reports every applied
+      bit value.
+    Numeric-control rule: a dial whose domain has MORE than four possible
+    values is a slider / number input, never a button row (aspect, size,
+    bits, webp quality all follow it).
+    Guards: `check:codec` fine-settings + new `export-card-unit` (pure
+    helpers in `src/studio/exportInfo.ts`), `check:codec-browser` (dials
+    restamp previewDim, name publish roundtrip, dim publish).
+    NOTE (pre-existing, not fixed here): headless SwiftShader squashes poster
+    readbacks when the RTT size changes between `renderPosterFor` calls
+    (reproduced on main without this amendment; JS-level viewport/framebuffer
+    state is correct, so it is a driver quirk, not app state). Real GPUs are
+    unaffected; the codec-browser guard restores the default card size before
+    its module-level webp pixel check to stay deterministic.

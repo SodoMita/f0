@@ -62,6 +62,55 @@ const raw = await fileSize()
 const rawState = await state()
 check('review opens with the exact export', raw.length > 0 && rawState.includes('validated'), `${raw} ${rawState}`)
 
+// Card size + model name (SPEC AMENDMENT 86): the review owns the published
+// `dim` and the NIP-50-searchable name.
+{
+  const aspectVisible = await page.isVisible('#export-aspect')
+  const resVisible = await page.isVisible('#export-resolution')
+  const nameValue = await page.$eval('#export-name', (el) => el.value)
+  const aspectLabel = await page.$eval('#export-aspect-label', (el) => el.textContent)
+  const resLabel = await page.$eval('#export-resolution-label', (el) => el.textContent)
+  check('review exposes card aspect + size dials', aspectVisible && resVisible)
+  check('card dials seed from the studio preview dim', aspectLabel === '16:10' && resLabel === '448 × 280', `${aspectLabel} ${resLabel}`)
+  check('model name prefills from the content', nameValue.length > 0, nameValue)
+  // A 1:1 card restamps previewDim — the publish `dim` follows the review.
+  await page.$eval('#export-aspect', (el) => {
+    el.value = '1'
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+    el.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  await page.waitForFunction(() => /1:1/.test(document.getElementById('export-aspect-label').textContent), { timeout: 10000 })
+  const sqLabel = await page.$eval('#export-resolution-label', (el) => el.textContent)
+  const sqDim = await page.evaluate(() => window.__form0.previewDim())
+  check('aspect dial restamps the card to 1:1', sqLabel === '448 × 448', sqLabel)
+  check('previewDim follows the review dials', sqDim.width === 448 && sqDim.height === 448, JSON.stringify(sqDim))
+  // Restore the default card size. Headless SwiftShader renders posters with
+  // a stale internal viewport when the RTT size changes between renders
+  // (pre-existing; see SPEC AMENDMENT 86) — the codec + module checks below
+  // must run at the default 448×280 poster size to stay deterministic.
+  await page.$eval('#export-aspect', (el) => {
+    el.value = '1.6'
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+    el.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  await page.$eval('#export-resolution', (el) => {
+    el.value = '448'
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+    el.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  await page.waitForFunction(() => {
+    const d = window.__form0.previewDim()
+    return d.width === 448 && d.height === 280
+  }, { timeout: 10000 })
+  const backDim = await page.evaluate(() => window.__form0.previewDim())
+  check('dials restore the default card', backDim.width === 448 && backDim.height === 280, JSON.stringify(backDim))
+  // Custom model name: publish must use it (checked after the roundtrip).
+  await page.$eval('#export-name', (el) => {
+    el.value = 'codec roundtrip'
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+}
+
 const dracoVisible = await page.isVisible('#codec-geometry [data-v="draco"]')
 const webpVisible = await page.isVisible('#codec-texture [data-v="webp"]')
 check('draco option appears when the local encoder works', dracoVisible)
@@ -104,13 +153,21 @@ if (dracoVisible) {
 
   // Fine settings: fewer geometry bits must re-derive a smaller file.
   const balancedSize = await fileSize()
-  await page.click('#draco-quality [data-v="small"]')
+  await page.$eval('#draco-bits', (el) => {
+    el.value = '10'
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+    el.dispatchEvent(new Event('change', { bubbles: true }))
+  })
   await settle()
   await page.waitForFunction(() => /pos 10/.test(document.getElementById('export-codec-note').textContent), { timeout: 60000 })
   const smallSize = await fileSize()
   const noteSmall = await page.$eval('#export-codec-note', (el) => el.textContent)
   check('draco bits dial changes the result', smallSize !== balancedSize && /pos 10/.test(noteSmall), `${balancedSize} -> ${smallSize}`)
-  await page.click('#draco-quality [data-v="balanced"]')
+  await page.$eval('#draco-bits', (el) => {
+    el.value = '12'
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+    el.dispatchEvent(new Event('change', { bubbles: true }))
+  })
   await settle()
   await page.waitForFunction(() => /pos 12/.test(document.getElementById('export-codec-note').textContent), { timeout: 60000 })
 
@@ -177,6 +234,15 @@ check('editing while reviewed closes the review', reviewGone === true)
   // draco one (note shows the savings)
   const note = await page.$eval('#export-codec-note', (el) => el.textContent)
   check('re-opened review re-applies the draco choice', /draco .*→/.test(note), note)
+  // The re-open reseeded the name from content — type the custom one again;
+  // the card dials persisted from the first review (restored to the default
+  // 16:10/448 by the dial check above) and the re-open must not reset them.
+  await page.$eval('#export-name', (el) => {
+    el.value = 'codec roundtrip'
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  const dimNow = await page.evaluate(() => window.__form0.previewDim())
+  check('card dials persist across review re-open', dimNow.width === 448 && dimNow.height === 280, JSON.stringify(dimNow))
   await page.evaluate(() => window.__form0.blossoms.setServers(['https://localhost:8443']))
   const before = await page.evaluate(() => window.__form0.index.byId.size)
   await page.evaluate(() => document.querySelector('#btn-export-publish').click())
@@ -185,9 +251,14 @@ check('editing while reviewed closes the review', reviewGone === true)
     const f = window.__form0
     const newest = [...f.index.byId.values()].filter((m) => m.role === 'root')
       .sort((a, b) => b.createdAt - a.createdAt)[0]
-    return { grew: f.index.byId.size > beforeCount, eventId: newest?.eventId, urls: newest?.urls, sha: newest?.sha256, size: newest?.size }
+    return {
+      grew: f.index.byId.size > beforeCount, eventId: newest?.eventId, urls: newest?.urls, sha: newest?.sha256, size: newest?.size,
+      name: newest?.name, dim: newest ? `${newest.width}x${newest.height}` : undefined,
+    }
   }, before)
   check('compressed publish routes to the new post', !!published.eventId && published.grew, published.eventId?.slice(0, 8))
+  check('published event carries the edited model name', published.name === 'codec roundtrip', published.name ?? '')
+  check('published dim is the reviewed card size', published.dim === '448x280', published.dim ?? '')
   const uploaded = await page.evaluate(async (m) => {
     const f = window.__form0
     f.blossoms.setServers(['https://localhost:8443'])

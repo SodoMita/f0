@@ -1,4 +1,106 @@
 import { formatSize } from './modelInfo'
+import { LIMITS } from '../theme'
+
+/**
+ * Export-review settings (SPEC AMENDMENT 86). Pure helpers — no Babylon, no
+ * DOM — so scripts/export-card-unit.mjs can drive them directly.
+ *
+ * The review owns the things the author actually cares about at publish time:
+ * the poster card size (aspect + resolution → the `dim` tag every client
+ * renders at) and the model name (the nostr event `content`, NIP-50
+ * searchable). Numeric dials follow one rule: a domain with MORE than four
+ * possible values is a slider / number input, never a button row.
+ */
+
+/** Card aspect bounds = the `dim` format bounds (posterAspectMin/Max). */
+export const CARD_ASPECT_MIN = LIMITS.posterAspectMin
+export const CARD_ASPECT_MAX = LIMITS.posterAspectMax
+/** Card resolution bounds = the `dim` format pixel bounds (posterDimMin/Max). */
+export const CARD_RES_MIN = LIMITS.posterDimMin
+export const CARD_RES_MAX = LIMITS.posterDimMax
+
+/** Draco position-bits dial bounds (SPEC AMENDMENT 86: was 3 preset buttons). */
+export const DRACO_BITS_MIN = 6
+export const DRACO_BITS_MAX = 16
+/** Position bits that reproduce the old `balanced` preset exactly. */
+export const DRACO_BITS_DEFAULT = 12
+
+export interface CardDim { width: number; height: number }
+
+function clamp(v: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, v))
+}
+
+/**
+ * A card size from the review's two dials. `longEdge` is the pixel count of
+ * the LONG side (the number people think of as "resolution"); the short side
+ * follows the aspect. The long edge is floored so the short edge never drops
+ * under the format's minimum (a 2:1 card needs 128px of long edge to have a
+ * 64px short side).
+ */
+export function cardDimFromSettings(aspect: number, longEdge: number): CardDim {
+  const a = clamp(aspect, CARD_ASPECT_MIN, CARD_ASPECT_MAX)
+  const minLong = Math.max(CARD_RES_MIN, Math.ceil(a >= 1 ? CARD_RES_MIN * a : CARD_RES_MIN / a))
+  const l = clamp(Math.round(longEdge), minLong, CARD_RES_MAX)
+  const width = a >= 1 ? l : Math.round(l * a)
+  const height = a >= 1 ? Math.round(l / a) : l
+  return { width, height }
+}
+
+/** Inverse of cardDimFromSettings — used to seed the dials from previewDim. */
+export function cardSettingsFromDim(width: number, height: number): { aspect: number; longEdge: number } {
+  const aspect = width / Math.max(1, height)
+  return {
+    aspect: clamp(aspect, CARD_ASPECT_MIN, CARD_ASPECT_MAX),
+    longEdge: clamp(Math.max(width, height), CARD_RES_MIN, CARD_RES_MAX),
+  }
+}
+
+/** Named aspect presets shown on the aspect dial. */
+export const ASPECT_PRESETS: ReadonlyArray<readonly [string, number]> = [
+  ['1:2', 0.5],
+  ['3:4', 0.75],
+  ['4:5', 0.8],
+  ['1:1', 1],
+  ['5:4', 1.25],
+  ['4:3', 4 / 3],
+  ['3:2', 1.5],
+  ['16:10', 1.6],
+  ['16:9', 16 / 9],
+  ['2:1', 2],
+]
+
+/** Label for the aspect dial: the named preset when near one, else the ratio. */
+export function aspectLabel(aspect: number): string {
+  const a = clamp(aspect, CARD_ASPECT_MIN, CARD_ASPECT_MAX)
+  let best: string | null = null
+  let bestDiff = Infinity
+  for (const [name, value] of ASPECT_PRESETS) {
+    const d = Math.abs(a - value)
+    if (d < bestDiff) { bestDiff = d; best = name }
+  }
+  if (best && bestDiff <= 0.025) return best
+  return a.toFixed(2)
+}
+
+/**
+ * Per-attribute Draco quantization for the single "geometry bits" dial.
+ * The dial sets POSITION directly; the other kinds scale from the balanced
+ * ratios (12 → pos 12 · nrm 9 · tan 10 · uv 11 · col 8 · gen 11, the old
+ * `balanced` preset). Rounding keeps every value inside the encoder's range.
+ */
+export function dracoBits(position: number): Record<string, number> {
+  const p = clamp(Math.round(position), DRACO_BITS_MIN, DRACO_BITS_MAX)
+  const scale = (v: number) => clamp(Math.round((v * p) / 12), DRACO_BITS_MIN, DRACO_BITS_MAX)
+  return {
+    POSITION: p,
+    NORMAL: scale(9),
+    TANGENT: scale(10),
+    TEX_COORD: scale(11),
+    COLOR: scale(8),
+    GENERIC: scale(11),
+  }
+}
 
 export interface GLBExportInfo {
   bytes: number

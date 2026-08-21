@@ -4,6 +4,19 @@ Claim a task by moving it to **In progress** with your name/date, push, then
 move it to **Done** with a commit reference. One agent per area.
 
 ## Done
+- [x] **Export review: card aspect + size, model name, bits dial** (agent
+      arena, 2026-08-21, SPEC AMENDMENT 86): the review owns the published
+      `dim` — aspect slider (0.5–2.0, named presets) + resolution slider
+      (long edge 64–4096) restamp previewDim and re-render the lossy preview;
+      a model-name field (pre-filled, sanitised, ≤140 chars) fills the nostr
+      `content`; the draco 14/12/10 preset buttons became one geometry-bits
+      slider (6–16; 12 = old `balanced`). Numeric dials with >4 values are
+      sliders, not button rows. Guards: new `export-card-unit` (pure helpers
+      in `studio/exportInfo.ts`) + `check:codec` + `check:codec-browser`
+      (dials restamp previewDim, name + dim publish roundtrips). Also
+      documented a PRE-EXISTING SwiftShader quirk: mixed-size poster
+      readbacks render squashed on headless SwiftShader (not on real GPUs);
+      the guard restores the default card before its module-level pixel check.
 - [x] **Export codec lossy preview + fine settings** (agent arena, 2026-08-21,
       SPEC AMENDMENT 85): the review renders the exact compressed bytes
       through the card pipeline beside the raw export with a pixel-difference

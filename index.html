@@ -453,6 +453,20 @@
         <div id="export-meter" class="export-meter"><i></i></div>
         <div id="export-breakdown" class="export-breakdown"></div>
         <p id="export-extensions" class="export-extensions"></p>
+        <div class="export-card-size">
+          <div class="codec-row"><span>card aspect</span>
+            <input type="range" id="export-aspect" min="0.5" max="2" step="0.05" value="1.6" aria-label="card aspect" />
+            <b id="export-aspect-label">16:10</b>
+          </div>
+          <div class="codec-row"><span>card size</span>
+            <input type="range" id="export-resolution" min="64" max="4096" step="8" value="448" aria-label="card resolution" />
+            <b id="export-resolution-label">448 × 280</b>
+          </div>
+          <div class="codec-row"><span>model name</span>
+            <input type="text" id="export-name" class="export-name" maxlength="140" placeholder="name this model" aria-label="model name" spellcheck="false" autocomplete="off" />
+          </div>
+          <p class="hint">The card size is published as the post's <code>dim</code> — every client renders this exact frame. The model name is what relay search (NIP-50) finds.</p>
+        </div>
         <div id="export-codecs" class="export-codecs" hidden>
           <div class="codec-row"><span>geometry</span>
             <div class="codec-opts" id="codec-geometry">
@@ -469,11 +483,8 @@
         </div>
         <div id="export-codec-settings" class="export-codec-settings" hidden>
           <div class="codec-row" id="draco-quality-row" hidden><span>geometry bits</span>
-            <div class="codec-opts" id="draco-quality">
-              <button type="button" data-v="high" title="position 14 · normal 10 · uv 12 · color 8">14</button>
-              <button type="button" data-v="balanced" class="on" title="position 12 · normal 9 · uv 11 · color 8">12</button>
-              <button type="button" data-v="small" title="position 10 · normal 8 · uv 9 · color 6">10</button>
-            </div>
+            <input type="range" id="draco-bits" min="6" max="16" step="1" value="12" aria-label="geometry bits" />
+            <b id="draco-bits-label" title="pos 12 · nrm 9 · tan 10 · uv 11 · col 8">12</b>
           </div>
           <div class="codec-row" id="webp-quality-row" hidden><span>texture quality</span>
             <input type="range" id="webp-quality" min="50" max="100" step="5" value="85" aria-label="webp quality" />

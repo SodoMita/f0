@@ -23,6 +23,19 @@ body[data-theme="light"] .export-card { background: rgba(253,253,255,.98); }
 .codec-opts button:disabled { opacity: .5; cursor: wait; }
 .export-codec-note { margin: 0; font: 10px/1.5 ui-monospace, monospace; color: var(--muted); overflow-wrap: anywhere; }
 .export-codec-note:empty { display: none; }
+/* Card size + model name (SPEC AMENDMENT 86): the review owns the published
+   `dim` and the NIP-50-searchable name. Sliders + text, no button rows. */
+.export-card-size { display: flex; flex-direction: column; gap: 6px; padding-top: 2px; }
+.export-card-size .codec-row input[type="range"] { width: 150px; accent-color: var(--accent, #7c9cff); }
+.export-card-size .codec-row input[type="text"] {
+  flex: 1; min-width: 0; background: rgba(255,255,255,.06); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px;
+  font: 11px/1.2 ui-monospace, monospace;
+}
+.export-card-size .codec-row input[type="text"]:focus { outline: none; border-color: var(--accent, #7c9cff); }
+.export-card-size .hint { margin: 0; font: 10px/1.5 ui-monospace, monospace; color: var(--muted); }
+.export-card-size .hint code { font: inherit; color: var(--ink); }
+body[data-theme="light"] .export-card-size .codec-row input[type="text"] { background: rgba(0,0,0,.05); border-color: rgba(0,0,0,.16); }
 /* Fine settings for the active codecs (lossy dials) + lossy preview. */
 .export-codec-settings { display: flex; flex-direction: column; gap: 6px; }
 .codec-row input[type="range"] { width: 130px; accent-color: var(--accent, #7c9cff); }
