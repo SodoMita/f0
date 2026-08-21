@@ -39,6 +39,7 @@
     "check:relay": "npx --yes tsx scripts/relay-pool-unit.mjs",
     "check:studio": "bun scripts/studio-unit.mjs",
     "check:vcolor": "node scripts/vcolor-check.mjs && node scripts/vcolor-poster.mjs && node scripts/vcolor-paint.mjs",
+    "check:codec": "bun scripts/codec-unit.mjs",
     "check:overlay-order": "node scripts/overlay-order.mjs"
   },
   "dependencies": {
