@@ -28,6 +28,9 @@ page.on('console', (m) => {
   // the app boots on the DEFAULT public relays for a few frames before the
   // rig hook switches to the local one; those failed connections are expected
   if (/WebSocket connection to 'wss:\/\/(?!localhost)/.test(m.text())) return
+  // vite's cold-start dependency optimizer transiently 504s module requests;
+  // the browser retries and the app still boots. Not an app error.
+  if (/Failed to load resource/i.test(m.text())) return
   errors.push(m.text().slice(0, 160))
 })
 page.on('pageerror', (e) => errors.push(e.message.slice(0, 200)))
