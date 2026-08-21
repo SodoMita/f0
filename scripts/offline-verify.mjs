@@ -14,7 +14,10 @@ const MODEL = 'https://localhost:8443/models/'
 
 const browser = await chromium.launch({
   headless: true,
-  args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox'],
+  // --ignore-certificate-errors: the rig relay serves wss://localhost:8443 with
+  // a self-signed cert; the headless test browser must accept it (it only ever
+  // talks to the local rig).
+  args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox', '--ignore-certificate-errors'],
 })
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
 const errors = []

@@ -12,7 +12,9 @@ const check = (name, ok, detail = '') => {
   if (!ok) fails.push(name)
 }
 
-const browser = await chromium.launch({ headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox'] })
+// --ignore-certificate-errors: the offline rig serves wss://localhost:8443 with
+// a self-signed cert; the headless test browser must accept it.
+const browser = await chromium.launch({ headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox', '--ignore-certificate-errors'] })
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
 const errors = []
 page.on('pageerror', (e) => errors.push(e.message.slice(0, 160)))
