@@ -27,7 +27,7 @@ import type { ShaderMaterial } from '@babylonjs/core/Materials/shaderMaterial'
 import type { Texture as TextureT } from '@babylonjs/core/Materials/Textures/texture'
 import {
   flatCamera, makeBackdropTexture, paintBackdrop, makeContactShadow, makeSpinnerTexture,
-  roundRect, luminance, shade,
+  roundRect, paintPlayButtons, luminance, shade,
 } from '../core/gfx'
 import { theme, LIMITS } from '../theme'
 
@@ -238,7 +238,7 @@ export class Board {
     this.playTexOff.hasAlpha = true
     this.playTexOn = new DynamicTexture('card-play-on', { width: 128, height: 128 }, this.scene, false, Texture.BILINEAR_SAMPLINGMODE)
     this.playTexOn.hasAlpha = true
-    this.paintPlayTextures()
+    paintPlayButtons(this.playTexOff, this.playTexOn, this.isDark, theme.ink)
 
     this.cb = cb
     this.previewPool = new PreviewPool(
@@ -381,7 +381,7 @@ export class Board {
     paintBackdrop(this.backdropTex, hex)
     // the shared button textures carry the theme's pill colours — repaint
     // them, then every card picks up the new look on its next position pass
-    this.paintPlayTextures()
+    paintPlayButtons(this.playTexOff, this.playTexOn, this.isDark, theme.ink)
     for (const slot of this.cards) {
       setCardTint(slot.shadowMat, this.isDark ? '#000000' : '#1b1b22')
       setCardOpacity(slot.shadowMat, this.contactStrength * (this.isDark ? 1 : 0.4))
@@ -726,56 +726,6 @@ export class Board {
     slot.badgeTex.update()
     slot.badge.setEnabled(true)
     this.invalidate()
-  }
-
-  /**
-   * Paint BOTH shared button textures: a translucent pill like the reply
-   * badge, with the icon drawn as vector strokes (play = triangle, pause =
-   * two rounded bars — never font glyphs, rule 9c).
-   */
-  private paintPlayTextures(): void {
-    const paint = (tex: DynamicTexture, playing: boolean): void => {
-      const { width: w, height: h } = tex.getSize()
-      const ctx = tex.getContext() as CanvasRenderingContext2D
-      ctx.clearRect(0, 0, w, h)
-      const dark = this.isDark
-      const pad = Math.round(h * 0.07)
-      const bw = w - pad * 2
-      const bh = h - pad * 2
-      ctx.fillStyle = dark ? 'rgba(12,12,14,0.62)' : 'rgba(250,250,252,0.72)'
-      ctx.strokeStyle = dark ? 'rgba(255,255,255,0.30)' : 'rgba(0,0,0,0.28)'
-      ctx.lineWidth = Math.max(2, h * 0.03)
-      roundRect(ctx, pad, pad, bw, bh, bh * 0.28)
-      ctx.fill()
-      ctx.stroke()
-
-      const ink = dark ? theme.ink : '#101014'
-      const cx = w / 2
-      const cy = h / 2
-      const s = h * 0.24
-      if (playing) {
-        // pause: two rounded bars
-        const barW = s * 0.34
-        const gap = s * 0.24
-        ctx.fillStyle = ink
-        roundRect(ctx, cx - gap / 2 - barW, cy - s, barW, s * 2, barW * 0.45)
-        ctx.fill()
-        roundRect(ctx, cx + gap / 2, cy - s, barW, s * 2, barW * 0.45)
-        ctx.fill()
-      } else {
-        // play: triangle, optically centred a touch right
-        ctx.fillStyle = ink
-        ctx.beginPath()
-        ctx.moveTo(cx - s * 0.5, cy - s)
-        ctx.lineTo(cx - s * 0.5, cy + s)
-        ctx.lineTo(cx + s * 0.92, cy)
-        ctx.closePath()
-        ctx.fill()
-      }
-      tex.update()
-    }
-    paint(this.playTexOff, false)
-    paint(this.playTexOn, true)
   }
 
   /** Point a card's button at the right shared texture (▶ or ⏸). */

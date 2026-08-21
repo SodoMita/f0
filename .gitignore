@@ -6,7 +6,13 @@ release/
 form-zero-standalone.html
 *.tsbuildinfo
 
-# local captures / scratch
+# local captures / generated digests and reports
 shots/
 *.log
 .DS_Store
+AGENTS.txt
+README.txt
+docs/*.txt
+dbg.mjs
+perf-report.html
+package-lock.json

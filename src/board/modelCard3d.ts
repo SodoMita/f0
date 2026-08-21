@@ -7,13 +7,12 @@ import { TransformNode } from '@babylonjs/core/Meshes/transformNode'
 import type { AssetContainer } from '@babylonjs/core/assetContainer'
 import type { AnimationGroup } from '@babylonjs/core/Animations/animationGroup'
 import type { Sound } from '@babylonjs/core/Audio/sound'
-// Registers the scene's mainSoundTrack (MSFT_audio_emitter sounds land there).
-import '@babylonjs/core/Audio/audioSceneComponent'
 import '../model/gltf'
 import { configureDraco } from '../model/draco'
 import { worldBox, dominantFacing } from '../model/facing'
 import { validateGLBCached } from '../model/limits'
 import { graphics } from '../render/graphics'
+import { claimModelSounds, playModelSounds } from './modelSounds'
 
 /** Model bytes + content hash + the authored camera index (v3 `preview-camera`). */
 export interface DirectModel {
@@ -214,7 +213,7 @@ export class Direct3DPool {
     if (slot.started) for (const a of slot.anims) a.play(true)
     else { for (const a of slot.anims) a.start(true); slot.started = true }
     slot.playing = true
-    if (sound) this.playSounds(slot)
+    if (sound) playModelSounds(slot)
   }
 
   pause(postId: string): void {
@@ -394,7 +393,7 @@ export class Direct3DPool {
       slot.orient = orient
       slot.fit = fit
       slot.anims = container.animationGroups.filter((g) => g.targetedAnimations.length > 0)
-      slot.sounds = this.claimSounds(container, soundBaseline)
+      slot.sounds = claimModelSounds(this.scene, container, soundBaseline, this.claimedSounds)
       slot.ext = ext
       slot.postId = postId
       slot.started = false
@@ -438,42 +437,4 @@ export class Direct3DPool {
     slot.visible = false
   }
 
-  /** Find the MSFT_audio_emitter Sounds this container's load created
-   *  (same ownership inference as the preview pool: node-attached emitters
-   *  first, then a bounded delta of unattached ones). */
-  private claimSounds(container: AssetContainer, baseline: number): Sound[] {
-    const all = this.scene.mainSoundTrack.soundCollection
-    const meshes = new Set(container.meshes)
-    const owned: Sound[] = []
-    const attachedOf = (s: Sound): TransformNode | null =>
-      (s as unknown as { _connectedTransformNode?: TransformNode })._connectedTransformNode ?? null
-    for (const s of all) {
-      if (this.claimedSounds.has(s)) continue
-      const node = attachedOf(s)
-      if (node && meshes.has(node as never)) { this.claimedSounds.add(s); owned.push(s) }
-    }
-    for (const s of all.slice(baseline)) {
-      if (this.claimedSounds.has(s) || owned.includes(s)) continue
-      if (!attachedOf(s)) { this.claimedSounds.add(s); owned.push(s) }
-    }
-    return owned
-  }
-
-  /** Start a slot's sounds, retrying briefly for clips still decoding. */
-  private playSounds(slot: Slot): void {
-    if (slot.soundTimer !== null) { clearInterval(slot.soundTimer); slot.soundTimer = null }
-    const pending = slot.sounds.filter((s) => !s.isReady())
-    for (const s of slot.sounds) if (s.isReady()) s.play()
-    if (!pending.length) return
-    let tries = 0
-    slot.soundTimer = window.setInterval(() => {
-      if (slot.soundTimer === null) return
-      tries++
-      for (const s of pending) if (s.isReady()) s.play()
-      if (pending.every((s) => s.isReady()) || tries >= 15) {
-        clearInterval(slot.soundTimer)
-        slot.soundTimer = null
-      }
-    }, 200)
-  }
 }

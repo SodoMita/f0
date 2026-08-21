@@ -20,7 +20,7 @@ import {
   setCardFlip, setCardOpacity, setCardBlend, type CardTextureKind,
 } from './cardMaterial'
 import type { ShaderMaterial } from '@babylonjs/core/Materials/shaderMaterial'
-import { flatCamera, makeBackdropTexture, paintBackdrop, makeSpinnerTexture, roundRect, luminance, shade } from '../core/gfx'
+import { flatCamera, makeBackdropTexture, paintBackdrop, makeSpinnerTexture, roundRect, paintPlayButtons, luminance, shade } from '../core/gfx'
 import { theme } from '../theme'
 import { nodeWorthTexture } from './threadGate'
 
@@ -254,7 +254,7 @@ export class ThreadView {
     this.paintReplyTexture()
     this.playTexOff = new DynamicTexture('thread-play-off', { width: 128, height: 128 }, this.scene, true)
     this.playTexOn = new DynamicTexture('thread-play-on', { width: 128, height: 128 }, this.scene, true)
-    this.paintPlayTextures()
+    paintPlayButtons(this.playTexOff, this.playTexOn, this.isDark, theme.ink)
 
     this.applyCamera()
 
@@ -477,7 +477,7 @@ export class ThreadView {
     this.paintFrame(this.frameTex, false)
     this.paintFrame(this.rootFrameTex, true)
     this.paintReplyTexture()
-    this.paintPlayTextures()
+    paintPlayButtons(this.playTexOff, this.playTexOn, this.isDark, theme.ink)
     const edge = Color3.FromHexString(shade(hex, this.isDark ? 0.3 : -0.3))
     for (const l of this.lineMeshes) l.color = edge
   }
@@ -550,49 +550,6 @@ export class ThreadView {
     ctx.moveTo(px, cy - ps); ctx.lineTo(px, cy + ps)
     ctx.stroke()
     tex.update()
-  }
-
-  /** Shared ▶/⏸ button textures (vector strokes, never font glyphs). */
-  private paintPlayTextures(): void {
-    const paint = (tex: DynamicTexture, playing: boolean): void => {
-      const { width: w, height: h } = tex.getSize()
-      const ctx = tex.getContext() as CanvasRenderingContext2D
-      ctx.clearRect(0, 0, w, h)
-      const dark = this.isDark
-      const pad = Math.round(h * 0.07)
-      const bw = w - pad * 2
-      const bh = h - pad * 2
-      ctx.fillStyle = dark ? 'rgba(12,12,14,0.62)' : 'rgba(250,250,252,0.72)'
-      ctx.strokeStyle = dark ? 'rgba(255,255,255,0.30)' : 'rgba(0,0,0,0.28)'
-      ctx.lineWidth = Math.max(2, h * 0.03)
-      roundRect(ctx, pad, pad, bw, bh, bh * 0.28)
-      ctx.fill()
-      ctx.stroke()
-      const ink = dark ? theme.ink : '#101014'
-      const cx = w / 2
-      const cy = h / 2
-      const s = h * 0.24
-      if (playing) {
-        const barW = s * 0.34
-        const gap = s * 0.24
-        ctx.fillStyle = ink
-        roundRect(ctx, cx - gap / 2 - barW, cy - s, barW, s * 2, barW * 0.45)
-        ctx.fill()
-        roundRect(ctx, cx + gap / 2, cy - s, barW, s * 2, barW * 0.45)
-        ctx.fill()
-      } else {
-        ctx.fillStyle = ink
-        ctx.beginPath()
-        ctx.moveTo(cx - s * 0.5, cy - s)
-        ctx.lineTo(cx - s * 0.5, cy + s)
-        ctx.lineTo(cx + s * 0.92, cy)
-        ctx.closePath()
-        ctx.fill()
-      }
-      tex.update()
-    }
-    paint(this.playTexOff, false)
-    paint(this.playTexOn, true)
   }
 
   /** Point a node's button at the right shared texture (▶ or ⏸). */

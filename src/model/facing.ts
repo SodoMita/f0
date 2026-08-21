@@ -143,45 +143,6 @@ export function worldRadius(container: AssetContainer): number {
   return r || 1
 }
 
-/**
- * True world-space bounds of the whole model: union of every mesh's world AABB.
- * Averaging per-mesh centers (worldCenter) or per-mesh sphere radii can miss
- * offset models and frame the camera on the wrong point.
- */
-export function worldBounds(container: AssetContainer): { center: Vector3; radius: number } {
-  const min = new Vector3(Infinity, Infinity, Infinity)
-  const max = new Vector3(-Infinity, -Infinity, -Infinity)
-  let any = false
-  for (const mesh of container.meshes) {
-    mesh.computeWorldMatrix(true)
-    const info = mesh.getBoundingInfo()
-    if (!info) continue
-    const mi = info.boundingBox.minimumWorld
-    const ma = info.boundingBox.maximumWorld
-    min.x = Math.min(min.x, mi.x); min.y = Math.min(min.y, mi.y); min.z = Math.min(min.z, mi.z)
-    max.x = Math.max(max.x, ma.x); max.y = Math.max(max.y, ma.y); max.z = Math.max(max.z, ma.z)
-    any = true
-  }
-  if (!any) return { center: Vector3.Zero(), radius: 1 }
-  // NOTE: do not mutate min before computing both values (a previous
-  // `min.add(max)` bug halved the radius and over-zoomed every camera).
-  const center = new Vector3((min.x + max.x) / 2, (min.y + max.y) / 2, (min.z + max.z) / 2)
-  const radius = Math.max(0.001, Vector3.Distance(min, max) / 2)
-  return { center, radius }
-}
-
-/**
- * Camera distance that frames a bounding sphere of `radius` with margin for a
- * perspective camera with the given vertical fov.
- *
- * Prefer `frameDistance()` — this sphere fit wastes most of a 16:10 frame for
- * wide/flat models (a wide sign has a huge bounding sphere, so it was pushed
- * far away and rendered as a postage stamp in the middle of the card).
- */
-export function fitDistance(radius: number, fov: number): number {
-  return Math.max(radius * 2, (radius / Math.tan(fov / 2)) * 1.25)
-}
-
 /** World-space AABB of the whole model. */
 export function worldBox(container: AssetContainer): { min: Vector3; max: Vector3; center: Vector3; radius: number } {
   const min = new Vector3(Infinity, Infinity, Infinity)
