@@ -166,16 +166,32 @@ bun run build:standalone  # ONE self-contained form-zero-standalone.html
 
 ## Verification — required before claiming any change works
 
-Agents have no vision; **pixel/OCR checks are the eyes**. Always run:
+Agents have no vision; **pixel/OCR checks are the eyes**. One command runs the
+canonical gate (exactly what PR CI enforces — see `.github/workflows/ci.yml`):
 
 ```bash
-bun run build                       # must be clean
+bun run check          # static + unit + browser (offline rig) — the whole gate
+```
+
+Tiers, individually:
+
+```bash
+bun run check:static   # tsc --noEmit + normal build + standalone build
+bun run check:unit     # pure-logic unit files (manifest: scripts/check-units.mjs)
+bun run check:e2e      # smoke + features + offline-verify against the offline rig
+bun run check:fast     # static + unit (no browser)
+```
+
+`check:e2e` starts its own Vite + offline rig (local wss relay + model server)
+via `scripts/run-e2e.mjs` and runs the browser suites serially — deterministic,
+no real relays. The probes below are area-specific and run by hand when you
+touch those parts:
+
+```bash
 bun scripts/orient.mjs              # ORIENTATION GUARD: raw/dyn/rtt probes, exits 1 on a mirror
 bun scripts/interact.mjs            # thread pan (no drift) + pinch + wheel-about-cursor + taps
-bun scripts/smoke.mjs               # boot + feed + posters + live slots + scroll + click
-bun scripts/features.mjs            # reply badges + thread view + settings
 bun scripts/capture.mjs             # board/viewer/thread/light/phone screenshots to shots/
-bun scripts/perf.mjs                # PERF: boot, per-view frame cost, 48-card stress, idle, heap
+bun scripts/perf.mjs                # PERF: boot, per-view frame cost, 48-card stress, idle, heap (enforces stable budgets, exits 1)
 bun scripts/shaders.mjs             # shader recompiles (repeat model opens must compile 0 programs)
 bun scripts/settings.mjs            # every setting must reach real engine state (20 checks)
 bun scripts/transfer.mjs            # network button hit target + global AND per-server speed/ping/status readouts (needs the rig)

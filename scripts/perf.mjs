@@ -270,3 +270,30 @@ const result = {
 console.log(JSON.stringify(result, null, 1))
 writeFileSync(OUT, JSON.stringify(result, null, 1))
 await browser.close()
+
+// ------------------------------------------------------------------ budgets
+// Stable, deterministic budgets FAIL the run; noisy metrics (boot time,
+// scroll p95, CPU-throttled phone numbers) are reported but not enforced here
+// (they belong in a scheduled, median-of-3 comparison — see CONVENTIONS.md).
+const MiB = 1024 * 1024
+const fails = []
+const check = (name, ok, detail = '') => {
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? '  ' + detail : ''}`)
+  if (!ok) fails.push(name)
+}
+const info = (name, ok, detail = '') =>
+  console.log(`${ok ? 'ok  ' : 'WARN'}  ${name}${detail ? '  ' + detail : ''}  (noisy — reported, not enforced)`)
+
+check('model bytes in memory < 48 MiB', result.counts.modelBytesInMemory < 48 * MiB,
+  `${(result.counts.modelBytesInMemory / MiB).toFixed(1)} MiB`)
+check('no leftover spinners after the 48-card stress', result.stress.spinnersLeft === 0,
+  `spinners=${result.stress.spinnersLeft}`)
+check('static board renders ~0 fps (demand-driven loop)', result.idleBoard.rendersPerSec <= 1,
+  `${result.idleBoard.rendersPerSec}/s`)
+
+info('boot firstCardMs < 1.5s (production build)', result.boot.firstCardMs < 1500, `${result.boot.firstCardMs} ms`)
+info('board frame p95 < 25 ms', result.board.frameMs.p95 < 25, `${result.board.frameMs.p95} ms`)
+info('48-card stress scroll p95 < 120 ms', result.stress.scrolling.p95 < 120, `${result.stress.scrolling.p95} ms`)
+
+console.log(fails.length ? `FAILURES: ${fails.join(' | ')}` : 'ALL PERF BUDGETS PASSED')
+process.exit(fails.length ? 1 : 0)
