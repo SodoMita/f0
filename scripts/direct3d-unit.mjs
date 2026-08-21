@@ -1,9 +1,10 @@
 // Direct3DPool units — no browser needed:
 //   bun scripts/direct3d-unit.mjs
-// Guards the AMENDMENT 76 bugfixes: cancel-during-load must not place a
-// model, a full pool must not latch overflow as failed, eviction must use
-// the caller's visible set (not stale slot.visible), leftover scene lights
-// stay disabled, and the model is pushed behind the overlay plane.
+// Guards the AMENDMENT 77 bugfixes (PR 36 + PR 38): cancel-during-load must
+// not place a model, a full pool must not latch overflow as failed, eviction
+// must use the caller's visible set (not stale slot.visible), leftover scene
+// lights stay disabled, in-flight loads land at the LATEST cell, and the
+// model is centred on the card plane.
 import { NullEngine } from '@babylonjs/core/Engines/nullEngine'
 import { Scene } from '@babylonjs/core/scene'
 import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight'
@@ -68,7 +69,7 @@ dummy.intensity = 1
 
 const bytes = makeTriangleGlb()
 const sha256 = '0'.repeat(64)
-const place = { x: 0, y: 0, z: 0.08, w: 16, h: 10, depth: 6 }
+const place = { x: 0, y: 0, z: 0, w: 16, h: 10, depth: 4 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 async function waitUntil(pred, tries = 40, ms = 25) {
   for (let i = 0; i < tries; i++) {
@@ -143,7 +144,25 @@ async function waitUntil(pred, tries = 40, ms = 25) {
   pool.dispose()
 }
 
-// ---- placed model sits behind the overlay plane --------------------------
+// ---- in-flight load lands at the LATEST cell, not the request cell -------
+{
+  let releaseResolve
+  const gate = new Promise((r) => { releaseResolve = r })
+  const pool = new Direct3DPool(scene, async () => {
+    await gate
+    return { bytes, sha256 }
+  }, { maxSlots: 1 })
+  pool.request('move', { ...place, x: 0, y: 0 })
+  pool.place('move', { ...place, x: 50, y: -12 })
+  releaseResolve()
+  await waitUntil(() => pool.isLive('move'))
+  const node = scene.transformNodes.find((n) => n.name.startsWith('d3-') && !n.name.includes('orient') && !n.name.includes('fit'))
+  check('pending place is applied on completion', !!node && Math.abs(node.position.x - 50) < 1e-4 && Math.abs(node.position.y + 12) < 1e-4,
+    `x=${node?.position.x} y=${node?.position.y}`)
+  pool.dispose()
+}
+
+// ---- placed model sits on the card plane ---------------------------------
 {
   const pool = new Direct3DPool(scene, async () => ({ bytes, sha256 }), { maxSlots: 1 })
   pool.request('front', place)
@@ -151,8 +170,9 @@ async function waitUntil(pred, tries = 40, ms = 25) {
   const node = scene.transformNodes.find((n) => n.name.startsWith('d3-') && !n.name.includes('orient') && !n.name.includes('fit'))
   check('found a root transform', !!node, node?.name ?? 'none')
   if (node) {
-    check('model centre is behind the card plane (z>0)', node.position.z > 0, `z=${node.position.z}`)
-    check('model centre is behind the front plane we asked for', node.position.z >= place.z - 1e-4, `z=${node.position.z}`)
+    check('model is centred on the card plane', Math.abs(node.position.z - place.z) < 1e-4, `z=${node.position.z}`)
+    check('model x/y match the requested cell', Math.abs(node.position.x - place.x) < 1e-4 && Math.abs(node.position.y - place.y) < 1e-4,
+      `x=${node.position.x} y=${node.position.y}`)
   }
   const importedOn = scene.lights.filter((l) => !l.name.startsWith('d3-') && l.isEnabled())
   check('no non-d3 lights left enabled', importedOn.length === 0, importedOn.map((l) => l.name).join(','))

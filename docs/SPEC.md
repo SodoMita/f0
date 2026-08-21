@@ -1155,10 +1155,24 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     - Imported GLB lights and cameras are disabled — they lit neighbouring
       cards. The pool's own rig is the only light; leftover board dummy hemi
       is disabled so PBR is not double-lit.
-    - Models sit BEHIND the card plane (front at z≈0.08, depth extends +Z)
-      and overlays (badge / play / spinner / reply) render in group 1 so a
-      post cannot paint over its buttons. Transparent card materials disable
-      depth write (an opacity-0 tap target must not occlude the model).
+    - Models are centred on the card/node plane (z=0) with depth
+      0.4·min(w,h) so they do not poke behind the opaque backdrop (board z=2)
+      or through the contact shadow (moved to z=1.9 in 3D). Overlays (badge /
+      play / spinner / reply) render in group 1 so a post cannot paint over
+      its buttons. Transparent card materials disable depth write (an
+      opacity-0 tap target must not occlude the model).
+    - A 2D poster requested BEFORE the 3D toggle resolves asynchronously and
+      used to land on the card quad over the live model. Both views bump a
+      mode-generation counter on every 2D↔3D switch and drop poster results
+      whose generation is stale. A stale preview-pool release must not
+      re-show a poster over a direct model.
+    - The no-camera auto-fit rotation was `FromUnitVectorsToRef(facing, -Z)`;
+      for opposite vectors that picks an arbitrary 180° axis and flips flat
+      models. It is now the exact inverse of the poster's auto-fit camera
+      (`LookAtLH(eye=facing, target=0, up≈+Y)` → quaternion).
+    - A load that completes after the feed scrolled landed at the cell
+      captured at REQUEST time. The pool keeps the latest pending place per
+      post and applies it on completion (models stay glued to their cards).
     - FormEngine calls `engine.beginFrame()`/`endFrame()` so
       `getDeltaTime()` is real. Without that, AnimationGroup.start() on
       direct-3D cards never advanced (demand-driven RAF is not
