@@ -443,6 +443,56 @@
       </div>
     </div>
 
+    <!-- Export review: the inspected/downloaded GLB is the immutable blob that
+         Publish uploads. Codec choices land here once their browser encoders
+         are bundled; no fake toggles in the editor itself. -->
+    <div id="export-review" class="hud export-review" hidden role="dialog" aria-modal="true" aria-label="GLB export review">
+      <section class="export-card">
+        <header class="export-head"><div><strong>Export GLB</strong><span id="export-state">ready to inspect</span></div><button id="btn-export-close" class="hbtn small" aria-label="close export review">✕</button></header>
+        <div id="export-summary" class="export-summary"></div>
+        <div id="export-meter" class="export-meter"><i></i></div>
+        <div id="export-breakdown" class="export-breakdown"></div>
+        <p id="export-extensions" class="export-extensions"></p>
+        <div id="export-codecs" class="export-codecs" hidden>
+          <div class="codec-row"><span>geometry</span>
+            <div class="codec-opts" id="codec-geometry">
+              <button type="button" data-v="none" class="on">raw</button>
+              <button type="button" data-v="draco" hidden>draco</button>
+            </div>
+          </div>
+          <div class="codec-row"><span>textures</span>
+            <div class="codec-opts" id="codec-texture">
+              <button type="button" data-v="none" class="on">raw</button>
+              <button type="button" data-v="webp" hidden>webp</button>
+            </div>
+          </div>
+        </div>
+        <div id="export-codec-settings" class="export-codec-settings" hidden>
+          <div class="codec-row" id="draco-quality-row" hidden><span>geometry bits</span>
+            <div class="codec-opts" id="draco-quality">
+              <button type="button" data-v="high" title="position 14 · normal 10 · uv 12 · color 8">14</button>
+              <button type="button" data-v="balanced" class="on" title="position 12 · normal 9 · uv 11 · color 8">12</button>
+              <button type="button" data-v="small" title="position 10 · normal 8 · uv 9 · color 6">10</button>
+            </div>
+          </div>
+          <div class="codec-row" id="webp-quality-row" hidden><span>texture quality</span>
+            <input type="range" id="webp-quality" min="50" max="100" step="5" value="85" aria-label="webp quality" />
+            <b id="webp-quality-label">85%</b>
+          </div>
+        </div>
+        <div id="export-preview" class="export-preview" hidden>
+          <div class="shots">
+            <figure class="export-shot"><canvas id="export-preview-raw" width="448" height="280"></canvas><figcaption>raw</figcaption></figure>
+            <figure class="export-shot"><canvas id="export-preview-codec" width="448" height="280"></canvas><figcaption id="export-preview-codec-label">codec</figcaption></figure>
+          </div>
+          <p id="export-preview-diff" class="export-preview-diff"></p>
+        </div>
+        <p id="export-codec-note" class="export-codec-note"></p>
+        <p class="hint">This is the exact self-contained GLB that download and publish use. A codec choice re-encodes the same frozen export and re-validates the result before it can be published.</p>
+        <footer class="export-actions"><button id="btn-export-download" class="net-btn">download GLB</button><button id="btn-export-publish" class="net-btn primary">publish</button></footer>
+      </section>
+    </div>
+
     <input id="file-input" type="file" multiple hidden accept=".glb,.gltf,.bin,.obj,.mtl,.png,.jpg,.jpeg,.webp" />
     <div id="a11y-bridge" hidden></div>
 

@@ -26,6 +26,16 @@ and optional embedded audio.
   (T); prev/next. **VR** (spec AMENDMENT 41): an enter-VR action puts the
   model in 1:1 WebXR immersive space with 6-DOF head tracking (same canvas /
   engine); hidden when unsupported.
+- **Studio → export review** (spec AMENDMENT 84): publishing first freezes an
+  exact, validated GLB snapshot with its size/budget breakdown; download and
+  publish ship those exact bytes. The review offers local codec encoders that
+  appear only when they provably work — geometry **draco** and texture
+  **webp** (a text model shrinks ~13×); a codec choice re-derives from the
+  same frozen export and must re-validate before it can be published, and
+  `raw` restores the serializer bytes exactly. Because both codecs are lossy,
+  the review renders the compressed result beside the raw export (with a
+  pixel-difference readout) and exposes fine settings: geometry quantization
+  bits and texture quality.
 
 ## HUD is HTML
 Settings, navigation, toolbars, metadata, toasts are plain HTML overlays.

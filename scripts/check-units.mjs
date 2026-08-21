@@ -28,6 +28,7 @@ const ROOT = dirname(here)
 // filename -> { run: [...argv before the file], tier }
 const MANIFEST = {
   'anim-unit.mjs':        { run: ['bun'],            tier: 'unit' },
+  'codec-unit.mjs':       { run: ['bun'],            tier: 'unit' },
   'direct3d-unit.mjs':    { run: ['bun'],            tier: 'unit' },
   'error-copy-unit.mjs':  { run: ['node'],           tier: 'browser' },
   'hash-unit.mjs':        { run: ['bun'],            tier: 'unit' },

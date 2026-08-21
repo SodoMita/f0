@@ -1,0 +1,37 @@
+/* Exact-byte GLB review before a Studio upload. */
+.export-review { inset: 0; z-index: 40; display: grid; place-items: center; padding: 20px; background: rgba(0,0,0,.48); backdrop-filter: blur(5px); pointer-events: auto; }
+.export-card { width: min(440px, 100%); display: flex; flex-direction: column; gap: 14px; padding: 16px; border: 1px solid var(--line); border-radius: 14px; background: rgba(21,21,23,.97); box-shadow: 0 18px 70px rgba(0,0,0,.42); }
+.export-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.export-head strong { display: block; font: 600 16px/1.2 ui-monospace, monospace; }
+.export-head span { display: block; margin-top: 4px; color: var(--muted); font: 10px/1.2 ui-monospace, monospace; }
+.export-summary { display: grid; grid-template-columns: 1fr auto; gap: 4px 14px; font: 11px/1.45 ui-monospace, monospace; color: var(--muted); }
+.export-summary b { color: var(--ink); font-weight: 500; text-align: right; }
+.export-meter { height: 6px; overflow: hidden; border-radius: 4px; background: rgba(255,255,255,.1); }
+.export-meter i { display: block; width: 0; height: 100%; border-radius: inherit; background: var(--success); }
+.export-breakdown, .export-extensions { margin: 0; font: 10px/1.5 ui-monospace, monospace; color: var(--muted); }
+.export-extensions { overflow-wrap: anywhere; }
+.export-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.export-actions .net-btn { min-height: 40px; }
+body[data-theme="light"] .export-card { background: rgba(253,253,255,.98); }
+/* Codec choices: each option appears only when its local encoder works. */
+.export-codecs { display: flex; flex-direction: column; gap: 6px; }
+.codec-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; font: 11px/1.2 ui-monospace, monospace; color: var(--muted); }
+.codec-opts { display: flex; gap: 4px; }
+.codec-opts button { padding: 5px 12px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--muted); font: 11px/1 ui-monospace, monospace; cursor: pointer; }
+.codec-opts button:hover:not(:disabled) { color: var(--ink); }
+.codec-opts button.on { border-color: var(--accent, #7c9cff); color: var(--ink); background: rgba(124, 156, 255, .14); }
+.codec-opts button:disabled { opacity: .5; cursor: wait; }
+.export-codec-note { margin: 0; font: 10px/1.5 ui-monospace, monospace; color: var(--muted); overflow-wrap: anywhere; }
+.export-codec-note:empty { display: none; }
+/* Fine settings for the active codecs (lossy dials) + lossy preview. */
+.export-codec-settings { display: flex; flex-direction: column; gap: 6px; }
+.codec-row input[type="range"] { width: 130px; accent-color: var(--accent, #7c9cff); }
+.codec-row b { min-width: 34px; color: var(--ink); font: 11px/1 ui-monospace, monospace; text-align: right; }
+.export-preview { display: flex; flex-direction: column; gap: 6px; }
+.export-preview .shots { display: flex; gap: 8px; justify-content: center; }
+.export-shot { margin: 0; display: flex; flex-direction: column; gap: 4px; align-items: center; }
+.export-shot canvas { width: 200px; height: auto; aspect-ratio: 16/10; border: 1px solid var(--line); border-radius: 8px; background: repeating-conic-gradient(rgba(255,255,255,.06) 0 25%, transparent 0 50%) 0 0/16px 16px; }
+.export-shot figcaption { font: 10px/1 ui-monospace, monospace; color: var(--muted); }
+.export-preview-diff { margin: 0; font: 10px/1.5 ui-monospace, monospace; color: var(--muted); text-align: center; }
+.export-preview-diff:empty { display: none; }
+.export-codecs.busy button, .export-codec-settings.busy button, .export-codec-settings.busy input[type="range"] { opacity: .55; cursor: progress; }

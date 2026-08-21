@@ -13,7 +13,7 @@ import { request } from 'node:https'
 const URL = process.env.TARGET_URL || 'http://localhost:4173/'
 const browser = await chromium.launch({
   headless: true,
-  args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox'],
+  args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox', '--ignore-certificate-errors'],
 })
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
 const errors = []
@@ -58,18 +58,30 @@ await page.waitForFunction(() => window.__form0.index.byId.size >= 52, null, { t
   await page.evaluate(() => { location.hash = '#/studio' })
   await page.waitForFunction(() => window.__form0.engine.activeScene === window.__form0.studio.scene, null, { timeout: 10000 })
   // the studio opens on the UPLOAD tab with EMPTY text (by design since the
-  // upload-tab regression fix) — switch to the type tab, which seeds '/0'
-  await page.evaluate(() => document.querySelector('[data-tab="type"]').click())
+  // upload-tab regression fix). AMENDMENT 66/69: the type tab never seeds
+  // anything either — a blank field is no content — so type '/0' the way a
+  // player would.
+  await page.evaluate(() => {
+    document.querySelector('[data-tab="type"]').click()
+    const ta = document.getElementById('studio-text')
+    ta.value = '/0'
+    ta.dispatchEvent(new Event('input', { bubbles: true }))
+  })
   await page.waitForFunction(() => window.__form0.studio.hasContent(), null, { timeout: 20000 })
+  await page.waitForTimeout(1000) // text mesh rebuild debounce
 
   // point the app's blossom client at the rig's upload endpoint
   await page.evaluate(() => window.__form0.blossoms.setServers(['https://localhost:8443']))
   const before = await page.evaluate(() => window.__form0.index.byId.size)
 
-  // the REAL publish flow: the studio's publish button (export -> blossom ->
-  // relays; format v4 renders no poster at publish time) and the app routes
-  // to the new post's viewer
+  // the REAL publish flow: the studio's publish button opens the export
+  // review (frozen, validated snapshot), and only the review's publish
+  // button uploads (blossom + relays; format v4 renders no poster at
+  // publish time). The app then routes to the new post's viewer.
   await page.evaluate(() => document.querySelector('#btn-studio-publish').click())
+  await page.waitForSelector('#export-review:not([hidden])', { timeout: 60000 })
+  await page.waitForFunction(() => document.querySelector('#export-state').textContent.includes('validated'), null, { timeout: 60000 })
+  await page.evaluate(() => document.querySelector('#btn-export-publish').click())
   await page.waitForFunction(() => location.hash.startsWith('#/viewer/'), null, { timeout: 120000 })
   const published = await page.evaluate((beforeCount) => {
     const f = window.__form0
@@ -174,6 +186,9 @@ await page.waitForFunction(() => window.__form0.index.byId.size >= 52, null, { t
   await page.waitForTimeout(1100)
   const before2 = await page.evaluate(() => window.__form0.index.byId.size)
   await page.evaluate(() => document.querySelector('#btn-studio-publish').click())
+  await page.waitForSelector('#export-review:not([hidden])', { timeout: 60000 })
+  await page.waitForFunction(() => document.querySelector('#export-state').textContent.includes('validated'), null, { timeout: 60000 })
+  await page.evaluate(() => document.querySelector('#btn-export-publish').click())
   await page.waitForFunction(() => location.hash.startsWith('#/viewer/'), null, { timeout: 120000 })
   const importedPublish = await page.evaluate((bc) => {
     const f = window.__form0
@@ -195,42 +210,67 @@ await page.waitForFunction(() => window.__form0.index.byId.size >= 52, null, { t
 {
   await page.evaluate(() => { location.hash = '#/studio' })
   await page.waitForFunction(() => window.__form0.engine.activeScene === window.__form0.studio.scene, null, { timeout: 10000 })
-  await page.evaluate(() => document.querySelector('[data-tab="type"]').click())
+  await page.evaluate(() => {
+    document.querySelector('[data-tab="type"]').click()
+    const ta = document.getElementById('studio-text')
+    ta.value = 'cancel me'
+    ta.dispatchEvent(new Event('input', { bubbles: true }))
+  })
   await page.waitForFunction(() => window.__form0.studio.hasContent(), null, { timeout: 20000 })
+  await page.waitForTimeout(1000) // text mesh rebuild debounce
 
+  // publishModel builds its OWN BlossomClient (AMENDMENT 71 snapshot path),
+  // so stubbing the app's client instance no longer intercepts anything —
+  // stall the CLASS instead, then cancel from the UI.
+  await page.evaluate(async () => {
+    const { BlossomClient } = await import('/src/protocol/blossom.ts')
+    const original = BlossomClient.prototype.upload
+    BlossomClient.prototype.upload = function (_blob, _secret, signal) {
+      return new Promise((_resolve, reject) => {
+        const boom = () => {
+          const err = new Error('upload aborted')
+          err.name = 'AbortError'
+          reject(err)
+        }
+        if (signal?.aborted) { boom(); return }
+        signal?.addEventListener('abort', boom, { once: true })
+      })
+    }
+    window.__restoreBlossomUpload = () => { BlossomClient.prototype.upload = original }
+  })
   const cancelled = await page.evaluate(async () => {
     const f = window.__form0
-    const origUpload = f.blossoms.upload.bind(f.blossoms)
-    f.blossoms.upload = (_blob, _secret, signal) => new Promise((_resolve, reject) => {
-      const boom = () => {
-        const err = new Error('upload aborted')
-        err.name = 'AbortError'
-        reject(err)
-      }
-      if (signal?.aborted) { boom(); return }
-      signal?.addEventListener('abort', boom, { once: true })
-    })
     document.querySelector('#btn-studio-publish').click()
+    // review flow: validated snapshot first, then start the real upload
     await new Promise((r) => {
       const t0 = performance.now()
       const tick = () => {
-        if (document.getElementById('btn-studio-publish').textContent === 'cancel' || performance.now() - t0 > 4000) r()
+        const state = document.getElementById('export-state').textContent
+        if ((state.includes('validated') && !document.getElementById('export-review').hidden) || performance.now() - t0 > 20000) r()
+        else requestAnimationFrame(tick)
+      }
+      tick()
+    })
+    document.querySelector('#btn-export-publish').click()
+    await new Promise((r) => {
+      const t0 = performance.now()
+      const tick = () => {
+        if (document.getElementById('btn-studio-publish').textContent === 'cancel' || performance.now() - t0 > 8000) r()
         else requestAnimationFrame(tick)
       }
       tick()
     })
     const labeled = document.getElementById('btn-studio-publish').textContent
     const frozen = f.studio.isFrozen
-    document.querySelector('#btn-studio-publish').click()
+    document.querySelector('#btn-studio-publish').click() // = cancel
     await new Promise((r) => {
       const t0 = performance.now()
       const tick = () => {
-        if (document.getElementById('studio-status').textContent === 'cancelled' || performance.now() - t0 > 4000) r()
+        if (document.getElementById('studio-status').textContent === 'cancelled' || performance.now() - t0 > 8000) r()
         else requestAnimationFrame(tick)
       }
       tick()
     })
-    f.blossoms.upload = origUpload
     return {
       labeled,
       frozen,
@@ -240,6 +280,8 @@ await page.waitForFunction(() => window.__form0.index.byId.size >= 52, null, { t
       button: document.getElementById('btn-studio-publish').textContent,
     }
   })
+  await page.evaluate(() => window.__restoreBlossomUpload?.())
+
   check('publish button becomes cancel while uploading', cancelled.labeled === 'cancel' && cancelled.frozen,
     JSON.stringify(cancelled))
   check('cancel aborts the upload and unfreezes the studio',

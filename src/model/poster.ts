@@ -155,7 +155,12 @@ export class PosterRenderer {
       const cam = setupCamera(useAuthored)
       this.scene.activeCamera = cam
       cam.outputRenderTarget = rtt
-      // A couple of yields so materials compile. No readback, no blank retry.
+      // Textures decode asynchronously (blob URL -> image decode -> GPU
+      // upload); three microtask yields were not enough, so the FIRST poster
+      // of a texture-bearing post rendered with an unbaked material (blank
+      // card) and only a second render of the same bytes worked. One bounded
+      // readiness wait — not a readback, not a blank-check retry loop.
+      await this.scene.whenReadyAsync()
       this.scene.render()
       await sleep(0)
       this.scene.render()

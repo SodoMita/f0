@@ -1300,3 +1300,41 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     slot.pendingLive and binds it in the tick loop once the fade completes;
     onRelease clears it. Guard: scripts/offline-verify.mjs §1b "board card
     crossfades over >=60ms".
+
+84. STUDIO EXPORT CODECS (2026-08-21): the export review (frozen pre-publish
+    snapshot, exact bytes for download/publish) grows LOCAL codec encoders:
+    geometry KHR_draco_mesh_compression (Babylon's own DracoEncoder wasm via
+    `?url`, main thread, no asm.js fallback — without wasm the probe fails
+    and the control stays hidden) and textures EXT_texture_webp (canvas).
+    An option appears only after its encoder passes a probe. A choice
+    re-derives from the SAME frozen pristine export and must re-pass
+    validateGLB before it can become the reviewed snapshot (`raw` restores
+    the exact serializer bytes). The rewrite (`src/model/compressGlb.ts`,
+    encoders injected) never grows a file: skinned / morph-target /
+    already-compressed primitives and animations keep their raw buffers;
+    accessors keep count/min/max and lose only their bufferView; shared
+    views survive while anything still reads them raw. Standalone inlines
+    the encoder (+~570 KB → 5.09 MB single file).
+    Riding along: PosterRenderer awaits `scene.whenReadyAsync()` once before
+    its render loop (the first poster of a texture-bearing post used to
+    render before the texture decoded), and the publish button's mid-upload
+    cancel — lost when the review flow took over its click — works again.
+    (The "authored camera poster shows green" red check found during this
+    work was root-caused and fixed on main as AMENDMENT 82.)
+    Guards: `check:codec` (container, draco rewrite with real-wasm Babylon
+    load roundtrips, webp rewrite, shared views, animations byte-exact),
+    `check:codec-browser` (review UI, draco publish roundtrip with
+    SHA-verified bytes, webp poster equivalence).
+
+85. EXPORT CODEC PREVIEW + FINE SETTINGS (2026-08-21): both codecs are LOSSY,
+    so the review proves their cost: when one is active it renders the EXACT
+    reviewed bytes through the card pipeline beside the raw export, with a
+    mean pixel-difference readout (baseline cached per export, renders
+    token-guarded, hidden when no codec is on). Fine settings: geometry bits
+    presets 14/12/10 (position/normal/uv/color/tangent quantization) and a
+    texture quality slider (50–100%, default 85%); the note reports the
+    applied bits and quality. Every change re-derives + re-validates +
+    re-previews; derives queue instead of swallowing clicks, and a busy pass
+    can never leave the controls locked (fallback clears busy, edits reset).
+    Guards: `check:codec` fine-settings units + `check:codec-browser`
+    (preview, dials, visibility).

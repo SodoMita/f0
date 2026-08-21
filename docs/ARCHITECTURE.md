@@ -36,6 +36,12 @@ src/
     facing.ts        worldBox (union AABB of drawable meshes) + dominantFacing
                      (thin-axis / authored normals) + frameDistance
     framing.ts       3D-card main-camera / auto-fit frame + cell clip planes
+    glbContainer.ts  pure GLB chunk parse/build (codec pipeline, no Babylon)
+    compressGlb.ts   KHR_draco_mesh_compression + EXT_texture_webp rewrite
+                     with INJECTED encoders; never grows a file (AMENDMENT 82)
+    dracoEncode.ts   local Draco ENCODER config (?url assets, main thread,
+                     probe-gated) — the decode side stays in draco.ts
+    webpEncode.ts    canvas png/jpeg → webp texture codec (probe-gated)
     poster.ts        GLB → dedicated transparent RTT via scene.render() +
                      camera.outputRenderTarget, rendered at the post's `dim`
                      (default 448×280); format v4: never fetched, never a PNG
