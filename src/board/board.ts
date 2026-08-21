@@ -472,6 +472,11 @@ export class Board {
    * Toggle "3D models" (the topbar button / settings → Interface). ON swaps
    * the board from poster + offscreen preview RTTs to real GLB meshes
    * rendered directly in the board scene; OFF restores the poster pipeline.
+   *
+   * The toggle must take effect immediately — even while the feed is
+   * settling — so the board never shows a stale 2D poster after the user
+   * asked for 3D (the "shows initially 2d" regression). We therefore clear
+   * the scroll-settle gate before refreshing visibility.
    */
   setDirect3D(on: boolean): void {
     if (this.threeD === on) return
@@ -490,6 +495,13 @@ export class Board {
       slot.spinSince = 0
     }
     this.lastSyncScroll = Number.NEGATIVE_INFINITY
+    // Force the next visibility pass to treat the feed as settled: the user
+    // explicitly asked for a pipeline switch, so 3D models must start loading
+    // on this frame, not after the next scroll idle.
+    this.velocity = 0
+    this.lastScrollAt = 0
+    this.pendingSettle = false
+    this.assets?.setPaused(false)
     this.refreshVisibility()
     this.invalidate(3)
   }

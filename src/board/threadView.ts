@@ -490,6 +490,10 @@ export class ThreadView {
    * Toggle "3D models" for the thread map (topbar button / settings →
    * Interface). ON replaces poster nodes with real GLB meshes rendered
    * directly in the map; OFF restores the poster pipeline.
+   *
+   * The toggle must take effect immediately — even while a pinch is still
+   * in flight — so the map never shows a stale 2D poster after the user
+   * asked for 3D (the "shows initially 2d" regression).
    */
   setDirect3D(on: boolean): void {
     if (this.threeD === on) return
@@ -511,6 +515,11 @@ export class ThreadView {
       }
       this.positionPlayButton(n)
     }
+    // Force the next visibility pass to treat the map as idle: a still-pinching
+    // finger must not defer 3D loads until the gesture ends.
+    this.pointers.clear()
+    this.pinchDist = 0
+    this.posterFailed.clear()
     if (on) this.sync3D()
     else this.syncPosters()
     this.form.kick()
