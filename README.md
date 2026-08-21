@@ -32,7 +32,10 @@ and optional embedded audio.
   appear only when they provably work — geometry **draco** and texture
   **webp** (a text model shrinks ~13×); a codec choice re-derives from the
   same frozen export and must re-validate before it can be published, and
-  `raw` restores the serializer bytes exactly.
+  `raw` restores the serializer bytes exactly. Because both codecs are lossy,
+  the review renders the compressed result beside the raw export (with a
+  pixel-difference readout) and exposes fine settings: geometry quantization
+  bits and texture quality.
 
 ## HUD is HTML
 Settings, navigation, toolbars, metadata, toasts are plain HTML overlays.

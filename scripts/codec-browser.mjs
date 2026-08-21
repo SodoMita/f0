@@ -22,6 +22,12 @@ const check = (name, ok, detail = '') => {
 
 const fileSize = () => page.$eval('#export-summary b', (el) => el.textContent.split('/')[0].trim()).catch(() => '')
 const state = () => page.$eval('#export-state', (el) => el.textContent).catch(() => '')
+/** Codec derives queue; the chain has settled only when busy clears. */
+const settle = () => page.waitForFunction(() => {
+  const a = document.getElementById('export-codecs')
+  const b = document.getElementById('export-codec-settings')
+  return !a.classList.contains('busy') && !b.classList.contains('busy')
+}, { timeout: 90000 })
 
 await page.goto(URL, { waitUntil: 'domcontentloaded', timeout: 45000 })
 await page.waitForFunction(() => window.__form0?.studio, { timeout: 30000 })
@@ -61,10 +67,7 @@ check('webp option appears when the canvas encoder works', webpVisible)
 
 if (dracoVisible) {
   await page.click('#codec-geometry [data-v="draco"]')
-  await page.waitForFunction(() => {
-    const s = document.querySelector('#export-state').textContent
-    return s.includes('validated') || s.includes('failed')
-  }, { timeout: 60000 })
+  await settle()
   const compressed = await fileSize()
   const note = await page.$eval('#export-codec-note', (el) => el.textContent)
   const extensions = await page.$eval('#export-extensions', (el) => el.textContent)
@@ -72,29 +75,89 @@ if (dracoVisible) {
   check('draco shows savings note', /draco .*→/.test(note), note)
   check('draco extension is declared', extensions.includes('KHR_draco_mesh_compression'), extensions)
 
+  // Lossy preview (AMENDMENT 83): the review renders the exact compressed
+  // bytes through the card pipeline next to the raw export.
+  await page.waitForFunction(() => /identical pixels|mean pixel difference|unavailable/.test(document.getElementById('export-preview-diff').textContent), { timeout: 60000 })
+  const preview = await page.evaluate(() => {
+    const box = document.getElementById('export-preview')
+    const painted = (id) => {
+      const c = document.getElementById(id)
+      if (!c || !c.width) return 0
+      const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data
+      let sum = 0
+      for (let i = 0; i < d.length; i += 4) sum += d[i] + d[i + 1] + d[i + 2]
+      return sum
+    }
+    return {
+      visible: !box.hidden,
+      raw: painted('export-preview-raw'),
+      codec: painted('export-preview-codec'),
+      diff: document.getElementById('export-preview-diff').textContent,
+      label: document.getElementById('export-preview-codec-label').textContent,
+    }
+  })
+  check('lossy preview shows raw + compressed renders', preview.visible && preview.raw > 0 && preview.codec > 0, JSON.stringify({ raw: preview.raw, codec: preview.codec }))
+  check('lossy preview reports the pixel difference', /identical pixels|mean pixel difference/.test(preview.diff), preview.diff)
+  check('lossy preview labels the codec side', preview.label.includes('draco'), preview.label)
+
+  // Fine settings: fewer geometry bits must re-derive a smaller file.
+  const balancedSize = await fileSize()
+  await page.click('#draco-quality [data-v="small"]')
+  await settle()
+  await page.waitForFunction(() => /pos 10/.test(document.getElementById('export-codec-note').textContent), { timeout: 60000 })
+  const smallSize = await fileSize()
+  const noteSmall = await page.$eval('#export-codec-note', (el) => el.textContent)
+  check('draco bits dial changes the result', smallSize !== balancedSize && /pos 10/.test(noteSmall), `${balancedSize} -> ${smallSize}`)
+  await page.click('#draco-quality [data-v="balanced"]')
+  await settle()
+  await page.waitForFunction(() => /pos 12/.test(document.getElementById('export-codec-note').textContent), { timeout: 60000 })
+
   // Back to raw: deterministic re-derivation from the same frozen export.
   await page.click('#codec-geometry [data-v="none"]')
-  await page.waitForFunction(() => {
-    const s = document.querySelector('#export-state').textContent
-    return s.includes('validated') || s.includes('failed')
-  }, { timeout: 60000 })
+  await settle()
+  await page.waitForFunction(() => document.getElementById('export-codec-note').textContent === '', { timeout: 30000 })
   const back = await fileSize()
   check('switching back to raw restores the exact original', back === raw, `${back} vs ${raw}`)
 
   // The publish button only works off the reviewed snapshot; keep draco on.
   await page.click('#codec-geometry [data-v="draco"]')
-  await page.waitForFunction(() => document.querySelector('#export-state').textContent.includes('validated'), { timeout: 60000 })
+  await settle()
 }
 
 if (webpVisible) {
   // A text-only model has no textures: webp must stay honest about it.
   await page.click('#codec-texture [data-v="webp"]')
-  await page.waitForFunction(() => document.querySelector('#export-state').textContent.includes('validated'), { timeout: 60000 })
+  await settle()
   const note = await page.$eval('#export-codec-note', (el) => el.textContent)
   check('webp with nothing to encode keeps the review valid', (await state()).includes('validated'), note)
+  // Fine settings: the quality slider re-derives and stays valid.
+  const rowVisible = await page.isVisible('#webp-quality-row')
+  check('webp quality slider appears with the codec', rowVisible)
+  await page.$eval('#webp-quality', (el) => {
+    el.value = '70'
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+    el.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  await settle()
+  const qLabel = await page.$eval('#webp-quality-label', (el) => el.textContent)
+  check('webp quality change re-derives a valid review', qLabel === '70%', qLabel)
   await page.click('#codec-texture [data-v="none"]')
-  await page.waitForFunction(() => document.querySelector('#export-state').textContent.includes('validated'), { timeout: 60000 })
+  await settle()
+  const rowHidden = !(await page.isVisible('#webp-quality-row'))
+  check('webp quality slider hides with the codec off', rowHidden)
 }
+
+{
+  // The preview hides when no codec is active (geometry is still draco here).
+  await page.click('#codec-geometry [data-v="none"]')
+  await settle()
+  const hidden = await page.$eval('#export-preview', (el) => el.hidden)
+  check('preview hides with codecs off', hidden === true)
+  // Restore the draco choice for the rest of the flow.
+  await page.click('#codec-geometry [data-v="draco"]')
+  await settle()
+}
+
 
 // A studio edit while the review is open must invalidate the snapshot.
 await typeText('codec roundtrip check abcdefghijklmnopqrstuvwxyz 0123456789 EDITED')

@@ -33,8 +33,16 @@ export interface DracoPrimitiveInput {
   indices: Uint16Array | Uint32Array | null
 }
 
+/** Fine settings: quantization bits per Draco attribute kind (quality dial).
+ * Unspecified entries fall back to the encoder's defaults. */
+export interface DracoEncodeOptions {
+  quantizationBits?: Partial<Record<DracoAttributeName, number>>
+  encodeSpeed?: number
+  decodeSpeed?: number
+}
+
 export interface DracoCodec {
-  encodePrimitive(input: DracoPrimitiveInput): Promise<{ data: Uint8Array; attributeIds: Record<string, number> } | null>
+  encodePrimitive(input: DracoPrimitiveInput, options?: DracoEncodeOptions): Promise<{ data: Uint8Array; attributeIds: Record<string, number> } | null>
 }
 
 export interface TextureCodec {
@@ -44,7 +52,9 @@ export interface TextureCodec {
 
 export interface CompressOptions {
   draco?: DracoCodec
+  dracoOptions?: DracoEncodeOptions
   webp?: TextureCodec
+  /** 0..1 lossy quality for the texture codec (default 0.85). */
   webpQuality?: number
 }
 
@@ -183,7 +193,7 @@ export async function compressGLB(bytes: Uint8Array, opts: CompressOptions): Pro
             }
           }
           try {
-            const result = await opts.draco.encodePrimitive({ attributes, indices })
+            const result = await opts.draco.encodePrimitive({ attributes, indices }, opts.dracoOptions)
             if (result && result.data.length > 0 && result.data.length < rawSize) {
               dracoEdits.push({ mesh: mi, prim: pi, payload: result.data, ids: result.attributeIds })
             } else if (result) { report.draco.skipped++; dracoReason('a primitive did not shrink') }

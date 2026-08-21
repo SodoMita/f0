@@ -15,7 +15,7 @@
  * control".
  */
 import { DracoEncoder } from '@babylonjs/core/Meshes/Compression/dracoEncoder'
-import type { DracoCodec } from './compressGlb'
+import type { DracoCodec, DracoEncodeOptions } from './compressGlb'
 // Local Draco assets (spec 00 §6.5): never cdn.babylonjs.com.
 import encoderWrapperUrl from '@babylonjs/core/assets/Draco/draco_encoder_wasm_wrapper.js?url'
 import encoderWasmUrl from '@babylonjs/core/assets/Draco/draco_encoder.wasm?url'
@@ -40,11 +40,22 @@ export function configureDracoEncoder(): void {
 
 /** `DracoCodec` adapter over Babylon's main-thread DracoEncoder. */
 export const dracoCodec: DracoCodec = {
-  async encodePrimitive(input) {
+  async encodePrimitive(input, options?: DracoEncodeOptions) {
     // `kind` is the glTF semantic, so the returned attributeIds map is
     // exactly the KHR_draco_mesh_compression `attributes` dictionary.
     const attributes = input.attributes.map((a) => ({ kind: a.semantic, dracoName: a.dracoName, size: a.size, data: a.data }))
-    const encoded = await DracoEncoder.Default._encodeAsync(attributes, input.indices)
+    // Babylon's encoder expects a complete quantization record; fill partial
+    // fine settings over its defaults (POSITION 14 / NORMAL 10 / COLOR 8 /
+    // TEX_COORD 12 / GENERIC 12 — TANGENT rides its own entry here).
+    const encodeOptions: Record<string, unknown> = {}
+    if (options?.quantizationBits) {
+      encodeOptions.quantizationBits = { POSITION: 14, NORMAL: 10, COLOR: 8, TEX_COORD: 12, GENERIC: 12, ...options.quantizationBits }
+    }
+    if (options?.encodeSpeed !== undefined) encodeOptions.encodeSpeed = options.encodeSpeed
+    if (options?.decodeSpeed !== undefined) encodeOptions.decodeSpeed = options.decodeSpeed
+    const encoded = await DracoEncoder.Default._encodeAsync(
+      attributes, input.indices,
+      Object.keys(encodeOptions).length ? (encodeOptions as never) : undefined)
     if (!encoded) return null
     return {
       data: new Uint8Array(encoded.data.buffer, encoded.data.byteOffset, encoded.data.byteLength),

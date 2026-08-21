@@ -4,6 +4,12 @@ Claim a task by moving it to **In progress** with your name/date, push, then
 move it to **Done** with a commit reference. One agent per area.
 
 ## Done
+- [x] **Export codec lossy preview + fine settings** (agent arena, 2026-08-21,
+      SPEC AMENDMENT 83): the review renders the exact compressed bytes
+      through the card pipeline beside the raw export with a pixel-difference
+      readout, and exposes `geometry bits` presets (14/12/10) + a `texture
+      quality` slider (50–100%). Derives queue instead of swallowing clicks.
+      Guards extended: check:codec (37 units) + check:codec-browser.
 - [x] **Studio GLB export review, download, and compression** (agents arena,
       2026-08-21, SPEC AMENDMENT 82): the review is a frozen, validated
       snapshot — exact bytes for download AND publish, invalidated by any

@@ -1317,3 +1317,27 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     "authored camera poster is red-only" now renders red=5.7%/green=94.3%
     — the worldBox/frustum probe accepts the authored camera but the render
     shows the big green cube; owner: poster/framing follow-up.
+
+83. EXPORT CODEC PREVIEW + FINE SETTINGS (2026-08-21): both export codecs
+    are LOSSY, so the review shows what they cost before they can publish.
+    - Lossy preview: when a codec is active, the review renders the EXACT
+      reviewed bytes through the same card pipeline the board uses, next to
+      the raw export (both at the post's `dim`), with a mean per-channel
+      pixel difference readout ("identical pixels" … "x.y / 255"). The
+      baseline is cached per pristine export; renders are token-guarded so a
+      slow render from an older codec pass can never overwrite newer UI, and
+      the preview hides when no codec is active.
+    - Fine settings: `geometry bits` presets 14/12/10 (position/normal/uv/
+      color/tangent quantization: high = Babylon defaults, balanced, small)
+      and a `texture quality` slider (50–100%, default 85%). Every change
+      re-derives from the same frozen export, re-validates, and re-previews;
+      the note reports the applied bits (`pos 12/nrm 9/uv 11/col 8 bits`)
+      and webp quality.
+    - Derives QUEUE: a click while a derive runs is queued (same pattern as
+      the studio preview), never swallowed — and a busy pass must never
+      leave the controls locked (fallback() clears busy; edits reset it).
+    Guards: `check:codec` (fine settings units: bits reach the encoder,
+      fewer bits → smaller payload, low-bit roundtrip tolerance, webp
+      quality passthrough) and `check:codec-browser` (preview renders +
+      difference readout, bits dial changes size, quality slider re-derives,
+      preview/settings appear and hide with their codec).

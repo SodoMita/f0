@@ -48,9 +48,9 @@ DracoCompression.Configuration = { decoder: { numWorkers: 0, jsModule: decoderMo
   }
 }
 const dracoCodec = {
-  async encodePrimitive(input) {
+  async encodePrimitive(input, options) {
     const attributes = input.attributes.map((a) => ({ kind: a.semantic, dracoName: a.dracoName, size: a.size, data: a.data }))
-    const out = await encoder._encodeAsync(attributes, input.indices)
+    const out = await encoder._encodeAsync(attributes, input.indices, options)
     if (!out) return null
     return { data: new Uint8Array(out.data.buffer, out.data.byteOffset, out.data.byteLength), attributeIds: out.attributeIds }
   },
@@ -348,6 +348,31 @@ const sortedDelta = (a, b) => { const x = Float64Array.from(a).sort(); const y =
   }
 }
 
+// ---- draco fine settings (AMENDMENT 83) ----------------------------------
+{
+  const bytes = makeModel({ grid: 96 })
+  let captured = null
+  const spyCodec = {
+    async encodePrimitive(input, options) {
+      captured = options
+      return dracoCodec.encodePrimitive(input, options)
+    },
+  }
+  const high = await compressGLB(bytes, { draco: spyCodec, dracoOptions: { quantizationBits: { POSITION: 14, NORMAL: 10, TEX_COORD: 12, COLOR: 8 } } })
+  const small = await compressGLB(bytes, { draco: spyCodec, dracoOptions: { quantizationBits: { POSITION: 10, NORMAL: 8, TEX_COORD: 9, COLOR: 6 } } })
+  check('draco: fine settings reach the encoder', !!captured?.quantizationBits && captured.quantizationBits.POSITION !== undefined, JSON.stringify(captured?.quantizationBits ?? null))
+  check('draco: fewer bits -> smaller payload', !small.report.keptOriginal && small.bytes.length < high.bytes.length, `${high.bytes.length} vs ${small.bytes.length}`)
+  try {
+    const before = await loadVerts(bytes)
+    const after = await loadVerts(small.bytes)
+    check('draco: low-bit roundtrip keeps vertex count + indices', before.positions.length === after.positions.length && before.indices === after.indices, `${after.positions.length} floats`)
+    const lowDelta = sortedDelta(before.positions, after.positions)
+    check('draco: low-bit positions within coarse tolerance', lowDelta < 0.01, String(lowDelta))
+  } catch (e) {
+    check('draco: low-bit roundtrip loads', false, e.message)
+  }
+}
+
 // ---- webp units -----------------------------------------------------------
 {
   const bytes = makeModel({ withTexture: true, grid: 8 })
@@ -377,6 +402,14 @@ const sortedDelta = (a, b) => { const x = Float64Array.from(a).sort(); const y =
   const deadCodec = { async encode() { return null } }
   const { bytes: out, report } = await compressGLB(bytes, { webp: deadCodec })
   check('webp: encoder failure keeps original', out === bytes && report.keptOriginal)
+}
+
+{
+  const bytes = makeModel({ withTexture: true, grid: 8 })
+  let gotQuality = null
+  const spyCodec = { async encode(_b, _m, quality) { gotQuality = quality; return fakeWebp(16, 16, 90) } }
+  await compressGLB(bytes, { webp: spyCodec, webpQuality: 0.55 })
+  check('webp: quality setting is passed through', gotQuality === 0.55, String(gotQuality))
 }
 
 // ---- combined -------------------------------------------------------------

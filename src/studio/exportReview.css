@@ -23,3 +23,15 @@ body[data-theme="light"] .export-card { background: rgba(253,253,255,.98); }
 .codec-opts button:disabled { opacity: .5; cursor: wait; }
 .export-codec-note { margin: 0; font: 10px/1.5 ui-monospace, monospace; color: var(--muted); overflow-wrap: anywhere; }
 .export-codec-note:empty { display: none; }
+/* Fine settings for the active codecs (lossy dials) + lossy preview. */
+.export-codec-settings { display: flex; flex-direction: column; gap: 6px; }
+.codec-row input[type="range"] { width: 130px; accent-color: var(--accent, #7c9cff); }
+.codec-row b { min-width: 34px; color: var(--ink); font: 11px/1 ui-monospace, monospace; text-align: right; }
+.export-preview { display: flex; flex-direction: column; gap: 6px; }
+.export-preview .shots { display: flex; gap: 8px; justify-content: center; }
+.export-shot { margin: 0; display: flex; flex-direction: column; gap: 4px; align-items: center; }
+.export-shot canvas { width: 200px; height: auto; aspect-ratio: 16/10; border: 1px solid var(--line); border-radius: 8px; background: repeating-conic-gradient(rgba(255,255,255,.06) 0 25%, transparent 0 50%) 0 0/16px 16px; }
+.export-shot figcaption { font: 10px/1 ui-monospace, monospace; color: var(--muted); }
+.export-preview-diff { margin: 0; font: 10px/1.5 ui-monospace, monospace; color: var(--muted); text-align: center; }
+.export-preview-diff:empty { display: none; }
+.export-codecs.busy button, .export-codec-settings.busy button, .export-codec-settings.busy input[type="range"] { opacity: .55; cursor: progress; }

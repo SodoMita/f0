@@ -164,6 +164,17 @@ async function boot(): Promise<void> {
   const exportExtensions = $('export-extensions')
   const exportState = $('export-state')
   const exportCodecs = $('export-codecs')
+  const exportCodecSettings = $('export-codec-settings')
+  const dracoQualityRow = $('draco-quality-row')
+  const dracoQuality = $('draco-quality')
+  const webpQualityRow = $('webp-quality-row')
+  const webpQuality = $('webp-quality') as HTMLInputElement
+  const webpQualityLabel = $('webp-quality-label')
+  const exportPreview = $('export-preview')
+  const exportPreviewRaw = $('export-preview-raw') as HTMLCanvasElement
+  const exportPreviewCodec = $('export-preview-codec') as HTMLCanvasElement
+  const exportPreviewCodecLabel = $('export-preview-codec-label')
+  const exportPreviewDiff = $('export-preview-diff')
   const exportCodecNote = $('export-codec-note')
   const codecGeometry = $('codec-geometry')
   const codecTexture = $('codec-texture')
@@ -176,6 +187,20 @@ async function boot(): Promise<void> {
   let webpOn: boolean | null = null
   let exportCodecBusy = false
   let exportCodecToken = 0
+  // Choices/settings clicked while a derive is running are queued (same
+  // pattern as the studio preview) — a busy pass must never swallow a click.
+  let exportCodecQueued = false
+  // Fine settings (SPEC AMENDMENT 83): both codecs are LOSSY, so the review
+  // renders the compressed bytes next to the raw export and exposes quality.
+  const DRACO_PRESETS = {
+    high: { POSITION: 14, NORMAL: 10, TANGENT: 12, TEX_COORD: 12, COLOR: 8, GENERIC: 12 },
+    balanced: { POSITION: 12, NORMAL: 9, TANGENT: 10, TEX_COORD: 11, COLOR: 8, GENERIC: 11 },
+    small: { POSITION: 10, NORMAL: 8, TANGENT: 8, TEX_COORD: 9, COLOR: 6, GENERIC: 9 },
+  } as const
+  type DracoPreset = keyof typeof DRACO_PRESETS
+  let dracoPreset: DracoPreset = 'balanced'
+  // Card-rendered preview of the CURRENT pristine export (raw baseline).
+  let rawPreview: { pixels: Uint8Array; width: number; height: number } | null = null
   const netDot = $('net-dot')
   let relaysOnline = 0
   const btn3d = $('btn-3d') as HTMLButtonElement
@@ -588,8 +613,11 @@ async function boot(): Promise<void> {
   function codecNote(report: CompressReport | null, before?: GLBExportInfo, after?: GLBExportInfo): string {
     if (!report) return ''
     const parts: string[] = []
-    if (report.draco.prims) parts.push(`draco ${report.draco.prims} mesh${report.draco.prims === 1 ? '' : 'es'} ${formatSize(report.draco.bytesBefore)} → ${formatSize(report.draco.bytesAfter)}`)
-    if (report.webp.images) parts.push(`webp ${report.webp.images} texture${report.webp.images === 1 ? '' : 's'} ${formatSize(report.webp.bytesBefore)} → ${formatSize(report.webp.bytesAfter)}`)
+    if (report.draco.prims) {
+      const b = DRACO_PRESETS[dracoPreset]
+      parts.push(`draco ${report.draco.prims} mesh${report.draco.prims === 1 ? '' : 'es'} ${formatSize(report.draco.bytesBefore)} → ${formatSize(report.draco.bytesAfter)} · pos ${b.POSITION}/nrm ${b.NORMAL}/uv ${b.TEX_COORD}/col ${b.COLOR} bits`)
+    }
+    if (report.webp.images) parts.push(`webp ${report.webp.images} texture${report.webp.images === 1 ? '' : 's'} q${Math.round(webpQuality.valueAsNumber)}% ${formatSize(report.webp.bytesBefore)} → ${formatSize(report.webp.bytesAfter)}`)
     if (before && after && !report.keptOriginal) parts.push(`file ${formatSize(before.bytes)} → ${formatSize(after.bytes)} · −${Math.round((1 - after.bytes / before.bytes) * 100)}%`)
     const reasons = [...new Set([...report.draco.reasons, ...report.webp.reasons])]
     if (reasons.length) parts.push(`kept raw: ${reasons.join(' · ')}`)
@@ -599,6 +627,13 @@ async function boot(): Promise<void> {
   function syncCodecButtons(): void {
     const anyCodec = dracoOn === true || webpOn === true
     exportCodecs.hidden = !anyCodec
+    // Fine settings only make sense while their (lossy) codec is active.
+    dracoQualityRow.hidden = !(codecChoice.geometry === 'draco' && dracoOn === true)
+    webpQualityRow.hidden = !(codecChoice.texture === 'webp' && webpOn === true)
+    exportCodecSettings.hidden = dracoQualityRow.hidden && webpQualityRow.hidden
+    for (const btn of Array.from(dracoQuality.querySelectorAll('button[data-v]'))) {
+      ;(btn as HTMLElement).classList.toggle('on', (btn as HTMLElement).dataset.v === dracoPreset)
+    }
     const setOption = (group: HTMLElement, available: boolean, current: 'none' | 'draco' | 'webp'): 'none' | 'draco' | 'webp' => {
       for (const el of Array.from(group.querySelectorAll('button[data-v]'))) {
         const btn = el as HTMLButtonElement
@@ -614,7 +649,10 @@ async function boot(): Promise<void> {
 
   function setExportCodecBusy(busy: boolean): void {
     exportCodecBusy = busy
-    for (const btn of Array.from(exportCodecs.querySelectorAll('button'))) (btn as HTMLButtonElement).disabled = busy
+    // Codec controls stay clickable (a click while busy is queued, not
+    // swallowed); only the byte-consuming actions lock during a derive.
+    exportCodecs.classList.toggle('busy', busy)
+    exportCodecSettings.classList.toggle('busy', busy)
     btnExportDownload.disabled = busy
     btnExportPublish.disabled = busy || !reviewedExport
   }
@@ -625,8 +663,53 @@ async function boot(): Promise<void> {
     syncCodecButtons()
   }
 
+  /** Mean per-channel pixel difference (0..255) between two card renders. */
+  function meanPixelDiff(a: Uint8Array, b: Uint8Array): number {
+    const n = Math.min(a.length, b.length)
+    if (!n) return Number.NaN
+    let sum = 0
+    for (let i = 0; i < n; i += 4) sum += Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2])
+    return sum / (n / 4) / 3
+  }
+
+  /** The lossy preview (AMENDMENT 83): render the exact reviewed bytes through
+   * the same card pipeline the board uses, next to the raw export. Tokenled:
+   * a slow render from an older codec pass must never overwrite newer UI. */
+  async function renderExportPreview(token: number, blob: Blob, label: string): Promise<void> {
+    // Raw baseline first (cached per pristine export).
+    if (!rawPreview) {
+      try {
+        const r = await assets.renderPosterFor(pristineExport!.blob, previewDim.width, previewDim.height)
+        rawPreview = { pixels: r.pixels, width: r.width, height: r.height }
+      } catch { /* keep null — diff line just says unavailable */ }
+      if (token !== exportCodecToken) return
+    }
+    if (rawPreview) drawPosterPixels(exportPreviewRaw, rawPreview.pixels, rawPreview.width, rawPreview.height)
+    let frame: { pixels: Uint8Array; width: number; height: number } | null = null
+    try {
+      const r = await assets.renderPosterFor(blob, previewDim.width, previewDim.height)
+      frame = { pixels: r.pixels, width: r.width, height: r.height }
+    } catch { /* preview is best-effort; sizes/note stay authoritative */ }
+    if (token !== exportCodecToken) return
+    exportPreviewCodecLabel.textContent = label
+    if (!frame) {
+      exportPreviewDiff.textContent = 'preview unavailable'
+      exportPreview.hidden = false
+      return
+    }
+    drawPosterPixels(exportPreviewCodec, frame.pixels, frame.width, frame.height)
+    if (rawPreview && rawPreview.width === frame.width && rawPreview.height === frame.height) {
+      const d = meanPixelDiff(rawPreview.pixels, frame.pixels)
+      exportPreviewDiff.textContent = Number.isFinite(d)
+        ? d === 0 ? 'identical pixels' : `mean pixel difference ${d.toFixed(1)} / 255 (lossy preview of the exact bytes)`
+        : ''
+    } else exportPreviewDiff.textContent = ''
+    exportPreview.hidden = false
+  }
+
   /** Re-derive the reviewed export from the PRISTINE bytes with the current
-   * codec choice. The result is re-validated before it can be published. */
+   * codec choice + fine settings. The result is re-validated before it can be
+   * published, and its exact bytes are what the lossy preview renders. */
   async function applyCodecs(): Promise<void> {
     if (!pristineExport) return
     const token = ++exportCodecToken
@@ -635,6 +718,8 @@ async function boot(): Promise<void> {
       renderExportInfo(pristineExport!.info)
       exportState.textContent = 'validated · exact bytes'
       exportCodecNote.textContent = codecNote(null)
+      exportPreview.hidden = true
+      setExportCodecBusy(false)
       btnExportPublish.disabled = false
     }
     const wantDraco = codecChoice.geometry === 'draco' && dracoOn === true
@@ -643,11 +728,15 @@ async function boot(): Promise<void> {
     setExportCodecBusy(true)
     exportState.textContent = 'encoding…'
     exportCodecNote.textContent = ''
+    exportPreviewDiff.textContent = 'rendering preview…'
+    exportPreview.hidden = false
     try {
       const src = new Uint8Array(await pristineExport.blob.arrayBuffer())
       const { bytes: out, report } = await compressGLB(src, {
         draco: wantDraco ? dracoCodec : undefined,
+        dracoOptions: wantDraco ? { quantizationBits: { ...DRACO_PRESETS[dracoPreset] } } : undefined,
         webp: wantWebp ? webpCodec : undefined,
+        webpQuality: webpQuality.valueAsNumber / 100,
       })
       if (token !== exportCodecToken) return
       if (report.keptOriginal) {
@@ -665,13 +754,21 @@ async function boot(): Promise<void> {
       exportCodecNote.textContent = codecNote(report, pristineExport.info, info)
       btnExportPublish.disabled = false
       setStudioStatus(`${formatSize(info.bytes)} · reviewed`, 'ok')
+      const label = [wantDraco ? 'draco' : null, wantWebp ? 'webp' : null].filter(Boolean).join('+')
+      await renderExportPreview(token, reviewedExport.blob, label)
     } catch (err) {
       if (token !== exportCodecToken) return
       fallback()
       exportState.textContent = 'codec failed · original kept'
       exportCodecNote.textContent = err instanceof Error ? err.message : 'codec failed'
     } finally {
-      if (token === exportCodecToken) setExportCodecBusy(false)
+      if (token === exportCodecToken) {
+        setExportCodecBusy(false)
+        if (exportCodecQueued) {
+          exportCodecQueued = false
+          void applyCodecs()
+        }
+      }
     }
   }
 
@@ -690,9 +787,12 @@ async function boot(): Promise<void> {
       const info = inspectGLB(bytes)
       pristineExport = { blob, filename: content.filename, sourceFormat: content.sourceFormat, info }
       reviewedExport = { blob, filename: content.filename, sourceFormat: content.sourceFormat }
+      rawPreview = null // new export: the raw baseline must re-render
       renderExportInfo(info)
       exportState.textContent = 'validated · exact bytes'
       exportCodecNote.textContent = ''
+      exportPreview.hidden = true
+      exportPreviewDiff.textContent = ''
       btnExportPublish.disabled = false
       exportReview.hidden = false
       refreshCodecOffering()
@@ -732,10 +832,14 @@ async function boot(): Promise<void> {
   $('btn-export-close').addEventListener('click', closeExportReview)
   $('btn-export-download').addEventListener('click', downloadReviewedExport)
   btnExportPublish.addEventListener('click', () => { if (reviewedExport) { closeExportReview(); void publishStudio(reviewedExport) } })
+  const requestCodecApply = (): void => {
+    if (exportCodecBusy) exportCodecQueued = true
+    else void applyCodecs()
+  }
   const bindCodecGroup = (group: HTMLElement, apply: (value: string) => void): void => {
     group.addEventListener('click', (e) => {
       const btn = (e.target as HTMLElement).closest('button[data-v]') as HTMLButtonElement | null
-      if (!btn || exportCodecBusy || btn.hidden) return
+      if (!btn || btn.hidden) return
       apply(btn.dataset.v ?? 'none')
     })
   }
@@ -743,13 +847,29 @@ async function boot(): Promise<void> {
     if (value === codecChoice.geometry || (value !== 'none' && value !== 'draco')) return
     codecChoice.geometry = value
     syncCodecButtons()
-    void applyCodecs()
+    requestCodecApply()
   })
   bindCodecGroup(codecTexture, (value) => {
     if (value === codecChoice.texture || (value !== 'none' && value !== 'webp')) return
     codecChoice.texture = value
     syncCodecButtons()
-    void applyCodecs()
+    requestCodecApply()
+  })
+  // Draco quantization preset: a lossy dial, so it re-derives + re-previews.
+  dracoQuality.addEventListener('click', (e) => {
+    const btn = (e.target as HTMLElement).closest('button[data-v]') as HTMLButtonElement | null
+    if (!btn) return
+    const value = btn.dataset.v as DracoPreset
+    if (!value || !(value in DRACO_PRESETS) || value === dracoPreset) return
+    dracoPreset = value
+    syncCodecButtons()
+    if (codecChoice.geometry === 'draco') requestCodecApply()
+  })
+  webpQuality.addEventListener('input', () => {
+    webpQualityLabel.textContent = `${webpQuality.valueAsNumber}%`
+  })
+  webpQuality.addEventListener('change', () => {
+    if (codecChoice.texture === 'webp') requestCodecApply()
   })
 
   // Remove every studio addition (text, paint, cameras, mesh moves): the
@@ -845,7 +965,10 @@ async function boot(): Promise<void> {
     // private; it can no longer be published from the UI.
     reviewedExport = null
     pristineExport = null
+    rawPreview = null
     exportCodecToken++ // an in-flight codec pass may not land anymore
+    exportCodecQueued = false
+    setExportCodecBusy(false)
     if (!exportReview.hidden) closeExportReview()
     scheduleStudioPreview()
   }
