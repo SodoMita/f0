@@ -33,10 +33,12 @@ const deg2rad = (d: number): number => (d * Math.PI) / 180
 const rad2deg = (r: number): number => (r * 180) / Math.PI
 
 /**
- * White (or near-white) means "no tint": the library piece keeps the colours
- * its palette texture was authored with (AMENDMENT 85). Such a pick must not
- * become the post's `color` tag — that tag drives the card placeholder tint.
+ * White means "no tint": the library piece keeps the colours its palette
+ * texture was authored with (AMENDMENT 85). Such a pick must not become the
+ * post's `color` tag — that tag drives the card placeholder tint.
  */
+const NEUTRAL_TINT = '#FFFFFF'
+
 function isNeutral(hex: string): boolean {
   return /^#?f{3}$|^#?f{6}$/i.test(hex.trim())
 }
@@ -243,12 +245,18 @@ export class Studio {
   /**
    * Return the color of the selected item (symbol or text), or null when the
    * selection is something we do not colour (an imported model mesh).
+   *
+   * A library piece placed with no explicit tint reports NEUTRAL white
+   * (AMENDMENT 85) — it is showing its own palette texture, not the studio
+   * accent. Reporting the accent here used to leak it into the pickers, so
+   * the second piece a player placed came out tinted even though they never
+   * touched the colour control.
    */
   getSelectedColor(): string | null {
     if (this.textMesh && this.selection === this.textMesh.mesh) return this.textColor
     if (this.selection) {
       const extra = this.extras.find((c) => c.meshes.includes(this.selection!) || c.rootNodes.includes(this.selection!))
-      if (extra) return this.extraColors.get(extra) ?? this.tint
+      if (extra) return this.extraColors.get(extra) ?? NEUTRAL_TINT
     }
     return null
   }

@@ -74,12 +74,18 @@ def write_glb(mesh, path: str, name: str, color=(0.8, 0.8, 0.8), double_sided=Tr
     png = palette.png_bytes()
 
     blobs: list[bytes] = [pos, nrm, uvs, idx, png]
-    views: list[tuple[int, int, int | None]] = []
+    views: list[tuple[int, int, int | None, int | None]] = []
     cursor = 0
     bin_body = b""
     targets = [34962, 34962, 34962, 34963, None]
+    # byteStride belongs on the BUFFER VIEW — glTF has no accessor.byteStride,
+    # so putting it there (as this writer used to) made every loader read the
+    # padded NORMAL/TEXCOORD streams tightly packed: shifted normals and UVs
+    # that tiled the palette into stripes. Vertex attributes must also be
+    # 4-byte aligned, hence the padded i8x3 normals and u8x2 UVs.
+    strides = [None, 4, 4, None, None]
     for i, blob in enumerate(blobs):
-        views.append((cursor, len(blob), targets[i]))
+        views.append((cursor, len(blob), targets[i], strides[i]))
         pad = pad4(len(blob))
         bin_body += blob + (b"\x00" * pad)
         cursor += len(blob) + pad
@@ -88,9 +94,9 @@ def write_glb(mesh, path: str, name: str, color=(0.8, 0.8, 0.8), double_sided=Tr
     accessors: list[dict[str, Any]] = [
         {"bufferView": 0, "componentType": 5126, "count": nvert, "type": "VEC3",
          "min": [min(xs), min(ys), min(zs)], "max": [max(xs), max(ys), max(zs)]},
-        {"bufferView": 1, "byteStride": 4, "componentType": 5120, "count": nvert, "type": "VEC3",
+        {"bufferView": 1, "componentType": 5120, "count": nvert, "type": "VEC3",
          "normalized": True},
-        {"bufferView": 2, "byteStride": 4, "componentType": 5121, "count": nvert, "type": "VEC2",
+        {"bufferView": 2, "componentType": 5121, "count": nvert, "type": "VEC2",
          "normalized": True},
         {"bufferView": 3, "componentType": 5123, "count": nidx, "type": "SCALAR"},
     ]
@@ -132,8 +138,10 @@ def write_glb(mesh, path: str, name: str, color=(0.8, 0.8, 0.8), double_sided=Tr
         "textures": [{"name": "palette", "sampler": 0, "source": 0}],
         "accessors": accessors,
         "bufferViews": [
-            ({"buffer": 0, "byteOffset": o, "byteLength": n} | ({"target": t} if t else {}))
-            for o, n, t in views
+            ({"buffer": 0, "byteOffset": o, "byteLength": n}
+             | ({"target": t} if t else {})
+             | ({"byteStride": st} if st else {}))
+            for o, n, t, st in views
         ],
         "buffers": [{"byteLength": len(bin_body)}],
     }
