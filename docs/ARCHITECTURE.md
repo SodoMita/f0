@@ -47,9 +47,11 @@ src/
                      needAlphaBlending OPTION, deterministic zero flips
     previewPool.ts   bounded live-preview RTT slots (REUSED, evicted when
                      offscreen); scene.render() per slot; authored-camera aware
+    livePool.ts      ONE PreviewPool + per-scene Direct3D pools; board and
+                     thread share the stage; activate() keeps only one 3D pool
     threadView.ts    2D reply-tree map: tidy tree + elbow edges, native-pointer
                      pan / pinch / wheel-zoom-about-cursor, fit-to-content;
-                     live previews for animated nodes
+                     live previews for animated nodes (same PreviewPool as board)
   viewer/
     viewer.ts        detail viewer: orbit + authored cameras, lights, camera-
                      parented spotlight backdrop, contact shadow, stats

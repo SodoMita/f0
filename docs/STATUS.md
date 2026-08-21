@@ -4,6 +4,15 @@ Claim a task by moving it to **In progress** with your name/date, push, then
 move it to **Done** with a commit reference. One agent per area.
 
 ## Done
+- [x] **One preview/3D pool across board + thread** (agent arena, 2026-08-21,
+      SPEC AMENDMENT 80): `LivePool` owns the single PreviewPool stage (one
+      scene, one RTT set) and the per-scene Direct3D pools. `activate(view)`
+      keeps preview RTTs across board↔thread hops (request() rebinds via
+      onLive; the incoming view evicts what it cannot see) and for viewer
+      acquire() hand-off; studio drops everything. Inactive views must not
+      request or release the shared pool (a resize/onLoadDone used to steal
+      slots). Graphics registers the stage once. tsc clean.
+
 - [x] **Shorter board/thread + audit** (agent arena, 2026-08-21): extracted shared
       `cardFade` / `playIntent` / `overlays` so board and thread no longer each
       own a copy of the 120 ms crossfade, ▶/⏸ intent, and glass-pill drawing

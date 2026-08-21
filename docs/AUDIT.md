@@ -12,13 +12,14 @@ true without clearing the flag. A card that scrolled away mid-parse then
 scrolled back discarded the in-flight result (`Direct3DPool` already
 un-cancelled). Fixed: in-flight `request()` now `cancelled.delete(postId)`.
 
-### P2 — Two live-preview budgets
+### P2 — Two live-preview budgets (fixed)
 
-`apply.ts` still sets `board.setLivePreviewSlots(n)` **and**
-`threadView.setLivePreviewSlots(min(3, n))`. Only the active route renders,
-and the thread pool prunes on detach, so this is not a session-long double
-allocation — but it is two stage scenes. Sharing one pool would cut GPU
-memory when hopping board ↔ thread.
+Board and thread now share one `LivePool` (`src/board/livePool.ts`): one
+PreviewPool stage scene + RTT set, and per-scene Direct3D pools that
+`activate()` never keeps populated at the same time. `apply.ts` writes the
+same `livePreviews` budget to both views (they both call `live.setMaxSlots`).
+Viewer hand-off still `acquire()`s from that pool; graphics registers the
+stage scene once.
 
 ### P2 — Studio export still uses `any`
 
@@ -60,11 +61,11 @@ user data. Event `content` still goes through `textContent`.
 Shared helpers are inlined call sites on the existing per-slot objects — no
 new allocations on the render path. `tickFade` is the same 120 ms lerp the
 board already ran. Idle probe (`isAnimating`) is unchanged. PreviewPool
-un-cancel avoids a wasted re-parse after a scroll-back.
+un-cancel avoids a wasted re-parse after a scroll-back. One PreviewPool
+stage (not two) is the GPU-memory win of hopping board ↔ thread.
 
 ## Not done
 
 - Files still over the ~400 line convention: `main.ts`, `board.ts`,
   `threadView.ts`, `studio.ts`, `previewPool.ts`, `schema.ts`, `graphics.ts`.
 - CSS tokenisation of the light theme.
-- One shared preview/3D pool across board + thread.

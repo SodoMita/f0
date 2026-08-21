@@ -1248,3 +1248,21 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     67…300% zoom, that the buffer tracks the device ratio (sharpness), that
     studio ortho follows four window sizes plus a route re-entry, and that
     manual mode letterboxes instead of stretching.
+
+80. ONE PREVIEW/3D POOL ACROSS BOARD + THREAD (2026-08-21): board and thread
+    used to each construct a PreviewPool — two hidden stage scenes and two
+    RTT sets for the session, even though only one view renders. Direct3D
+    meshes must live in the visible scene, so those pools stay per-scene.
+    `LivePool` (`src/board/livePool.ts`) owns the single PreviewPool and both
+    Direct3D pools. `activate(view)`:
+    - board↔thread: keep preview RTTs so a post already parsed does not
+      re-parse (`request()` re-emits onLive; the incoming view evicts what
+      it cannot see); release the inactive 3D pool; restore board RTT size
+      when leaving the zoom-scaled thread map.
+    - viewer: keep preview for `acquire()` hand-off; release both 3D pools.
+    - studio (idle): release + prune everything.
+    Inactive views must not request or release the shared pool (a window
+    resize or onLoadDone behind the other view used to steal slots). The
+    `livePreviews` setting is one budget, not `min(3, n)` for the thread.
+    Graphics registers the stage scene once. Guard: board.previewPool ===
+    threadView.previewPool (offline-verify).

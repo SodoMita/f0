@@ -15,8 +15,9 @@ import type { LinesMesh } from '@babylonjs/core/Meshes/linesMesh'
 import type { FormEngine } from '../core/engine'
 import type { ThreadMeta } from '../protocol/thread-index'
 import type { AssetCache } from '../core/assets'
-import { PreviewPool } from './previewPool'
-import { Direct3DPool, type Place3D } from './modelCard3d'
+import type { PreviewPool } from './previewPool'
+import { type Direct3DPool, type Place3D } from './modelCard3d'
+import { LivePool } from './livePool'
 import {
   makeCardMaterial, setCardTexture, setCardTexture2, setCardTint, setCardTint2, setCardWhite, setCardFlip, setCardOpacity, type CardTextureKind,
 } from './cardMaterial'
@@ -109,7 +110,8 @@ export class Board {
   private pool = 24
   private cb: BoardCallbacks
   private rows: Row[] = []
-  readonly previewPool: PreviewPool
+  readonly live: LivePool
+  get previewPool(): PreviewPool { return this.live.preview }
   /** Direct-3D models rendered in the visible scene (no render-to-texture). */
   readonly pool3d: Direct3DPool
   private threeD = false
@@ -196,7 +198,7 @@ export class Board {
     this.playTexOn = playTex.on
 
     this.cb = cb
-    this.previewPool = new PreviewPool(
+    this.live = new LivePool(
       engine.engine,
       (postId) => this.assets?.getModelBytesByPostId(postId) ?? Promise.resolve(undefined),
       {
@@ -207,57 +209,44 @@ export class Board {
         targetFps: isMobile ? 12 : 15,
       },
     )
-    this.previewPool.onLive = (postId, rtt) => {
-      const slot = this.cards.find((c) => c.meta?.eventId === postId)
-      if (!slot) return
-      slot.live = rtt
-      slot.spinner.setEnabled(false)
-      this.invalidate()
-      this.crossfadeTo(slot, rtt, '#FFFFFF', 'rtt')
-      // the ▶ button flips to ⏸ once the model is actually animating
-      this.positionExtras(slot)
-    }
-    // The pool evicts a live slot when a newer visible card needs it: the
-    // evicted card must fall back to its poster instead of sampling a
-    // recycled render target.
-    this.previewPool.onRelease = (postId) => {
-      const slot = this.cards.find((c) => c.meta?.eventId === postId)
-      if (!slot || !slot.live) return
-      slot.live = null
-      this.showPoster(slot)
-      this.invalidate()
-      this.positionExtras(slot)
-    }
-    // The pool rebuilt its RTTs (settings → Textures → "Card / preview width").
-    // The card material was still sampling the disposed handle, so we swap
-    // its texture in place — no fade (the model pose and animation don't
-    // change, only the pixel grid behind it).
-    this.previewPool.onResize = (postId, newRtt) => {
-      const slot = this.cards.find((c) => c.meta?.eventId === postId)
-      if (!slot || !slot.live) return
-      slot.live = newRtt
-      if (slot.fadeStart) this.finishFade(slot)
-      setCardTexture(slot.mat, newRtt)
-      setCardWhite(slot.mat)
-      setCardTexture2(slot.mat, null)
-      setCardTint2(slot.mat, '#FFFFFF')
-      setCardFlip(slot.mat, 'rtt')
-      this.invalidate(2)
-    }
-    // A finished load frees a slot; re-run the request pass so queued cards
-    // (request() returned false while every slot was mid-load) get their turn.
-    this.previewPool.onLoadDone = () => {
-      this.refreshVisibility()
-    }
+    this.live.preview.watch({
+      onLive: (postId, rtt) => {
+        const slot = this.cards.find((c) => c.meta?.eventId === postId)
+        if (!slot) return
+        // Same RTT already bound (view hop / duplicate request) — skip the
+        // 120 ms fade that would flash the card.
+        if (slot.live === rtt) { this.positionExtras(slot); return }
+        slot.live = rtt
+        slot.spinner.setEnabled(false)
+        this.invalidate()
+        this.crossfadeTo(slot, rtt, '#FFFFFF', 'rtt')
+        this.positionExtras(slot)
+      },
+      onRelease: (postId) => {
+        const slot = this.cards.find((c) => c.meta?.eventId === postId)
+        if (!slot || !slot.live) return
+        slot.live = null
+        this.showPoster(slot)
+        this.invalidate()
+        this.positionExtras(slot)
+      },
+      onResize: (postId, newRtt) => {
+        const slot = this.cards.find((c) => c.meta?.eventId === postId)
+        if (!slot || !slot.live) return
+        slot.live = newRtt
+        if (slot.fadeStart) this.finishFade(slot)
+        setCardTexture(slot.mat, newRtt)
+        setCardWhite(slot.mat)
+        setCardTexture2(slot.mat, null)
+        setCardTint2(slot.mat, '#FFFFFF')
+        setCardFlip(slot.mat, 'rtt')
+        this.invalidate(2)
+      },
+      // Shared pool: a thread load finishing must not refill BOARD slots.
+      onLoadDone: () => { if (this.live.view === 'board') this.refreshVisibility() },
+    })
 
-    // Direct-3D pool: the same GLB bytes, but the meshes are rendered in the
-    // visible board scene instead of an offscreen render target. Only active
-    // while the 3D toggle is on.
-    this.pool3d = new Direct3DPool(
-      this.scene,
-      (postId) => this.assets?.getModelBytesByPostId(postId) ?? Promise.resolve(undefined),
-      { maxSlots: isMobile ? 6 : 10 },
-    )
+    this.pool3d = this.live.attach3d('board', this.scene, isMobile ? 6 : 10)
     this.pool3d.onPlaced = (postId) => {
       const slot = this.cards.find((c) => c.meta?.eventId === postId)
       if (!slot) return
@@ -284,7 +273,7 @@ export class Board {
       slot.footprint = null
       slot.shadow.setEnabled(false)
     }
-    this.pool3d.onLoadDone = () => this.refreshVisibility()
+    this.pool3d.onLoadDone = () => { if (this.live.view === 'board') this.refreshVisibility() }
 
     this.scene.onBeforeRenderObservable.add(() => this.tick())
 
@@ -386,6 +375,12 @@ export class Board {
   /** The hidden stage where live previews render (graphics settings apply). */
   get previewScene(): Scene { return this.previewPool.scene }
 
+  /** Returning to the board: re-request live slots after another view used the shared pool. */
+  resumeLive(): void {
+    this.lastSyncScroll = Number.NEGATIVE_INFINITY
+    this.refreshVisibility()
+  }
+
   /** Preload window as a fraction of a screen height (settings → Memory). */
   setPrefetch(screens: number): void {
     this.prefetchScreens = Math.max(0, screens)
@@ -406,7 +401,7 @@ export class Board {
 
   /** Number of animated preview slots (settings → Memory). */
   setLivePreviewSlots(n: number): void {
-    this.previewPool.setMaxSlots(n)
+    this.live.setMaxSlots(n)
     this.lastSyncScroll = Number.NEGATIVE_INFINITY
     this.syncSlots(true)
   }
@@ -417,7 +412,7 @@ export class Board {
   setPreviewSize(width: number): void {
     const w = Math.max(16, Math.round(width))
     const h = Math.max(16, Math.round(w * (10 / 16))) // 16:10 reference
-    this.previewPool.setRttSize(w, h)
+    this.live.setPreviewSize(w, h)
   }
 
   setInertia(v: number): void {
@@ -472,7 +467,7 @@ export class Board {
     this.modeGen++ // invalidate any in-flight poster jobs from the old mode
     // Free the pipeline we are leaving (never both resident at once).
     if (was) this.pool3d.releaseAll()
-    else this.previewPool.releaseAll()
+    else if (this.live.ownsPreview('board')) this.previewPool.releaseAll()
     for (const slot of this.cards) {
       if (!slot.meta || !slot.row) continue
       if (was) { slot.poster = null; slot.live = null }
@@ -781,7 +776,11 @@ export class Board {
       }
       if (slot.spinner.isEnabled() !== ring) { slot.spinner.setEnabled(ring); this.invalidate(2) }
 
-      if (settled && inRange) {
+      // Shared pool: only the active view may request or release RTTs / 3D
+      // models. A resize or onLoadDone while the thread is up used to steal
+      // slots (and could release a thread node that shares this post id).
+      const liveHere = this.live.view === 'board' && this.interactive
+      if (settled && inRange && liveHere) {
         if (in3D) {
           // Keep asking: a full pool used to mark the card `failed` on the
           // first refusal and never retry, so only the first N cards ever
@@ -818,7 +817,7 @@ export class Board {
             if (this.intent.wantsPlay(id)) this.previewPool.request(id, this.visiblePosts, this.intent.isManual(id))
           }
         }
-      } else if (Math.abs(y) >= near) {
+      } else if (liveHere && Math.abs(y) >= near) {
         if (in3D) {
           if (modelLive) this.pool3d.release(id)
         } else if (slot.live) {
@@ -1181,7 +1180,7 @@ export class Board {
       // (Skipped in 3D mode — a poster shown as a 3D fallback must not also
       // spin up an offscreen live preview.)
       const animated = assets.isAnimated(meta)
-      if (!this.threeD && (animated ?? (meta.animHint || meta.cameraCount > 0)) && !this.previewPool.isRejected(meta.eventId) && this.visiblePosts.has(meta.eventId)) {
+      if (this.live.view === 'board' && this.interactive && !this.threeD && (animated ?? (meta.animHint || meta.cameraCount > 0)) && !this.previewPool.isRejected(meta.eventId) && this.visiblePosts.has(meta.eventId)) {
         // autoplay gate (AMENDMENT 69): silent auto-start, or a user-started
         // post with its sound; never re-start a post the user paused.
         if (this.intent.wantsPlay(meta.eventId)) this.previewPool.request(meta.eventId, this.visiblePosts, this.intent.isManual(meta.eventId))
@@ -1202,11 +1201,14 @@ export class Board {
 
   private release(slot: CardSlot): void {
     if (slot.meta) {
-      if (this.threeD) this.pool3d.release(slot.meta.eventId)
-      else {
-        this.previewPool.release(slot.meta.eventId)
-        // if its poster never started, drop it from the queue
-        if (!slot.poster) this.assets?.cancelPoster(slot.meta.eventId)
+      // Recycle must not touch the shared pool while another view owns it
+      // (board.resize still runs on a window resize behind the thread).
+      if (this.live.view === 'board') {
+        if (this.threeD) this.pool3d.release(slot.meta.eventId)
+        else {
+          this.previewPool.release(slot.meta.eventId)
+          if (!slot.poster) this.assets?.cancelPoster(slot.meta.eventId)
+        }
       }
     }
     if (slot.live) {
@@ -1237,8 +1239,7 @@ export class Board {
     for (const c of this.cards) this.release(c)
     for (const l of this.seps) l.dispose()
     this.seps = []
-    this.previewPool.dispose()
-    this.pool3d.dispose()
+    this.live.dispose()
     this.scene.dispose()
   }
 }

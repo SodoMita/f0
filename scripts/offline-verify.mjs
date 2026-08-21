@@ -128,12 +128,12 @@ const fetchModel = (name) => page.evaluate(async (u) => {
 
   // d advertises preview-camera=1 -> the LIVE preview must use cam1 (green),
   // NOT camera 0. Sample the live slot's render target pixels directly.
-  // The THREAD pool hosts this check: the board recycles slots for its
-  // visible cards (the d-card is below the fold), which made the read race
-  // the slot's next occupant on the faster production build.
+  // Pause the board so its visibility pass cannot evict this isolated load
+  // (board + thread share one PreviewPool; d.glb sits below the fold).
   await page.evaluate(async () => {
-    const pool = window.__form0.threadView.previewPool
     const f = window.__form0
+    const pool = f.board.previewPool
+    f.board.setInteractive(false)
     const meta = [...f.index.byId.values()].find((m) => m.role === 'root' && m.filename === 'd.glb')
     if (!meta) return
     pool.retry(meta.eventId)
@@ -191,6 +191,7 @@ const fetchModel = (name) => page.evaluate(async (u) => {
       if (bytes[i] < 120 && bytes[i + 1] > 140 && bytes[i + 2] < 150) green++
     }
     window.__livePx = { red: red / opaque, green: green / opaque, opaque }
+    window.__form0.board.setInteractive(true)
   })
   await page.waitForFunction(() => window.__livePx, null, { timeout: 90000 }).catch(() => {})
   const livePx = await page.evaluate(() => window.__livePx ?? { red: 0, green: 0, opaque: 0 })
@@ -407,12 +408,15 @@ const fetchModel = (name) => page.evaluate(async (u) => {
         edges: tv.lineMeshes.length,
         live: tv.previewPool.activeCount,
         slots: tv.previewPool.slots.length,
+        maxSlots: tv.previewPool.opts.maxSlots,
         liveNodes,
+        shared: tv.previewPool === window.__form0.board.previewPool,
       }
     })
     check('thread map animates nodes (live previews)', t.live > 0 && t.liveNodes > 0,
       `live=${t.live} nodesWithLive=${t.liveNodes}`)
-    check('thread pool respects its budget', t.slots <= 3, `slots=${t.slots}`)
+    check('board and thread share one preview pool', t.shared === true)
+    check('thread pool respects its budget', t.slots <= t.maxSlots, `slots=${t.slots}/${t.maxSlots}`)
     await page.screenshot({ path: 'shots/verify-thread.png' })
     await page.evaluate(() => { location.hash = '#/' })
     await page.waitForTimeout(600)

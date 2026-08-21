@@ -100,7 +100,7 @@ async function boot(): Promise<void> {
   board.setAssets(assets)
   const viewer = new Viewer(engine)
   const studio = new Studio(engine)
-  const threadView = new ThreadView(engine)
+  const threadView = new ThreadView(engine, board.live)
   threadView.setup(
     assets, index,
     (meta) => router.go({ name: 'viewer', id: meta.eventId }),
@@ -1172,7 +1172,6 @@ async function boot(): Promise<void> {
   graphics.register(studio.scene, 'studio', () => studio.scene.activeCamera)
   for (const offscreen of assets.offscreenScenes()) graphics.register(offscreen, 'offscreen')
   graphics.register(board.previewScene, 'offscreen')
-  graphics.register(threadView.previewScene, 'offscreen')
 
   let settingsPanel: SettingsPanel | undefined
   settingsPanel = new SettingsPanel(settings, caps, {
@@ -1368,6 +1367,7 @@ async function boot(): Promise<void> {
     if (next !== 'board') setSearchOpen(false)
     if (next === 'studio' || next === 'viewer') assets.setPaused(true)
     if (next === 'board') {
+      board.live.activate('board')
       engine.setActiveScene(board.scene)
       topbar.hidden = false
       viewerBar.hidden = true
@@ -1375,13 +1375,16 @@ async function boot(): Promise<void> {
       document.body.classList.remove('drawer-open')
       viewer.detach()
       studio.detach()
+      board.resumeLive()
     } else if (next === 'viewer') {
+      board.live.activate('viewer')
       engine.setActiveScene(viewer.scene)
       topbar.hidden = false
       viewerBar.hidden = false
       viewer.attach()
       studio.detach()
     } else if (next === 'thread') {
+      board.live.activate('thread')
       engine.setActiveScene(threadView.scene)
       topbar.hidden = false
       viewerBar.hidden = true
@@ -1391,6 +1394,7 @@ async function boot(): Promise<void> {
       studio.detach()
       threadView.attach()
     } else {
+      board.live.activate('idle')
       engine.setActiveScene(studio.scene)
       topbar.hidden = false
       viewerBar.hidden = true

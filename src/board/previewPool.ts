@@ -65,6 +65,13 @@ export interface PreviewPoolOptions {
   targetFps: number
 }
 
+export interface PreviewHooks {
+  onLive?: (postId: string, rtt: RenderTargetTexture) => void
+  onRelease?: (postId: string) => void
+  onResize?: (postId: string, rtt: RenderTargetTexture) => void
+  onLoadDone?: () => void
+}
+
 /**
  * Bounded RenderTargetTexture pool (step 6 / 03 §5). One hidden stage scene;
  * each slot gets its own camera + RTT. Refresh is interleaved (00 §3.12).
@@ -103,6 +110,27 @@ export class PreviewPool {
   onResize: ((postId: string, rtt: RenderTargetTexture) => void) | null = null
   /** A load finished (success or not) — callers may retry queued requests. */
   onLoadDone: (() => void) | null = null
+  private hooks: PreviewHooks[] = []
+
+  /** Extra listeners (board + thread share one pool). */
+  watch(h: PreviewHooks): void { this.hooks.push(h) }
+
+  private emitLive(postId: string, rtt: RenderTargetTexture): void {
+    this.onLive?.(postId, rtt)
+    for (const h of this.hooks) h.onLive?.(postId, rtt)
+  }
+  private emitRelease(postId: string): void {
+    this.onRelease?.(postId)
+    for (const h of this.hooks) h.onRelease?.(postId)
+  }
+  private emitResize(postId: string, rtt: RenderTargetTexture): void {
+    this.onResize?.(postId, rtt)
+    for (const h of this.hooks) h.onResize?.(postId, rtt)
+  }
+  private emitLoadDone(): void {
+    this.onLoadDone?.()
+    for (const h of this.hooks) h.onLoadDone?.()
+  }
 
   constructor(
     engine: AbstractEngine,
@@ -163,7 +191,7 @@ export class PreviewPool {
       slot.rtt.clearColor = new Color4(0, 0, 0, 0)
       // Card material still holds the OLD RTT handle; tell the board to swap
       // immediately. Empty slots (no live post) need no notification.
-      if (slot.postId) this.onResize?.(slot.postId, slot.rtt)
+      if (slot.postId) this.emitResize(slot.postId, slot.rtt)
       oldRtt.dispose()
     }
   }
@@ -268,7 +296,14 @@ export class PreviewPool {
    * browser's autoplay policy AND the SPEC "no autoplay" audio line).
    */
   request(postId: string, visible?: ReadonlySet<string>, sound = false): boolean {
-    if (this.byPost.has(postId)) return true
+    const live = this.byPost.get(postId)
+    if (live) {
+      // Already resident (view hop board↔thread): re-emit so the incoming
+      // view binds the RTT. Without this, request() returned true and the
+      // new card/node stayed on its poster forever.
+      this.emitLive(postId, live.rtt)
+      return true
+    }
     // Scroll-back while a parse is in flight: un-cancel so the result is kept
     // (Direct3DPool does this; leaving cancelled discarded a still-wanted load).
     if (this.loading.has(postId)) {
@@ -306,7 +341,7 @@ export class PreviewPool {
     }
     const had = this.byPost.delete(postId)
     this.clearSlotModel(slot)
-    if (had) this.onRelease?.(postId)
+    if (had) this.emitRelease(postId)
   }
 
   /**
@@ -408,7 +443,7 @@ export class PreviewPool {
         // fall back to posters. byPost is removed last so the slot is still
         // "intact" until every local ref is cleared.
         self.byPost.delete(postId)
-        self.onRelease?.(postId)
+        self.emitRelease(postId)
       },
       rollback(): void {
         if (state !== 'open') return
@@ -622,7 +657,7 @@ export class PreviewPool {
       // autoplay animation stays silent (SPEC: audio "no autoplay").
       if (sound) playModelSounds(slot)
       this.byPost.set(postId, slot)
-      this.onLive?.(postId, slot.rtt)
+      this.emitLive(postId, slot.rtt)
     } catch {
       this.clearSlotModel(slot)
       // Do not mark a post FAILED when the slot itself was recycled mid-load
@@ -633,7 +668,7 @@ export class PreviewPool {
       this.cancelled.delete(postId)
       slot.pending = false
       this.loading.delete(postId)
-      this.onLoadDone?.()
+      this.emitLoadDone()
     }
   }
 }
