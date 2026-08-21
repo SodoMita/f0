@@ -35,6 +35,7 @@ import { ErrorSheet, ERRORS, bindCopyButton } from './hud/errorSheet'
 import { attachAllDragNumbers } from './studio/dragNumber'
 import { transfers, formatRate, formatBytes, formatDirStats, type TransferStats } from './core/transfer'
 import { handoffContainer } from './core/sceneTransfer'
+import type { Sound } from '@babylonjs/core/Audio/sound'
 import { bindPaintHud } from './studio/paintHud'
 import { formatCount, formatSize, modelNameForPublish, modelWarnings, sizeHeatColor } from './studio/modelInfo'
 import type { ImportedModel } from './studio/studio'
@@ -205,6 +206,9 @@ async function boot(): Promise<void> {
   let relaysOnline = 0
   const btn3d = $('btn-3d') as HTMLButtonElement
   const btnPlay = $('btn-play') as HTMLButtonElement
+  const btnFit = $('btn-fit') as HTMLButtonElement
+  const btnSound = $('btn-sound') as HTMLButtonElement
+  const viewerPos = $('viewer-pos')
   const camDots = $('cam-dots')
   const animRail = $('anim-rail')
   const animTrack = $('anim-track') as HTMLSelectElement
@@ -1357,6 +1361,27 @@ async function boot(): Promise<void> {
   $('btn-prev').addEventListener('click', () => void stepViewer(-1))
   $('btn-next').addEventListener('click', () => void stepViewer(1))
   btnPlay.addEventListener('click', () => { viewer.toggleAnimation(); syncPlay() })
+  btnFit.addEventListener('click', () => viewer.refit())
+  btnSound.addEventListener('click', () => { viewer.toggleSound(); syncSoundButton() })
+
+  /** Model sound button: visible only when the model carries audio, lit
+   *  while it plays (spec: sound always needs an explicit tap, never
+   *  autoplays — AMENDMENT 87). */
+  function syncSoundButton(): void {
+    btnSound.hidden = viewer.soundCount === 0
+    btnSound.classList.toggle('on', viewer.soundOn)
+    btnSound.title = viewer.soundOn ? 'model sound: on (S to mute)' : 'model sound: off (S to play)'
+  }
+
+  /** "N / M" next to prev/next so wrap-around navigation has a position. */
+  function syncViewerPos(meta: ThreadMeta | null): void {
+    if (!meta) { viewerPos.hidden = true; return }
+    const roots = orderedRoots()
+    const at = roots.findIndex((m) => m.eventId === meta.eventId)
+    if (at < 0) { viewerPos.hidden = true; return }
+    viewerPos.hidden = false
+    viewerPos.textContent = `${at + 1} / ${roots.length}`
+  }
 
   // ---------- animation rail (tracks / timeline / stepped / dir / speed) ----------
   // While the user drags the timeline the animator must not fight the thumb:
@@ -1382,7 +1407,11 @@ async function boot(): Promise<void> {
     syncAnimRail()
   })
   animSpeed.addEventListener('input', () => {
-    viewer.animator.setSpeed(parseFloat(animSpeed.value) || 1)
+    // parseFloat('') || 1 used to swallow the documented 0 = freeze pose
+    // (AMENDMENT 87): 0 is a real value here, only NaN (empty field) falls
+    // back to 1.
+    const v = parseFloat(animSpeed.value)
+    viewer.animator.setSpeed(Number.isFinite(v) ? v : 1)
   })
   // Playback → HUD: the animator reports every cursor move (tick or seek);
   // mirror it into the range thumb + frame readout unless the user is the
@@ -1576,10 +1605,14 @@ async function boot(): Promise<void> {
 
   settings.subscribe((values, changed) => {
     applySettings(wiring, values, changed)
+    // "everything opens paused" (board cards AND the viewer) + reduced
+    // motion both stop the viewer's open-autoplay (AMENDMENT 87).
+    viewer.setAutoplay(!!values.autoplayAnimations && !values.reduceMotion)
     btn3d.classList.toggle('active', settings.bool('direct3D'))
     settingsPanel.refresh()
   })
   applySettings(wiring, settings.all, null)
+  viewer.setAutoplay(settings.bool('autoplayAnimations') && !settings.bool('reduceMotion'))
   btn3d.classList.toggle('active', settings.bool('direct3D'))
 
   mixer.onDevices = () => {
@@ -1707,6 +1740,7 @@ async function boot(): Promise<void> {
       viewerBar.hidden = false
       viewer.attach()
       studio.detach()
+      syncSoundButton() // stale-state guard: load/sync below refines it
     } else if (next === 'thread') {
       board.live.activate('thread')
       engine.setActiveScene(threadView.scene)
@@ -1727,6 +1761,17 @@ async function boot(): Promise<void> {
     }
   }
 
+  /**
+   * After a hand-off, transferred sounds may be half-owned: the viewer's
+   * clear() already disposed the ones it claimed, the rest are still
+   * registered in the viewer scene with no owner. Dispose the leftovers.
+   */
+  function disposeLeftoverSounds(sounds: Sound[]): void {
+    if (!sounds.length) return
+    const col = viewer.scene.mainSoundTrack.soundCollection
+    for (const s of sounds) if (col.includes(s)) { try { s.dispose() } catch { /* already gone */ } }
+  }
+
   async function openViewer(id?: string): Promise<void> {
     if (!id) { setMode('board'); return }
     const meta = index.byId.get(id)
@@ -1741,6 +1786,7 @@ async function boot(): Promise<void> {
     currentMeta = meta
     syncDeleteButton()
     setMode('viewer')
+    syncViewerPos(meta)
     camDots.innerHTML = ''
     animRail.hidden = true
     animTrack.innerHTML = ''
@@ -1751,35 +1797,47 @@ async function boot(): Promise<void> {
     // "loading model" flash on what was already on screen.
     const live = board.previewPool.acquire(id)
     if (live) {
+      let transferred: Sound[] = []
       try {
-        const container = handoffContainer(live.container, board.previewPool.scene, viewer.scene, live.offset, 'viewer')
+        const { container, sounds } = handoffContainer(live.container, board.previewPool.scene, viewer.scene, live.offset, 'viewer')
+        transferred = sounds
         // At this point the clones live in viewer.scene and the source
         // container is disposed. ANY return below this point MUST commit
         // (otherwise the preview slot stays bound to a now-empty source).
+        // Transferred sounds belong to whoever keeps the container:
+        // commit() never disposes them (keep set + _scene check), the
+        // viewer's clear() does — a stale nav just commits and lets the
+        // teardown own them.
         if (nav !== viewerNav) {
           // The user navigated away while we were cloning (unlikely but
           // possible across async boundaries). The viewer is about to be
           // cleared by the next setMode anyway; just commit to release the
           // preview slot and let the viewer tear-down dispose the clones.
-          live.commit()
+          live.commit(new Set(transferred))
+          disposeLeftoverSounds(transferred)
           return
         }
         viewer.loadFromContainer(container, meta)
         if (nav !== viewerNav) {
-          live.commit()
+          live.commit(new Set(transferred))
+          disposeLeftoverSounds(transferred)
           return
         }
         renderCamDots()
         syncAnimRail()
-        live.commit()
+        syncSoundButton()
+        live.commit(new Set(transferred))
         return
       } catch (err) {
         // Hand-off failed (e.g. parse result lost a mesh). Rollback the
         // reservation so the slot is back to live-animating, then fall
         // through to the bytes path — the user still gets a working
-        // viewer (with a re-parse).
+        // viewer (with a re-parse). Sounds already moved to the viewer
+        // scene are orphaned (their source nodes are gone): dispose the
+        // ones the viewer's own clear() did not already take.
         console.warn('viewer handoff failed, falling back to parse:', err)
-        live.rollback()
+        disposeLeftoverSounds(transferred)
+        live.rollback(new Set(transferred))
       }
     }
     setLoading('model', true, 'loading model')
@@ -1799,6 +1857,7 @@ async function boot(): Promise<void> {
       if (nav !== viewerNav) return
       renderCamDots()
       syncAnimRail()
+      syncSoundButton()
     } catch {
       if (nav === viewerNav) errorSheet.show(ERRORS.MODEL_PARSE(() => router.go({ name: 'board' })))
     } finally {
@@ -2026,6 +2085,10 @@ async function boot(): Promise<void> {
       case 'ArrowRight': void stepViewer(1); break
       case 'c': case 'C': viewer.cycleCamera(); renderCamDots(); break
       case 'a': case 'A': viewer.toggleAnimation(); syncPlay(); break
+      // re-fit the CURRENT camera mode (authored pose or auto-fit)
+      case 'f': case 'F': viewer.refit(); break
+      // model sound (spec A11Y "S sound" — was never wired; AMENDMENT 87)
+      case 's': case 'S': viewer.toggleSound(); syncSoundButton(); break
       // frame stepping (pauses playback; wraps around the clip)
       case ',': case '<': viewer.animator.step(-1); engine.kick(); syncPlay(); break
       case '.': case '>': viewer.animator.step(1); engine.kick(); syncPlay(); break

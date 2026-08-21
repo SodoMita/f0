@@ -1371,3 +1371,48 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     group present, `front` flagged), `npm run check:symbols`, and
     `node scripts/library-shot.mjs` (place pieces in a real browser and shoot
     the canvas). Library 142 KiB after the Draco pass; standalone +34 KB.
+87. VIEWER: NAVIGABLE AUTHORED CAMERAS, ADAPTIVE NEAR PLANE, RE-FRAME,
+    SPEED 0, MODEL AUDIO, HONEST HAND-OFF (2026-08-21). Viewer-research
+    (docs/VIEWER-RESEARCH.md) found the essential gaps vs Sketchfab /
+    Babylon's viewers; the essential fixes landed:
+    - Authored cameras SEED the orbit instead of becoming a frozen,
+      control-less view: the author's world position + fov, pivot placed on
+      the authored forward ray (composition preserved; the orbit is fully
+      navigable from the author's framing). A dot = snap back to that
+      framing; the A dot = auto-fit from the dominant face. `applyCamera`
+      never leaves the orbit un-attached.
+    - The near plane adapts per rendered frame: minZ = 10% of the camera's
+      distance to the model AABB (floored by the user's near setting). The
+      old fixed model-sized minZ let lowerRadiusLimit go BELOW minZ, so a
+      close-up of any part smaller than the whole model was sliced
+      (measured: minZ=1.0 vs lowerRadiusLimit=0.872 on the rig's two-cube
+      model).
+    - Re-frame: F key + fit button re-seeds the CURRENT camera mode.
+      Re-framing also clears the orbit's residual inertial offsets
+      (inertialAlpha/Beta/Radius/Panning): under the demand-driven loop a
+      drag's glide FREEZES mid-flight when rendering stops (the offsets only
+      decay while frames render) and the next render trigger applied them,
+      dragging the fresh pose off (measured 0.19-unit drift after F).
+    - Speed 0 is reachable in the HUD: `parseFloat(v) || 1` swallowed the
+      documented freeze-pose; only NaN (empty field) falls back to 1.
+    - Model audio (MSFT_audio_emitter) works in the viewer: adopt() claims
+      the model's sounds (paused — spec: sound always needs a tap), the S
+      key / sound button toggle playback, and handoffContainer TRANSFERS
+      the sounds to the viewer scene (re-attached to the cloned nodes,
+      re-registered on the target mainSoundTrack) so a model that was
+      audible on its card is not silenced by the hand-off. commit() never
+      disposes a sound that moved scenes; a failed hand-off disposes the
+      leftovers and rolls the slot back with them excluded.
+    - The viewer obeys `autoplayAnimations` (and reduced motion): adopt()
+      passes the stored flag to setGroups instead of hard-coded true.
+    - loadFromContainer THROWS when the container is not bound to the
+      viewer scene (it returned silently and the caller committed the slot,
+      leaving a blank viewer with no loading ring).
+    - "N / M" feed position shown next to prev/next (wrap-around nav had no
+      position indicator).
+    Out of scope by decision: metadata/label changes, camera tweens,
+    auto-rotate, share, screenshot (see docs/VIEWER-RESEARCH.md §6).
+    Guard: scripts/viewer.mjs (24 checks: navigable authored camera,
+    composition preserved, near plane, re-frame incl. inertia, N of M,
+    speed 0, audio claim/S-toggle/hand-off transfer, autoplay respect,
+    no-camera path).

@@ -29,6 +29,26 @@ move it to **Done** with a commit reference. One agent per area.
       screenshots), `python3 scripts/preview-library.py` contact sheet. Full
       gate green: check:static + check:unit (13 files) + check:e2e (4 suites).
       Library 142 KiB after Draco; standalone 5.11 → 5.15 MB.
+- [x] **Viewer: essential fixes vs Sketchfab/Babylon** (agent arena, 2026-08-21,
+      SPEC AMENDMENT 87): authored cameras now SEED the orbit (author's
+      position + fov, pivot on the authored forward ray) instead of a frozen
+      control-less frame — fully navigable, dot = snap back, A = auto-fit.
+      Near plane adapts per frame (10% of camera→AABB distance) so close-ups
+      of small parts no longer slice (minZ could exceed lowerRadiusLimit).
+      F/fit-button re-frames the current mode AND kills residual orbit
+      inertia (a frozen glide used to drag the re-framed pose off). Speed 0
+      (freeze) reachable in the HUD. Model audio: claimed on adopt, S key /
+      sound button toggle (paused by default), hand-off TRANSFERS the sounds
+      to the viewer scene (commit() spares moved sounds; failed hand-off
+      disposes leftovers + rollback excludes them). Viewer obeys
+      autoplayAnimations/reduceMotion (was hard-coded play).
+      loadFromContainer throws on a mis-bound container (used to silently
+      commit the slot → blank viewer). "N / M" feed position next to
+      prev/next. Rig flavour 'a' carries a WAV beep (MSFT_audio_emitter) so
+      the audio path is testable offline. Out of scope by decision:
+      metadata/labels, camera tweens, auto-rotate, share, screenshot.
+      Guard: scripts/viewer.mjs (24 checks, all green) + full `bun run check`
+      gate. Research: docs/VIEWER-RESEARCH.md.
 - [x] **Export codec lossy preview + fine settings** (agent arena, 2026-08-21,
       SPEC AMENDMENT 85): the review renders the exact compressed bytes
       through the card pipeline beside the raw export with a pixel-difference
@@ -51,8 +71,8 @@ move it to **Done** with a commit reference. One agent per area.
       yet decoded — one whenReadyAsync before the render loop). Guards:
       `bun scripts/codec-unit.mjs`, `node scripts/codec-browser.mjs`
       (rig), `scripts/verify-publish.mjs` repaired to the AMENDMENT-66/69
-      studio + review flow (fully green after main's poster frustum fix). Standalone +570 KB (encoder
-      inlined).
+      studio + review flow (fully green after main's poster frustum fix).
+      Standalone +570 KB (encoder inlined).
 - [x] **3D view bugs from arena/01a02366-f0, kept short** (agent arena, 2026-08-21,
       SPEC AMENDMENT 81): empty `__root__` meshes no longer stretch every fit
       to the origin (specks); overlay materials ignore depth so 3D models
@@ -922,10 +942,30 @@ move it to **Done** with a commit reference. One agent per area.
       inverse(main-cam rotation); thread camera is only a position). Center a
       node -> thread view == model's main-camera view. Fall back to auto-fit
       when no camera. Load models only near viewport (same pipeline as board).
+- [ ] **Viewer: remaining fixes from the AMENDMENT 87 research**
+      (docs/VIEWER-RESEARCH.md §6 — deferred by decision 2026-08-21 to keep
+      the codebase essential while there is a lot to optimize/polish/debug;
+      pick in this order, extend scripts/viewer.mjs per feature):
+      (1) screenshot button — render frame then read back in the SAME task
+      (PBO fence like posters, or `toDataURL` right after `scene.render()`;
+      `preserveDrawingBuffer` is false by design); (2) auto-rotate/turntable
+      toggle — orbit behaviour + a registered animation source so
+      render-on-demand keeps working, off under reduce motion; (3)
+      share/copy-link button (the `#/viewer/<id>` URL already carries the
+      model); (4) camera-pose tween on camera switches (~0.4 s, skippable by
+      input) — decided "minor optional", last of the group; (5) P2
+      presentation: environment-lighting presets via per-material
+      `reflectionTexture` (fixes the black-PBR driver issue properly — the
+      largest remaining visual-quality gap), wireframe/matcap inspection,
+      loop / play-once control on the animation rail, camera fly-through
+      (glTF camera animations as playable tracks). Out of scope per decision:
+      title/author line, metadata-drawer upgrades (labels are fine as-is).
 - [ ] **VR support** (AMENDMENT 41): WebXR immersive viewing in the viewer —
       `WebXRExperienceHelper`, xrCompatible canvas (same engine/canvas), 6-DOF
       tracking, enter-VR action hidden when unsupported, error sheet on failed
-      entry, reduced-motion respected.
+      entry, reduced-motion respected. AR (`immersive-ar` / Quick Look at 1:1)
+      and first-person fly mode are the other research-deferred viewer items
+      (docs/VIEWER-RESEARCH.md §6 P3).
 - [ ] **New settings entries** (AMENDMENT 42): the settings system already
       exists (`src/settings/schema.ts`, ~50 settings, 11 groups). Add the NEW
       tunables to it — thread view mode (AMENDMENT 43) and VR toggle

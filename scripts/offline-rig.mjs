@@ -230,6 +230,19 @@ function makeModel(flavour) {
     nodes.push({ camera: 1, name: 'cam1', translation: [gx - 1.5, 0.6, 2.5], rotation: q1 })
   }
 
+  // Flavour 'a' carries a short 440 Hz beep (MSFT_audio_emitter over an
+  // in-BIN bufferView) so the rig can verify the viewer's sound claim,
+  // the S-key toggle, and the hand-off sound transfer (AMENDMENT 87).
+  let audioExt = null
+  if (flavour === 'a') {
+    const audioView = addView(makeWav(), 'audio')
+    audioExt = {
+      clips: [{ bufferView: audioView, mimeType: 'audio/wav' }],
+      emitters: [{ clips: [{ clip: 0, weight: 1 }], loop: true, volume: 1 }],
+    }
+    nodes[0].extensions = { MSFT_audio_emitter: { emitters: [0] } }
+  }
+
   const json = {
     asset: { version: '2.0', generator: 'offline-rig' },
     scene: 0,
@@ -239,10 +252,37 @@ function makeModel(flavour) {
     buffers: [{ byteLength: align4(binParts.reduce((s, b) => s + b.length, 0)) }],
     cameras: cameras.length ? cameras : undefined,
     animations: anim ? [anim] : undefined,
+    extensionsUsed: audioExt ? ['MSFT_audio_emitter'] : undefined,
+    extensions: audioExt ? { MSFT_audio_emitter: audioExt } : undefined,
   }
   const bin = Buffer.concat(binParts)
   json.bin = bin
   return buildGLB(json)
+}
+
+/** Tiny PCM WAV: a 440 Hz beep with 50 ms fade in/out (8 kHz mono s16). */
+function makeWav(freq = 440, seconds = 0.3, rate = 8000) {
+  const n = Math.floor(seconds * rate)
+  const data = Buffer.alloc(44 + n * 2)
+  data.write('RIFF', 0)
+  data.writeUInt32LE(36 + n * 2, 4)
+  data.write('WAVE', 8)
+  data.write('fmt ', 12)
+  data.writeUInt32LE(16, 16)
+  data.writeUInt16LE(1, 20) // PCM
+  data.writeUInt16LE(1, 22) // mono
+  data.writeUInt32LE(rate, 24)
+  data.writeUInt32LE(rate * 2, 28)
+  data.writeUInt16LE(2, 32)
+  data.writeUInt16LE(16, 34)
+  data.write('data', 36)
+  data.writeUInt32LE(n * 2, 40)
+  for (let i = 0; i < n; i++) {
+    const t = i / rate
+    const env = Math.min(1, t * 20, (seconds - t) * 20)
+    data.writeInt16LE(Math.round(0.5 * env * Math.sin(2 * Math.PI * freq * t) * 32767), 44 + i * 2)
+  }
+  return data
 }
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
 const align4 = (n) => (n + 3) & ~3

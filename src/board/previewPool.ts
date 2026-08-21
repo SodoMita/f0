@@ -22,6 +22,8 @@ import { validateGLBCached } from '../model/limits'
 import { graphics } from '../render/graphics'
 import { claimModelSounds, playModelSounds } from './modelSounds'
 
+const EMPTY_SOUNDS: ReadonlySet<Sound> = new Set()
+
 /** Model bytes + the preferred authored camera (v3 `preview-camera` index). */
 export interface PreviewModel {
   bytes: Uint8Array
@@ -397,8 +399,11 @@ export class PreviewPool {
     container: AssetContainer
     offset: Vector3
     anims: AnimationGroup[]
-    commit(): void
-    rollback(): void
+    /** `keepSounds` = sounds the hand-off already moved to the viewer scene;
+     *  the viewer owns them, so commit must NOT dispose them. */
+    commit(keepSounds?: ReadonlySet<Sound>): void
+    /** `dropped` = sounds the caller disposed after a failed hand-off. */
+    rollback(dropped?: ReadonlySet<Sound>): void
   } | null {
     const slot = this.byPost.get(postId)
     if (!slot || !slot.container) return null
@@ -421,7 +426,7 @@ export class PreviewPool {
       container,
       offset,
       anims,
-      commit(): void {
+      commit(keepSounds: ReadonlySet<Sound> = EMPTY_SOUNDS): void {
         if (state !== 'open') return
         state = 'committed'
         slot.root?.dispose()
@@ -430,8 +435,11 @@ export class PreviewPool {
         slot.anims = []
         // The stage no longer owns the model: release its sounds so they
         // cannot keep registered (and sounding) in the hidden stage scene.
+        // A sound handoffContainer MOVED to the viewer scene is the
+        // viewer's now (AMENDMENT 87) — never dispose it here.
         for (const s of slot.sounds) {
           self.claimedSounds.delete(s)
+          if (keepSounds.has(s) || (s as unknown as { _scene?: Scene })._scene !== self.scene) continue
           s.stop()
           s.dispose()
         }
@@ -445,9 +453,12 @@ export class PreviewPool {
         self.byPost.delete(postId)
         self.emitRelease(postId)
       },
-      rollback(): void {
+      rollback(dropped: ReadonlySet<Sound> = EMPTY_SOUNDS): void {
         if (state !== 'open') return
         state = 'rolledback'
+        // A failed hand-off disposes the sounds it already moved (their
+        // source nodes are gone); keep the slot's list honest.
+        if (dropped.size) slot.sounds = slot.sounds.filter((s) => !dropped.has(s))
         // The model is still in previewScene with parent=null (we detached
         // above). The slot stays in byPost, so tick() will re-render it
         // once the anims spin back up.
