@@ -197,6 +197,38 @@ if (twoCamCards.length) {
   console.log(`      d.glb card: red=${(c.red * 100).toFixed(1)}%  green=${(c.green * 100).toFixed(1)}%`)
   check('3D board card honours preview-camera=1 (the GREEN camera, not cam 0)',
     c.green > 0.10 && c.red < 0.01, `red=${(c.red * 100).toFixed(1)}% green=${(c.green * 100).toFixed(1)}%`)
+
+  // That camera is a CLOSE-UP: the model overflows the cell, so it is the
+  // best test of the crop. Shoot a padded rect — nothing may bleed out of
+  // the card (a poster is cut off by the card's edges; a model must be too).
+  const r = twoCamCards[0]
+  const pad = 40
+  const clip = {
+    x: Math.max(0, Math.round(r.x - pad)), y: Math.max(0, Math.round(r.y - pad)),
+    width: Math.round(r.w + 2 * pad), height: Math.round(r.h + 2 * pad),
+  }
+  const padded = await page.screenshot({ clip })
+  writeFileSync(`${OUT}/board3d-card-d-padded.png`, padded)
+  const img = PNG.decode(padded)
+  let gx0 = 1e9, gx1 = -1, gy0 = 1e9, gy1 = -1
+  for (let y = 0; y < img.height; y++) {
+    for (let x = 0; x < img.width; x++) {
+      const i = (y * img.width + x) * 4
+      const R = img.data[i], G = img.data[i + 1], B = img.data[i + 2]
+      if (G > 60 && G > R * 1.5 && G > B * 1.5) {
+        if (x < gx0) gx0 = x
+        if (x > gx1) gx1 = x
+        if (y < gy0) gy0 = y
+        if (y > gy1) gy1 = y
+      }
+    }
+  }
+  const left = Math.round(r.x) - clip.x, top = Math.round(r.y) - clip.y
+  const slack = 2
+  check('a close-up model is CROPPED to its card (no bleed onto neighbours)',
+    gx0 >= left - slack && gx1 <= left + Math.round(r.w) + slack &&
+    gy0 >= top - slack && gy1 <= top + Math.round(r.h) + slack,
+    `green=[${gx0},${gx1}]x[${gy0},${gy1}] card=[${left},${left + Math.round(r.w)}]x[${top},${top + Math.round(r.h)}]`)
 }
 await page.evaluate(() => window.__form0.setSearchQuery(''))
 await page.waitForTimeout(1500)
