@@ -184,6 +184,8 @@ bun scripts/capture.mjs             # board/viewer/thread/light/phone screenshot
 bun scripts/perf.mjs                # PERF: boot, per-view frame cost, 48-card stress, idle, heap
 bun scripts/shaders.mjs             # shader recompiles (repeat model opens must compile 0 programs)
 bun scripts/settings.mjs            # every setting must reach real engine state (20 checks)
+npm run check:3d                    # 3D MODE (AMENDMENT 79/80): framing vs the authored camera,
+                                    #   edge-case models, pixels on the rig, leak/toggle cycles
 bun scripts/transfer.mjs            # network button hit target + global AND per-server speed/ping/status readouts (needs the rig)
 bun scripts/network-panel.mjs       # network panel is an overlay: opens over / returns to the current page (needs the rig)
 PHASE=load bun scripts/profile.mjs  # CPU profile of a board load, aggregated by self time

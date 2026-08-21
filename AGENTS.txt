@@ -31,6 +31,8 @@ NON-NEGOTIABLE (each cost real debugging):
 
 VERIFY (agents have no vision; pixel checks are the eyes):
  bun run build && smoke.mjs && features.mjs && capture.mjs + visual_critique.py
+ 3D mode / model framing: npm run check:3d (math + pixels + leak cycles).
+ Never pipe a guard into `tail` — you get tail's exit code, not the suite's.
 
 MULTI-AGENT: one agent per area, claim in STATUS, rebase before push, atomic
 commits, fix-forward (record bugs in SPEC AMENDMENTS + STATUS). Deploy is

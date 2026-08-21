@@ -1306,7 +1306,11 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     in its card while the feed scrolls, a 2D↔3D round trip must leave no
     orphan nodes, a tap on a 3D card must still open the viewer, a
     camera-less post must be the SAME size in 2D and 3D, and a settled 3D
-    board must render ZERO frames while still animating with autoplay on).
+    board must render ZERO frames while still animating with autoplay on),
+    plus `node scripts/direct3d-leak.mjs` — four on/off cycles must return
+    the scene to its exact baseline (meshes, materials, textures, transform
+    chains, animation groups, sounds, heap): a browser-only imageboard is a
+    long-running tab and this toggle loads real GLBs into the live scene.
 
 80. EMPTY NODES POISONED EVERY FIT (2026-08-21): `model/facing.ts`'s
     `worldBox` / `worldBounds` / `worldCenter` / `worldRadius` unioned the
