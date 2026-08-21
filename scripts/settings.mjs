@@ -39,12 +39,20 @@ check('panel renders every group', shape.groups >= 11, JSON.stringify(shape))
 check('unsupported features are shown disabled, not faked', shape.unavailable >= 6)
 check('legacy control ids still present (headless suites)', shape.legacy)
 
-// search filters
+// search filters. The search matches id, label AND hint (the `glow` setting
+// is a hit for "bloom" through its hint text), so filter by the row's own
+// text, not just its id.
 await page.fill('#settings-search', 'bloom')
 await page.waitForTimeout(250)
 const filtered = await page.evaluate(() =>
-  [...document.querySelectorAll('#settings-panel .setting')].filter((r) => !r.hidden).map((r) => r.dataset.id))
-check('search filters rows', filtered.length > 0 && filtered.every((id) => id.toLowerCase().includes('bloom')), filtered.join(','))
+  [...document.querySelectorAll('#settings-panel .setting')].filter((r) => !r.hidden)
+    .map((r) => ({ id: r.dataset.id, hit: (r.dataset.id + ' ' + r.textContent).toLowerCase().includes('bloom') })))
+check('search filters rows', filtered.length > 0 && filtered.every((r) => r.hit), filtered.map((r) => r.id).join(','))
+await page.fill('#settings-search', 'zzz-no-such-setting')
+await page.waitForTimeout(250)
+const none = await page.evaluate(() =>
+  [...document.querySelectorAll('#settings-panel .setting')].every((r) => r.hidden))
+check('search hides unmatched rows', none)
 await page.fill('#settings-search', '')
 await page.waitForTimeout(200)
 

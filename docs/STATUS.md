@@ -4,6 +4,24 @@ Claim a task by moving it to **In progress** with your name/date, push, then
 move it to **Done** with a commit reference. One agent per area.
 
 ## Done
+- [x] **Studio GLB export review, download, and compression** (agents arena,
+      2026-08-21, SPEC AMENDMENT 82): the review is a frozen, validated
+      snapshot — exact bytes for download AND publish, invalidated by any
+      studio edit. Codec encoders are now real: geometry `draco`
+      (KHR_draco_mesh_compression via Babylon's bundled encoder wasm, probe-
+      gated control) and textures `webp` (EXT_texture_webp via canvas). A
+      choice re-derives from the same pristine export and must re-pass
+      validateGLB before it becomes the reviewed bytes; gainless passes keep
+      the original (never grows). Text export compresses ~13× (46 KiB →
+      3.5 KiB observed); the compressed post publishes, re-downloads
+      SHA-verified, and renders in the viewer/posters. Also fixed in review:
+      mid-upload cancel was dead (review handler swallowed the button), and
+      the first poster of a texture-bearing post rendered blank (texture not
+      yet decoded — one whenReadyAsync before the render loop). Guards:
+      `bun scripts/codec-unit.mjs`, `node scripts/codec-browser.mjs`
+      (rig), `scripts/verify-publish.mjs` repaired to the AMENDMENT-66/69
+      studio + review flow (12/14 green). Standalone +570 KB (encoder
+      inlined).
 - [x] **3D view bugs from arena/01a02366-f0, kept short** (agent arena, 2026-08-21,
       SPEC AMENDMENT 81): empty `__root__` meshes no longer stretch every fit
       to the origin (specks); overlay materials ignore depth so 3D models
@@ -815,12 +833,6 @@ move it to **Done** with a commit reference. One agent per area.
   pushes to `main`.
 ## In progress
 
-- [ ] **Studio GLB export review, download, and compression** — claimed by agent
-      arena, 2026-08-21. Add an immutable pre-publish export snapshot that can
-      be inspected by exact size/budget breakdown, downloaded, then uploaded
-      without re-exporting. Include functional geometry and texture codec
-      choices only where browser-bundled encoders create validated,
-      self-contained GLBs; never advertise a non-working codec control.
 
 - [ ] **Per-card play/pause (animation + sound) + autoplay setting** — claimed by
       agent arena, 2026-08-20. SPEC AMENDMENT 69. Board cards and thread nodes
@@ -844,6 +856,16 @@ move it to **Done** with a commit reference. One agent per area.
       + Amanatides–Woo DDA. Not a voxel editor.
 
 ## Next (priority order — pick one and claim it)
+
+- [ ] **Authored-camera poster shows the wrong cube** (found in review,
+      2026-08-21, see AMENDMENT 82 tail): `verify-publish.mjs`'s
+      "authored camera poster is red-only" check renders red=5.7% /
+      green=94.3% for rig model `a.glb` — reproducible at the previous tip
+      with the codec/poster edits reverted, so it predates them.
+      `cameraFramesBox` (overlap semantics) accepts the camera and the
+      render still shows the big green offset cube; suspect the
+      AMENDMENT-81 worldBox/frustum interplay or the glTF camera aspect
+      handling. `scripts/verify-publish.mjs` carries the failing check.
 
 **Editor core (the product's primary use cases — do these first):**
 

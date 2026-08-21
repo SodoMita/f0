@@ -453,7 +453,22 @@
         <div id="export-meter" class="export-meter"><i></i></div>
         <div id="export-breakdown" class="export-breakdown"></div>
         <p id="export-extensions" class="export-extensions"></p>
-        <p class="hint">This is the exact self-contained GLB that download and publish use. Compression codecs will appear here only when a local encoder is available.</p>
+        <div id="export-codecs" class="export-codecs" hidden>
+          <div class="codec-row"><span>geometry</span>
+            <div class="codec-opts" id="codec-geometry">
+              <button type="button" data-v="none" class="on">raw</button>
+              <button type="button" data-v="draco" hidden>draco</button>
+            </div>
+          </div>
+          <div class="codec-row"><span>textures</span>
+            <div class="codec-opts" id="codec-texture">
+              <button type="button" data-v="none" class="on">raw</button>
+              <button type="button" data-v="webp" hidden>webp</button>
+            </div>
+          </div>
+        </div>
+        <p id="export-codec-note" class="export-codec-note"></p>
+        <p class="hint">This is the exact self-contained GLB that download and publish use. A codec choice re-encodes the same frozen export and re-validates the result before it can be published.</p>
         <footer class="export-actions"><button id="btn-export-download" class="net-btn">download GLB</button><button id="btn-export-publish" class="net-btn primary">publish</button></footer>
       </section>
     </div>

@@ -1278,3 +1278,42 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     doNotRecurse — release must recurse or orient/fit leak. The glTF loader
     auto-starts animation group 0; the pool stops it so play/pause own
     playback. Contact shadow uses the model's real footprint in the cell.
+
+82. STUDIO EXPORT CODECS (2026-08-21): the export review (frozen pre-publish
+    snapshot, exact bytes for download/publish) grows LOCAL codec encoders.
+    Geometry: KHR_draco_mesh_compression through Babylon's own DracoEncoder
+    (`@babylonjs/core/assets/Draco/draco_encoder*` via `?url`, main thread,
+    NO asm.js fallback — without wasm the probe fails and the control stays
+    hidden; the decoder side has been bundled since AMENDMENT 68). Textures:
+    EXT_texture_webp through canvas re-encode (no wasm). Rules:
+    - A codec option appears only after its encoder passes a probe — never
+      advertise a non-working codec control.
+    - A choice re-derives from the SAME frozen pristine export (switching
+      codecs back and forth is deterministic; `raw` restores the exact
+      serializer bytes), and the result must pass `validateGLB` before it can
+      become the reviewed snapshot. The published/uploaded bytes stay exactly
+      what the review showed.
+    - The rewrite (`src/model/compressGlb.ts`, encoders injected) never grows
+      a file: per-primitive and whole-file gain checks fall back to the
+      original bytes. Skinned meshes, morph-target primitives, already-
+      compressed primitives and animations keep their raw buffers; accessors
+      keep count/min/max and lose only their bufferView; shared views survive
+      when anything still reads them raw.
+    - Standalone build inlines the encoder wrapper+wasm (+~570 KB → 5.09 MB
+      single file) to keep it network-free.
+    Poster fix riding along: `PosterRenderer` now awaits
+    `scene.whenReadyAsync()` once before its render loop — the first poster
+    of a texture-bearing post used to render before the texture decoded
+    (blank card); a second render of the same bytes worked. Not a readback,
+    not a retry loop. Also found/repaired in review: the publish button lost
+    its cancel behavior when the review flow landed (a mid-upload click
+    opened a review instead of aborting).
+    Guards: `bun scripts/codec-unit.mjs` (33 units: container, draco rewrite
+    + real-wasm Babylon load roundtrips, webp rewrite, shared views,
+    animations byte-exact) and `node scripts/codec-browser.mjs` (review UI,
+    draco publish roundtrip with SHA-verified upload bytes, webp poster
+    equivalence). KNOWN PRE-EXISTING FAILURE (not codec-related, reproduced
+    at the previous tip with codec edits reverted): verify-publish's
+    "authored camera poster is red-only" now renders red=5.7%/green=94.3%
+    — the worldBox/frustum probe accepts the authored camera but the render
+    shows the big green cube; owner: poster/framing follow-up.

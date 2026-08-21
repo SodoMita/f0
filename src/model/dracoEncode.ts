@@ -19,7 +19,6 @@ import type { DracoCodec } from './compressGlb'
 // Local Draco assets (spec 00 §6.5): never cdn.babylonjs.com.
 import encoderWrapperUrl from '@babylonjs/core/assets/Draco/draco_encoder_wasm_wrapper.js?url'
 import encoderWasmUrl from '@babylonjs/core/assets/Draco/draco_encoder.wasm?url'
-import encoderFallbackUrl from '@babylonjs/core/assets/Draco/draco_encoder.js?url'
 
 let configured = false
 export function configureDracoEncoder(): void {
@@ -28,7 +27,11 @@ export function configureDracoEncoder(): void {
   DracoEncoder.DefaultConfiguration = {
     wasmUrl: encoderWrapperUrl,
     wasmBinaryUrl: encoderWasmUrl,
-    fallbackUrl: encoderFallbackUrl,
+    // No asm.js fallback: the wasm pair is ~430 KB and the fallback another
+    // ~900 KB, which the standalone build would inline for a path no
+    // supported browser takes. Without WebAssembly the probe fails and the
+    // draco control simply stays hidden (optional feature, never advertised
+    // when it cannot work).
     // Main-thread encode (same rationale as the decoder): no worker/CSP
     // interaction. Studio exports are small (LIMITS.vertices etc).
     numWorkers: 0,

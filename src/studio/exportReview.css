@@ -13,3 +13,13 @@
 .export-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .export-actions .net-btn { min-height: 40px; }
 body[data-theme="light"] .export-card { background: rgba(253,253,255,.98); }
+/* Codec choices: each option appears only when its local encoder works. */
+.export-codecs { display: flex; flex-direction: column; gap: 6px; }
+.codec-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; font: 11px/1.2 ui-monospace, monospace; color: var(--muted); }
+.codec-opts { display: flex; gap: 4px; }
+.codec-opts button { padding: 5px 12px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--muted); font: 11px/1 ui-monospace, monospace; cursor: pointer; }
+.codec-opts button:hover:not(:disabled) { color: var(--ink); }
+.codec-opts button.on { border-color: var(--accent, #7c9cff); color: var(--ink); background: rgba(124, 156, 255, .14); }
+.codec-opts button:disabled { opacity: .5; cursor: wait; }
+.export-codec-note { margin: 0; font: 10px/1.5 ui-monospace, monospace; color: var(--muted); overflow-wrap: anywhere; }
+.export-codec-note:empty { display: none; }

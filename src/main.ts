@@ -39,7 +39,10 @@ import { bindPaintHud } from './studio/paintHud'
 import { formatCount, formatSize, modelNameForPublish, modelWarnings, sizeHeatColor } from './studio/modelInfo'
 import type { ImportedModel } from './studio/studio'
 import { bindLibraryHud } from './studio/library/hud'
-import { exportBreakdown, inspectGLB } from './studio/exportInfo'
+import { exportBreakdown, inspectGLB, type GLBExportInfo } from './studio/exportInfo'
+import { compressGLB, type CompressReport } from './model/compressGlb'
+import { configureDracoEncoder, dracoCodec, dracoEncoderReady } from './model/dracoEncode'
+import { webpCodec, webpEncoderSupported } from './model/webpEncode'
 
 type Mode = 'boot' | 'board' | 'viewer' | 'studio' | 'thread'
 
@@ -50,6 +53,7 @@ function $(id: string): HTMLElement {
 async function boot(): Promise<void> {
   enforceOffline()
   configureDraco()
+  configureDracoEncoder() // local wasm URLs only; no cdn.babylonjs.com
 
   // Settings BEFORE the engine: the GPU power preference is a context-creation
   // option, so boot is the only place it can take effect (settings: deferred).
@@ -147,14 +151,31 @@ async function boot(): Promise<void> {
   let publishAbort: AbortController | null = null
   // A review is a frozen export snapshot. It is invalidated by every Studio
   // edit, so preview/download/publish cannot disagree about the bytes.
-  let reviewedExport: { blob: Blob; filename: string; sourceFormat: 'glb' | 'gltf' | 'obj' | 'generated' } | null = null
+  // `pristineExport` is that snapshot BEFORE codecs; a codec choice always
+  // re-derives from the same pristine bytes, so switching back and forth is
+  // deterministic and the reviewed/downloaded/published bytes stay identical.
+  type ExportSnapshot = { blob: Blob; filename: string; sourceFormat: 'glb' | 'gltf' | 'obj' | 'generated' }
+  let reviewedExport: ExportSnapshot | null = null
+  let pristineExport: (ExportSnapshot & { info: GLBExportInfo }) | null = null
   const exportReview = $('export-review')
   const exportSummary = $('export-summary')
   const exportMeter = $('export-meter').firstElementChild as HTMLElement
   const exportBreakdownEl = $('export-breakdown')
   const exportExtensions = $('export-extensions')
   const exportState = $('export-state')
+  const exportCodecs = $('export-codecs')
+  const exportCodecNote = $('export-codec-note')
+  const codecGeometry = $('codec-geometry')
+  const codecTexture = $('codec-texture')
   const btnExportPublish = $('btn-export-publish') as HTMLButtonElement
+  const btnExportDownload = $('btn-export-download') as HTMLButtonElement
+  // Codec availability is probed once; controls appear only when the local
+  // encoder really works (never advertise a non-working codec control).
+  const codecChoice = { geometry: 'none' as 'none' | 'draco', texture: 'none' as 'none' | 'webp' }
+  let dracoOn: boolean | null = null
+  let webpOn: boolean | null = null
+  let exportCodecBusy = false
+  let exportCodecToken = 0
   const netDot = $('net-dot')
   let relaysOnline = 0
   const btn3d = $('btn-3d') as HTMLButtonElement
@@ -555,6 +576,105 @@ async function boot(): Promise<void> {
     }
   }
 
+  function renderExportInfo(info: GLBExportInfo): void {
+    exportSummary.innerHTML = `<span>file size</span><b>${formatSize(info.bytes)} / ${formatSize(LIMITS.modelBytesHard)}</b><span>scene</span><b>${info.meshes} meshes · ${formatCount(info.triangles)} triangles</b><span>content</span><b>${info.textures} textures · ${info.animations} animations</b>`
+    const pct = Math.min(100, (info.bytes / LIMITS.modelBytesHard) * 100)
+    exportMeter.style.width = `${pct.toFixed(1)}%`
+    exportMeter.style.background = sizeHeatColor(info.bytes)
+    exportBreakdownEl.textContent = exportBreakdown(info)
+    exportExtensions.textContent = info.extensions.length ? `extensions: ${info.extensions.join(', ')}` : 'extensions: none'
+  }
+
+  function codecNote(report: CompressReport | null, before?: GLBExportInfo, after?: GLBExportInfo): string {
+    if (!report) return ''
+    const parts: string[] = []
+    if (report.draco.prims) parts.push(`draco ${report.draco.prims} mesh${report.draco.prims === 1 ? '' : 'es'} ${formatSize(report.draco.bytesBefore)} → ${formatSize(report.draco.bytesAfter)}`)
+    if (report.webp.images) parts.push(`webp ${report.webp.images} texture${report.webp.images === 1 ? '' : 's'} ${formatSize(report.webp.bytesBefore)} → ${formatSize(report.webp.bytesAfter)}`)
+    if (before && after && !report.keptOriginal) parts.push(`file ${formatSize(before.bytes)} → ${formatSize(after.bytes)} · −${Math.round((1 - after.bytes / before.bytes) * 100)}%`)
+    const reasons = [...new Set([...report.draco.reasons, ...report.webp.reasons])]
+    if (reasons.length) parts.push(`kept raw: ${reasons.join(' · ')}`)
+    return parts.join(' · ')
+  }
+
+  function syncCodecButtons(): void {
+    const anyCodec = dracoOn === true || webpOn === true
+    exportCodecs.hidden = !anyCodec
+    const setOption = (group: HTMLElement, available: boolean, current: 'none' | 'draco' | 'webp'): 'none' | 'draco' | 'webp' => {
+      for (const el of Array.from(group.querySelectorAll('button[data-v]'))) {
+        const btn = el as HTMLButtonElement
+        const v = btn.dataset.v ?? 'none'
+        btn.hidden = v !== 'none' && !available
+        btn.classList.toggle('on', v === current)
+      }
+      return current !== 'none' && !available ? 'none' : current
+    }
+    codecChoice.geometry = setOption(codecGeometry, dracoOn === true, codecChoice.geometry) as 'none' | 'draco'
+    codecChoice.texture = setOption(codecTexture, webpOn === true, codecChoice.texture) as 'none' | 'webp'
+  }
+
+  function setExportCodecBusy(busy: boolean): void {
+    exportCodecBusy = busy
+    for (const btn of Array.from(exportCodecs.querySelectorAll('button'))) (btn as HTMLButtonElement).disabled = busy
+    btnExportDownload.disabled = busy
+    btnExportPublish.disabled = busy || !reviewedExport
+  }
+
+  function refreshCodecOffering(): void {
+    if (dracoOn === null) void dracoEncoderReady().then((ok) => { dracoOn = ok; syncCodecButtons() })
+    if (webpOn === null) void webpEncoderSupported().then((ok) => { webpOn = ok; syncCodecButtons() })
+    syncCodecButtons()
+  }
+
+  /** Re-derive the reviewed export from the PRISTINE bytes with the current
+   * codec choice. The result is re-validated before it can be published. */
+  async function applyCodecs(): Promise<void> {
+    if (!pristineExport) return
+    const token = ++exportCodecToken
+    const fallback = (): void => {
+      reviewedExport = { blob: pristineExport!.blob, filename: pristineExport!.filename, sourceFormat: pristineExport!.sourceFormat }
+      renderExportInfo(pristineExport!.info)
+      exportState.textContent = 'validated · exact bytes'
+      exportCodecNote.textContent = codecNote(null)
+      btnExportPublish.disabled = false
+    }
+    const wantDraco = codecChoice.geometry === 'draco' && dracoOn === true
+    const wantWebp = codecChoice.texture === 'webp' && webpOn === true
+    if (!wantDraco && !wantWebp) { fallback(); return }
+    setExportCodecBusy(true)
+    exportState.textContent = 'encoding…'
+    exportCodecNote.textContent = ''
+    try {
+      const src = new Uint8Array(await pristineExport.blob.arrayBuffer())
+      const { bytes: out, report } = await compressGLB(src, {
+        draco: wantDraco ? dracoCodec : undefined,
+        webp: wantWebp ? webpCodec : undefined,
+      })
+      if (token !== exportCodecToken) return
+      if (report.keptOriginal) {
+        // Nothing shrank: the review keeps the exact serializer bytes.
+        fallback()
+        exportCodecNote.textContent = codecNote(report)
+        return
+      }
+      const verdict = validateGLB(out)
+      if (!verdict.ok) throw new Error(verdict.reason)
+      reviewedExport = { blob: new Blob([out.buffer as ArrayBuffer], { type: 'model/gltf-binary' }), filename: pristineExport.filename, sourceFormat: pristineExport.sourceFormat }
+      const info = inspectGLB(out)
+      renderExportInfo(info)
+      exportState.textContent = 'validated · exact bytes'
+      exportCodecNote.textContent = codecNote(report, pristineExport.info, info)
+      btnExportPublish.disabled = false
+      setStudioStatus(`${formatSize(info.bytes)} · reviewed`, 'ok')
+    } catch (err) {
+      if (token !== exportCodecToken) return
+      fallback()
+      exportState.textContent = 'codec failed · original kept'
+      exportCodecNote.textContent = err instanceof Error ? err.message : 'codec failed'
+    } finally {
+      if (token === exportCodecToken) setExportCodecBusy(false)
+    }
+  }
+
   async function openExportReview(): Promise<void> {
     if (publishing || !studio.hasContent()) return
     try {
@@ -566,20 +686,21 @@ async function boot(): Promise<void> {
       const bytes = new Uint8Array(await content.blob.arrayBuffer())
       const report = validateGLB(bytes)
       if (!report.ok) throw new Error(report.reason)
-      reviewedExport = { ...content, blob: new Blob([bytes.buffer], { type: 'model/gltf-binary' }) }
+      const blob = new Blob([bytes.buffer as ArrayBuffer], { type: 'model/gltf-binary' })
       const info = inspectGLB(bytes)
-      exportSummary.innerHTML = `<span>file size</span><b>${formatSize(info.bytes)} / ${formatSize(LIMITS.modelBytesHard)}</b><span>scene</span><b>${info.meshes} meshes · ${formatCount(info.triangles)} triangles</b><span>content</span><b>${info.textures} textures · ${info.animations} animations</b>`
-      const pct = Math.min(100, (info.bytes / LIMITS.modelBytesHard) * 100)
-      exportMeter.style.width = `${pct.toFixed(1)}%`
-      exportMeter.style.background = sizeHeatColor(info.bytes)
-      exportBreakdownEl.textContent = exportBreakdown(info)
-      exportExtensions.textContent = info.extensions.length ? `extensions: ${info.extensions.join(', ')}` : 'extensions: none'
-      exportState.textContent = report.ok ? 'validated · exact bytes' : 'validation failed'
-      btnExportPublish.disabled = !report.ok
+      pristineExport = { blob, filename: content.filename, sourceFormat: content.sourceFormat, info }
+      reviewedExport = { blob, filename: content.filename, sourceFormat: content.sourceFormat }
+      renderExportInfo(info)
+      exportState.textContent = 'validated · exact bytes'
+      exportCodecNote.textContent = ''
+      btnExportPublish.disabled = false
       exportReview.hidden = false
+      refreshCodecOffering()
+      void applyCodecs()
       setStudioStatus(`${formatSize(info.bytes)} · reviewed`, 'ok')
     } catch (err) {
       reviewedExport = null
+      pristineExport = null
       setStudioStatus('')
       errorSheet.show(ERRORS.STUDIO_PUBLISH(err instanceof Error ? err.message : 'export failed'))
     } finally {
@@ -601,10 +722,35 @@ async function boot(): Promise<void> {
   }
 
   btnStudioImport.addEventListener('click', () => { if (!publishing) void pickStudioFile() })
-  btnStudioPublish.addEventListener('click', () => void openExportReview())
+  // While publishing the button is relabeled "cancel" — that click must
+  // ABORT, not open a review (the review flow had swallowed it and a
+  // mid-upload cancel did nothing).
+  btnStudioPublish.addEventListener('click', () => {
+    if (publishing) { cancelPublish(); return }
+    void openExportReview()
+  })
   $('btn-export-close').addEventListener('click', closeExportReview)
   $('btn-export-download').addEventListener('click', downloadReviewedExport)
   btnExportPublish.addEventListener('click', () => { if (reviewedExport) { closeExportReview(); void publishStudio(reviewedExport) } })
+  const bindCodecGroup = (group: HTMLElement, apply: (value: string) => void): void => {
+    group.addEventListener('click', (e) => {
+      const btn = (e.target as HTMLElement).closest('button[data-v]') as HTMLButtonElement | null
+      if (!btn || exportCodecBusy || btn.hidden) return
+      apply(btn.dataset.v ?? 'none')
+    })
+  }
+  bindCodecGroup(codecGeometry, (value) => {
+    if (value === codecChoice.geometry || (value !== 'none' && value !== 'draco')) return
+    codecChoice.geometry = value
+    syncCodecButtons()
+    void applyCodecs()
+  })
+  bindCodecGroup(codecTexture, (value) => {
+    if (value === codecChoice.texture || (value !== 'none' && value !== 'webp')) return
+    codecChoice.texture = value
+    syncCodecButtons()
+    void applyCodecs()
+  })
 
   // Remove every studio addition (text, paint, cameras, mesh moves): the
   // studio reloads the model from its pristine imported bytes, so publishing
@@ -698,6 +844,8 @@ async function boot(): Promise<void> {
     // Any edit makes a previously reviewed export stale. Keep the old blob
     // private; it can no longer be published from the UI.
     reviewedExport = null
+    pristineExport = null
+    exportCodecToken++ // an in-flight codec pass may not land anymore
     if (!exportReview.hidden) closeExportReview()
     scheduleStudioPreview()
   }
