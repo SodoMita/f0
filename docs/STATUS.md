@@ -789,6 +789,11 @@ move it to **Done** with a commit reference. One agent per area.
   pushes to `main`.
 ## In progress
 
+- [ ] **Runtime model thumbnails + square/triangle paint brushes** — claimed by
+      agent arena, 2026-08-21. Paint stamp buttons and the Shapes library use
+      thumbnails rendered from their real meshes at runtime, not glyph/SVG
+      approximations.
+
 - [ ] **Per-card play/pause (animation + sound) + autoplay setting** — claimed by
       agent arena, 2026-08-20. SPEC AMENDMENT 69. Board cards and thread nodes
       get a ▶/⏸ button (Babylon mesh, bottom-left corner, opposite the reply
