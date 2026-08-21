@@ -155,6 +155,11 @@ export class Viewer {
     this.backdrop.scaling.set(hh * 2 * aspect, hh * 2, 1)
   }
 
+  /** Test hook (scripts/viewer.mjs): the box orbit/framing use. */
+  modelBoxForTest(): { min: Vector3; max: Vector3; center: Vector3; radius: number } | null {
+    return this.modelBox
+  }
+
   /** Settings → Camera. FOV is degrees; clips are world units. */
   setCameraSettings(o: { fov: number; near: number; far: number; inertia: number; invertY: boolean }): void {
     this.camPrefs = { ...o }
@@ -452,8 +457,24 @@ export class Viewer {
     this.applyCamera(next >= n ? -1 : next)
   }
 
+  /**
+   * Kill the orbit's residual glide. Under the demand-driven loop a drag's
+   * inertia only decays WHILE frames render — if rendering stops mid-glide
+   * (static model, paused animation, idle), the offsets FREEZE and the next
+   * render trigger (F, a camera dot, a settings kick) applies them, dragging
+   * the freshly re-framed pose off (AMENDMENT 84).
+   */
+  private stopOrbitInertia(): void {
+    this.orbit.inertialAlphaOffset = 0
+    this.orbit.inertialBetaOffset = 0
+    this.orbit.inertialRadiusOffset = 0
+    this.orbit.inertialPanningX = 0
+    this.orbit.inertialPanningY = 0
+  }
+
   /** Auto-fit orbit from the model's dominant face (the poster's side). */
   private fitOrbit(): void {
+    this.stopOrbitInertia()
     const box = this.modelBox
     const container = this.container
     if (!box || !container) return
@@ -473,19 +494,34 @@ export class Viewer {
   }
 
   /**
-   * Seed the orbit from an authored camera: the author's world position as
-   * the camera position, the author's fov, model center as the orbit pivot —
-   * the authored framing, fully navigable (AMENDMENT 84).
+   * Seed the orbit from an authored camera (AMENDMENT 84): the author's
+   * world position as the camera position, the author's fov, and the orbit
+   * pivot placed ON the authored forward ray — the authored composition is
+   * position + direction + fov, and any pivot distance along that ray keeps
+   * the identical view (we use the distance to the model center so
+   * orbiting still rotates around the model when it is in view).
    */
   private seedFromAuthored(cam: Camera): void {
+    this.stopOrbitInertia()
     const box = this.modelBox!
     const wm = cam.getWorldMatrix()
     const pos = new Vector3(wm.m[12], wm.m[13], wm.m[14])
-    let dist = Vector3.Distance(pos, box.center)
-    let target: Vector3 = box.center
-    if (dist < 0.05) {
-      // Parked at the model's center: pivot 0.5 units along the dominant
-      // face so the orbit has a well-defined axis (zero radius = NaN angles).
+    // Babylon cameras look down local +Z (left-handed system).
+    const fwd = Vector3.TransformNormal(new Vector3(0, 0, 1), wm)
+    const toCenter = Vector3.Distance(pos, box.center)
+    let target: Vector3
+    let dist: number
+    if (fwd.lengthSquared() > 0.5) {
+      fwd.normalize()
+      dist = Math.max(0.5, toCenter)
+      target = pos.add(fwd.scale(dist)) // NOT addInPlace: pos is the camera position
+    } else if (toCenter >= 0.05) {
+      // Degenerate world matrix: look at the model center instead.
+      dist = toCenter
+      target = box.center
+    } else {
+      // Parked at the model's center with a degenerate matrix: pivot 0.5
+      // units along the dominant face (zero radius = NaN angles).
       target = box.center.add(dominantFacing(this.container!).scale(0.5))
       dist = 0.5
     }

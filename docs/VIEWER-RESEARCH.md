@@ -1,6 +1,15 @@
 # VIEWER RESEARCH — what is good, missing, wrong, and bad in the viewer
 (2026-08-21, agent arena)
 
+**Status (2026-08-21, AMENDMENT 84):** the essential fixes are implemented —
+navigable authored cameras (orbit seeded from the author's pose), adaptive
+near plane (no close-up slice), F/fit re-frame (incl. residual-inertia kill),
+speed-0 fix, model audio in the viewer (S key / sound button, hand-off
+transfer), autoplay/reduced-motion respect, `loadFromContainer` honest
+failure, "N / M" position. Guard: `scripts/viewer.mjs`. Deferred by decision:
+metadata/label changes, camera tweens, auto-rotate, share, screenshot, and
+all of §3.2/§3.3/§3.4 beyond the above.
+
 Research task: compare FORM/0's single-model viewer against Sketchfab's
 3D/VR viewer, Babylon's official viewers (playground samples + the new
 `@babylonjs/viewer` v2), Google `model-viewer`, and general 3D-web-viewer
