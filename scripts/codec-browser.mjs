@@ -75,7 +75,7 @@ if (dracoVisible) {
   check('draco shows savings note', /draco .*→/.test(note), note)
   check('draco extension is declared', extensions.includes('KHR_draco_mesh_compression'), extensions)
 
-  // Lossy preview (AMENDMENT 83): the review renders the exact compressed
+  // Lossy preview (AMENDMENT 85): the review renders the exact compressed
   // bytes through the card pipeline next to the raw export.
   await page.waitForFunction(() => /identical pixels|mean pixel difference|unavailable/.test(document.getElementById('export-preview-diff').textContent), { timeout: 60000 })
   const preview = await page.evaluate(() => {

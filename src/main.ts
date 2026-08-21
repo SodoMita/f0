@@ -190,7 +190,7 @@ async function boot(): Promise<void> {
   // Choices/settings clicked while a derive is running are queued (same
   // pattern as the studio preview) — a busy pass must never swallow a click.
   let exportCodecQueued = false
-  // Fine settings (SPEC AMENDMENT 83): both codecs are LOSSY, so the review
+  // Fine settings (SPEC AMENDMENT 85): both codecs are LOSSY, so the review
   // renders the compressed bytes next to the raw export and exposes quality.
   const DRACO_PRESETS = {
     high: { POSITION: 14, NORMAL: 10, TANGENT: 12, TEX_COORD: 12, COLOR: 8, GENERIC: 12 },
@@ -672,7 +672,7 @@ async function boot(): Promise<void> {
     return sum / (n / 4) / 3
   }
 
-  /** The lossy preview (AMENDMENT 83): render the exact reviewed bytes through
+  /** The lossy preview (AMENDMENT 85): render the exact reviewed bytes through
    * the same card pipeline the board uses, next to the raw export. Tokenled:
    * a slow render from an older codec pass must never overwrite newer UI. */
   async function renderExportPreview(token: number, blob: Blob, label: string): Promise<void> {

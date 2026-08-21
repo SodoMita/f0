@@ -5,13 +5,13 @@ move it to **Done** with a commit reference. One agent per area.
 
 ## Done
 - [x] **Export codec lossy preview + fine settings** (agent arena, 2026-08-21,
-      SPEC AMENDMENT 83): the review renders the exact compressed bytes
+      SPEC AMENDMENT 85): the review renders the exact compressed bytes
       through the card pipeline beside the raw export with a pixel-difference
       readout, and exposes `geometry bits` presets (14/12/10) + a `texture
       quality` slider (50–100%). Derives queue instead of swallowing clicks.
       Guards extended: check:codec (37 units) + check:codec-browser.
 - [x] **Studio GLB export review, download, and compression** (agents arena,
-      2026-08-21, SPEC AMENDMENT 82): the review is a frozen, validated
+      2026-08-21, SPEC AMENDMENT 84): the review is a frozen, validated
       snapshot — exact bytes for download AND publish, invalidated by any
       studio edit. Codec encoders are now real: geometry `draco`
       (KHR_draco_mesh_compression via Babylon's bundled encoder wasm, probe-
@@ -26,7 +26,7 @@ move it to **Done** with a commit reference. One agent per area.
       yet decoded — one whenReadyAsync before the render loop). Guards:
       `bun scripts/codec-unit.mjs`, `node scripts/codec-browser.mjs`
       (rig), `scripts/verify-publish.mjs` repaired to the AMENDMENT-66/69
-      studio + review flow (12/14 green). Standalone +570 KB (encoder
+      studio + review flow (fully green after main's poster frustum fix). Standalone +570 KB (encoder
       inlined).
 - [x] **3D view bugs from arena/01a02366-f0, kept short** (agent arena, 2026-08-21,
       SPEC AMENDMENT 81): empty `__root__` meshes no longer stretch every fit
@@ -862,16 +862,6 @@ move it to **Done** with a commit reference. One agent per area.
       + Amanatides–Woo DDA. Not a voxel editor.
 
 ## Next (priority order — pick one and claim it)
-
-- [ ] **Authored-camera poster shows the wrong cube** (found in review,
-      2026-08-21, see AMENDMENT 82 tail): `verify-publish.mjs`'s
-      "authored camera poster is red-only" check renders red=5.7% /
-      green=94.3% for rig model `a.glb` — reproducible at the previous tip
-      with the codec/poster edits reverted, so it predates them.
-      `cameraFramesBox` (overlap semantics) accepts the camera and the
-      render still shows the big green offset cube; suspect the
-      AMENDMENT-81 worldBox/frustum interplay or the glTF camera aspect
-      handling. `scripts/verify-publish.mjs` carries the failing check.
 
 **Editor core (the product's primary use cases — do these first):**
 

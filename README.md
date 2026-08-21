@@ -26,7 +26,7 @@ and optional embedded audio.
   (T); prev/next. **VR** (spec AMENDMENT 41): an enter-VR action puts the
   model in 1:1 WebXR immersive space with 6-DOF head tracking (same canvas /
   engine); hidden when unsupported.
-- **Studio → export review** (spec AMENDMENT 82): publishing first freezes an
+- **Studio → export review** (spec AMENDMENT 84): publishing first freezes an
   exact, validated GLB snapshot with its size/budget breakdown; download and
   publish ship those exact bytes. The review offers local codec encoders that
   appear only when they provably work — geometry **draco** and texture
@@ -295,6 +295,7 @@ mismatch any page background.
 ## Run (Bun)
 ```bash
 bun install
+bun run check            # the gate: static + unit + browser (offline rig)
 bun run dev              # http://localhost:5173
 bun run build            # typecheck + normal build → release/
 bun run build:standalone # ONE .html → form-zero-standalone.html

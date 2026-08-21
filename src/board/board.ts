@@ -45,6 +45,9 @@ interface CardSlot extends CardFade {
   h: number
   poster: Texture | null
   live: RenderTargetTexture | null
+  /** Live RTT that arrived while a crossfade (plate->poster) was in flight;
+   *  bound once the current fade completes so it never snaps the fade. */
+  pendingLive: RenderTargetTexture | null
   requested: boolean
   row: Row | null
   failed: boolean
@@ -219,6 +222,15 @@ export class Board {
         slot.live = rtt
         slot.spinner.setEnabled(false)
         this.invalidate()
+        // A fast (cached) RTT can arrive while the plate->poster crossfade is
+        // still ramping. crossfadeTo() would finishFade() that fade, snapping
+        // opacity to 1 and cutting the poster fade-in short (AMENDMENT 83).
+        // Defer the live crossfade until the current fade completes.
+        if (slot.fadeStart > 0) {
+          slot.pendingLive = rtt
+          this.positionExtras(slot)
+          return
+        }
         this.crossfadeTo(slot, rtt, '#FFFFFF', 'rtt')
         this.positionExtras(slot)
       },
@@ -226,6 +238,7 @@ export class Board {
         const slot = this.cards.find((c) => c.meta?.eventId === postId)
         if (!slot || !slot.live) return
         slot.live = null
+        slot.pendingLive = null
         this.showPoster(slot)
         this.invalidate()
         this.positionExtras(slot)
@@ -523,7 +536,7 @@ export class Board {
       const { mesh: play, mat: playMat } = makeQuad(this.scene, `play-${i}`, { z: -0.06, group: OVERLAY_GROUP, pickable: true })
       bindDyn(playMat, this.playTexOff)
       const slot: CardSlot = {
-        mesh, mat, w: CARD_W, h: CARD_H_REF, poster: null, live: null, requested: false, row: null, failed: false, spinSince: 0,
+        mesh, mat, w: CARD_W, h: CARD_H_REF, poster: null, live: null, pendingLive: null, requested: false, row: null, failed: false, spinSince: 0,
         shadow, shadowMat, spinner, spinnerMat,
         badge, badgeMat, badgeTex, replyCount: 0, badgeDrawn: -1, footprint: null,
         play, playMat, ...fadeInit(),
@@ -992,7 +1005,17 @@ export class Board {
     this.previewPool.tick(this.visiblePosts)
     this.pool3d.tick(this.visiblePosts)
     const now = performance.now()
-    for (const slot of this.cards) tickFade(slot, slot.mat, now)
+    for (const slot of this.cards) {
+      if (tickFade(slot, slot.mat, now)) continue
+      // The fade finished: bind any live RTT that was deferred while it ran
+      // (onLive during a plate->poster crossfade — see the watch handler).
+      if (slot.pendingLive) {
+        const rtt = slot.pendingLive
+        slot.pendingLive = null
+        this.crossfadeTo(slot, rtt, '#FFFFFF', 'rtt')
+        this.positionExtras(slot)
+      }
+    }
     // spin the loading rings (stepped, like the HTML one)
     const step = (Math.PI * 2) / 12
     const phase = Math.floor(performance.now() / SPIN_STEP_MS) * step

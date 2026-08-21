@@ -1,4 +1,4 @@
-// Codec units (SPEC AMENDMENT 82) — GLB container rewrite + Draco encode +
+// Codec units (SPEC AMENDMENT 84) — GLB container rewrite + Draco encode +
 // WebP texture rewrite, all runnable under bun with the REAL Draco wasm
 // (jsModule + wasmBinary injected the same way the app injects URLs):
 //   bun scripts/codec-unit.mjs
@@ -348,7 +348,7 @@ const sortedDelta = (a, b) => { const x = Float64Array.from(a).sort(); const y =
   }
 }
 
-// ---- draco fine settings (AMENDMENT 83) ----------------------------------
+// ---- draco fine settings (AMENDMENT 85) ----------------------------------
 {
   const bytes = makeModel({ grid: 96 })
   let captured = null

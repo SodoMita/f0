@@ -3,7 +3,7 @@
  * (geometry) and EXT_texture_webp (textures) to an ALREADY VALIDATED export,
  * producing a smaller self-contained GLB that never grew past the original.
  *
- * Design constraints (SPEC AMENDMENT 82):
+ * Design constraints (SPEC AMENDMENT 84):
  * - Encoders are INJECTED (`DracoCodec` / `TextureCodec`), so the rewrite is
  *   unit-testable under bun without browser codecs, and the app only offers a
  *   control when its encoder actually initialised ("never advertise a
