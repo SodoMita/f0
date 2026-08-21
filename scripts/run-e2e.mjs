@@ -14,7 +14,7 @@
 //   SUITES="smoke features offline-verify" bun scripts/run-e2e.mjs
 //   TARGET_URL=http://localhost:4173/ bun scripts/run-e2e.mjs
 import { spawn, execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { request as httpRequest } from 'node:http'
@@ -63,10 +63,16 @@ function killAll() {
 }
 
 // ---------------------------------------------------------- health probes
+// The rig serves https://localhost:8443 with a self-signed cert we generate in
+// ensureCerts(). Validate against that exact cert (as the trusted CA) instead
+// of disabling TLS verification, so the probe checks the rig really is the
+// server we booted — not just that something answers on the port.
 function probe(url) {
   return new Promise((resolve) => {
+    const opts = { timeout: 3000 }
+    if (url.startsWith('https:')) opts.ca = readFileSync(CERT)
     const req = (url.startsWith('https:') ? httpsRequest : httpRequest)(
-      url, { rejectUnauthorized: false, timeout: 3000 },
+      url, opts,
       (res) => { res.resume(); resolve(res.statusCode === 200) },
     )
     req.on('error', () => resolve(false))
