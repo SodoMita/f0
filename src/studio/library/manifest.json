@@ -2,117 +2,181 @@
   {
     "id": "smile",
     "group": "face",
-    "dim": "2d"
+    "dim": "3d",
+    "front": true
   },
   {
     "id": "grin",
     "group": "face",
-    "dim": "2d"
+    "dim": "3d",
+    "front": true
   },
   {
     "id": "sad",
     "group": "face",
-    "dim": "2d"
+    "dim": "3d",
+    "front": true
   },
   {
     "id": "angry",
     "group": "face",
-    "dim": "2d"
+    "dim": "3d",
+    "front": true
   },
   {
     "id": "wow",
     "group": "face",
-    "dim": "2d"
+    "dim": "3d",
+    "front": true
   },
   {
     "id": "wink",
     "group": "face",
-    "dim": "2d"
+    "dim": "3d",
+    "front": true
   },
   {
     "id": "meh",
     "group": "face",
-    "dim": "2d"
+    "dim": "3d",
+    "front": true
   },
   {
     "id": "love",
     "group": "face",
-    "dim": "2d"
+    "dim": "3d",
+    "front": true
   },
   {
     "id": "dead",
     "group": "face",
-    "dim": "2d"
+    "dim": "3d",
+    "front": true
   },
   {
     "id": "cool",
     "group": "face",
-    "dim": "2d"
+    "dim": "3d",
+    "front": true
+  },
+  {
+    "id": "invader",
+    "group": "voxel",
+    "dim": "3d",
+    "front": true
+  },
+  {
+    "id": "ghost",
+    "group": "voxel",
+    "dim": "3d",
+    "front": true
+  },
+  {
+    "id": "creep",
+    "group": "voxel",
+    "dim": "3d",
+    "front": true
+  },
+  {
+    "id": "grassblock",
+    "group": "voxel",
+    "dim": "3d"
+  },
+  {
+    "id": "snake",
+    "group": "voxel",
+    "dim": "3d",
+    "front": true
+  },
+  {
+    "id": "sword",
+    "group": "voxel",
+    "dim": "3d",
+    "front": true
+  },
+  {
+    "id": "pixheart",
+    "group": "voxel",
+    "dim": "3d",
+    "front": true
   },
   {
     "id": "heart",
     "group": "react",
-    "dim": "2d"
+    "dim": "2d",
+    "front": true
   },
   {
     "id": "star",
     "group": "react",
-    "dim": "2d"
+    "dim": "2d",
+    "front": true
   },
   {
     "id": "plus",
     "group": "react",
-    "dim": "2d"
+    "dim": "2d",
+    "front": true
   },
   {
     "id": "minus",
     "group": "react",
-    "dim": "2d"
+    "dim": "2d",
+    "front": true
   },
   {
     "id": "check",
     "group": "react",
-    "dim": "2d"
+    "dim": "2d",
+    "front": true
   },
   {
     "id": "xmark",
     "group": "react",
-    "dim": "2d"
+    "dim": "2d",
+    "front": true
   },
   {
     "id": "question",
     "group": "react",
-    "dim": "2d"
+    "dim": "2d",
+    "front": true
   },
   {
     "id": "bang",
     "group": "react",
-    "dim": "2d"
+    "dim": "2d",
+    "front": true
   },
   {
     "id": "thumbup",
     "group": "react",
-    "dim": "2d"
+    "dim": "2d",
+    "front": true
   },
   {
     "id": "thumbdown",
     "group": "react",
-    "dim": "2d"
+    "dim": "2d",
+    "front": true
   },
   {
     "id": "spark",
     "group": "react",
-    "dim": "2d"
+    "dim": "2d",
+    "front": true
   },
   {
     "id": "fire",
     "group": "react",
-    "dim": "2d"
+    "dim": "2d",
+    "front": true
   },
   {
     "id": "arrow",
     "group": "react",
-    "dim": "2d"
+    "dim": "2d",
+    "front": true
   },
   {
     "id": "ok",
@@ -152,7 +216,8 @@
   {
     "id": "eye",
     "group": "status",
-    "dim": "2d"
+    "dim": "2d",
+    "front": true
   },
   {
     "id": "bell",
@@ -217,7 +282,8 @@
   {
     "id": "plane",
     "group": "shape",
-    "dim": "2d"
+    "dim": "2d",
+    "front": true
   },
   {
     "id": "house",
@@ -252,17 +318,20 @@
   {
     "id": "sun",
     "group": "object",
-    "dim": "2d"
+    "dim": "2d",
+    "front": true
   },
   {
     "id": "moon",
     "group": "object",
-    "dim": "2d"
+    "dim": "2d",
+    "front": true
   },
   {
     "id": "speech",
     "group": "object",
-    "dim": "2d"
+    "dim": "2d",
+    "front": true
   },
   {
     "id": "arrow3d",
@@ -272,11 +341,13 @@
   {
     "id": "house",
     "group": "object",
-    "dim": "2d"
+    "dim": "2d",
+    "front": true
   },
   {
     "id": "lock",
     "group": "status",
-    "dim": "2d"
+    "dim": "2d",
+    "front": true
   }
 ]

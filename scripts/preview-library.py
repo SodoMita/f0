@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 import math
 import os
@@ -18,8 +19,12 @@ OUT = os.path.join(ROOT, "shots")
 
 
 def load_glb(path: str):
+    """Read a library GLB back: positions, normals, palette colours, faces.
+
+    Colour comes from the embedded palette texture now (TEXCOORD_0 -> swatch),
+    so this mirrors what a real renderer does with NEAREST sampling.
+    """
     data = open(path, "rb").read()
-    dv = memoryview(data)
     off = 12
     json_bytes = None
     bin_off = bin_len = 0
@@ -42,18 +47,36 @@ def load_glb(path: str):
         v = views[a["bufferView"]]
         start = (v.get("byteOffset") or 0) + (a.get("byteOffset") or 0)
         n = a["count"]
+        stride = a.get("byteStride") or v.get("byteStride")
         if a["componentType"] == 5126:
-            arr = np.frombuffer(blob, np.float32, n * ncomp, start).reshape(n, ncomp).copy()
-        else:
-            arr = np.frombuffer(blob, np.uint16, n, start).astype(np.int32).copy()
-        return arr
+            return np.frombuffer(blob, np.float32, n * ncomp, start).reshape(n, ncomp).copy()
+        if a["componentType"] == 5121 and a["type"] == "VEC2":
+            raw = np.frombuffer(blob, np.uint8, n * (stride or 2), start).reshape(n, stride or 2)
+            return raw[:, :2].astype(np.float64) / 255.0
+        if a["componentType"] == 5120:
+            raw = np.frombuffer(blob, np.int8, n * (stride or 3), start).reshape(n, stride or 3)
+            return raw[:, :3].astype(np.float64) / 127.0
+        return np.frombuffer(blob, np.uint16, n, start).astype(np.int32).copy()
 
     prim = gltf["meshes"][0]["primitives"][0]
     v = take(prim["attributes"]["POSITION"], 3)
     n = take(prim["attributes"]["NORMAL"], 3)
-    c = take(prim["attributes"]["COLOR_0"], 3)
+    uv = take(prim["attributes"]["TEXCOORD_0"], 2)
     f = take(prim["indices"], 1).reshape(-1, 3)
+    # sample the palette exactly like a NEAREST sampler would
+    img = np.asarray(Image.open(io.BytesIO(_image_bytes(gltf, blob))).convert("RGB"), np.float64) / 255.0
+    h, w, _ = img.shape
+    px = np.clip((uv[:, 0] * w).astype(int), 0, w - 1)
+    py = np.clip((uv[:, 1] * h).astype(int), 0, h - 1)
+    c = img[py, px]
     return v, n, c, f
+
+
+def _image_bytes(gltf, blob) -> bytes:
+    image = gltf["images"][0]
+    view = gltf["bufferViews"][image["bufferView"]]
+    start = view.get("byteOffset") or 0
+    return blob[start : start + view["byteLength"]]
 
 
 def look_at(eye, target):
@@ -97,7 +120,9 @@ def render(v, nrm, col, faces, w=160, h=120, front=False):
     img[:] = (0.16, 0.16, 0.18) * (1 - yy) + (0.08, 0.08, 0.09) * yy
     depth = np.full((h, w), 1e9)
 
-    for ia, ib, ic in faces:
+    # Front faces are CCW in world space; the screen y-flip makes them
+    # clockwise, so iterate reversed and keep positive-area triangles.
+    for ia, ib, ic in faces[:, ::-1]:
         if z[ia] >= -0.02 or z[ib] >= -0.02 or z[ic] >= -0.02:
             continue
         x0, y0 = xs[ia], ys[ia]
@@ -145,7 +170,7 @@ def main():
     tiles = []
     for item in items:
         v, n, c, f = load_glb(os.path.join(GLB_DIR, item["id"] + ".glb"))
-        tiles.append(Image.fromarray(render(v, n, c, f, front=item["dim"] == "2d"), "RGB"))
+        tiles.append(Image.fromarray(render(v, n, c, f, front=bool(item.get("front"))), "RGB"))
     cols = 9
     rows = math.ceil(len(tiles) / cols)
     tw, th = tiles[0].size
