@@ -815,6 +815,13 @@ move it to **Done** with a commit reference. One agent per area.
   pushes to `main`.
 ## In progress
 
+- [ ] **Studio GLB export review, download, and compression** — claimed by agent
+      arena, 2026-08-21. Add an immutable pre-publish export snapshot that can
+      be inspected by exact size/budget breakdown, downloaded, then uploaded
+      without re-exporting. Include functional geometry and texture codec
+      choices only where browser-bundled encoders create validated,
+      self-contained GLBs; never advertise a non-working codec control.
+
 - [ ] **Per-card play/pause (animation + sound) + autoplay setting** — claimed by
       agent arena, 2026-08-20. SPEC AMENDMENT 69. Board cards and thread nodes
       get a ▶/⏸ button (Babylon mesh, bottom-left corner, opposite the reply
