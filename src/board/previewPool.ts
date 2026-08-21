@@ -187,8 +187,10 @@ export class PreviewPool {
       slot.rtt = new RenderTargetTexture(`slot-${slot.index}`, { width: w, height: h }, this.stage)
       slot.rtt.renderTargetOptions.generateDepthBuffer = true
       slot.rtt.renderTargetOptions.generateMipMaps = false
+      slot.rtt.samples = 1
       slot.rtt.wrapU = Texture.CLAMP_ADDRESSMODE
       slot.rtt.wrapV = Texture.CLAMP_ADDRESSMODE
+      slot.rtt.hasAlpha = true
       // Transparent background: see comment in makeSlot().
       slot.rtt.clearColor = new Color4(0, 0, 0, 0)
       // Card material still holds the OLD RTT handle; tell the board to swap
@@ -539,8 +541,10 @@ export class PreviewPool {
     const rtt = new RenderTargetTexture(`slot-${index}`, { width: this.opts.rttWidth, height: this.opts.rttHeight }, this.stage)
     rtt.renderTargetOptions.generateDepthBuffer = true
     rtt.renderTargetOptions.generateMipMaps = false
+    rtt.samples = 1
     rtt.wrapU = Texture.CLAMP_ADDRESSMODE
     rtt.wrapV = Texture.CLAMP_ADDRESSMODE
+    rtt.hasAlpha = true
     // Transparent background: the card shows the board backdrop through the
     // model, so previews never sit in an opaque rectangle that mismatches the
     // page background. RGB keeps the poster blank-check comparable.
