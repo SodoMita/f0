@@ -118,6 +118,14 @@ html, body {
 }
 #topbar .spacer { flex: 1; }
 
+/* Studio is its own view: board-only chrome (search / shuffle / 3D / create)
+   must not stay clickable on top of the editor. Home / network / settings
+   stay — home is how you leave besides the rail X. */
+body[data-mode="studio"] #btn-search,
+body[data-mode="studio"] #btn-shuffle,
+body[data-mode="studio"] #btn-3d,
+body[data-mode="studio"] #btn-add { display: none; }
+
 /* thread map zoom cluster — shown only while the thread view is active */
 #thread-zoom {
   display: flex; align-items: center; gap: 6px;

@@ -4,6 +4,25 @@ Claim a task by moving it to **In progress** with your name/date, push, then
 move it to **Done** with a commit reference. One agent per area.
 
 ## Done
+- [x] **Studio left the board clickable** (agent arena, 2026-08-21, SPEC
+      AMENDMENT 78): opening the studio left board-only topbar controls
+      (search / shuffle / 3D / create) clickable over the editor, a live
+      feed event re-bound cards pickable, and the studio camera attached
+      at construction so it stole canvas pointers on the board. Now
+      `body[data-mode=studio]` hides those controls, `Board.setInteractive`
+      drops picking/drag while another view owns the canvas, and the
+      studio camera attaches only in attach()/detach(). Guard:
+      `node scripts/studio-open.mjs`.
+
+- [x] **2D thread-open freeze** (agent arena, 2026-08-21, SPEC AMENDMENT 77):
+      opening a reply tree with the cube toggle OFF hitch-froze after
+      Direct-3D. `sync3D` no longer runs in 2D; `fit()` still puts the whole
+      tree "in view", so posters now skip postage-stamp nodes (`nodeWorthTexture`),
+      bind `peekPoster` instantly, trickle two getPoster jobs per pass, and
+      cancel offscreen/tiny queued posters. Headless: 5-node tree opens in
+      <1s with Direct3DPool empty and no >1.5s main-thread stall. Guards:
+      `bun scripts/thread-open-unit.mjs` + `node scripts/thread-open.mjs`.
+
 - [x] **Cards/nodes can't paint over their own buttons** (agent arena,
       2026-08-20, SPEC AMENDMENT 76): a board card's reply badge / play
       button (and a thread node's reply pill / play button) could be drawn
@@ -15,6 +34,27 @@ move it to **Done** with a commit reference. One agent per area.
       cards/nodes/backdrop), so they are always on top. Guard:
       `scripts/overlay-order.mjs`.
 
+
+- [x] **Direct-3D cards bugfix** (agent arena, 2026-08-21, SPEC AMENDMENT 77,
+      absorbs PR #38): the AMENDMENT 75 toggle rendered real GLBs but shipped
+      several bugs. `release()` of a still-loading post now cancels (same as
+      PreviewPool) instead of dropping the id from `loading` — a parse can no
+      longer land on a recycled card; scroll-back un-cancels. A full pool is
+      not a failure: capacity misses retry every visibility pass instead of
+      latching `slot.failed` onto the poster forever. Eviction uses the
+      caller's fresh visible set (board now ticks the pool). Thread 3D loads
+      only near the viewport. Imported GLB lights/cameras are disabled and
+      the leftover board dummy hemi is too (no double-lit PBR, no neighbour
+      lighting). Models sit on the card plane (z=0, depth 0.4·min) with the
+      contact shadow at z=1.9 in 3D so they do not clip the backdrop; overlays
+      render in group 1; transparent cards disable depth write. A 2D poster
+      requested before the 3D toggle is dropped via a mode-generation counter
+      (no frozen poster over the live model). No-camera auto-fit uses the
+      inverse of the poster's LookAt camera (no arbitrary 180° flip). In-flight
+      loads land at the latest cell, not the request-time cell. FormEngine
+      calls `beginFrame()`/`endFrame()` so `getDeltaTime()` is real and
+      AnimationGroup.start() on 3D cards actually advances. Guard:
+      `bun scripts/direct3d-unit.mjs`; tsc + vite clean.
 
 - [x] **Viewer: multi-track animation rail** (agent arena, 2026-08-20):
       models with animations get a second rail above the toolbar — a track

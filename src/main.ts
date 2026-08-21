@@ -1363,6 +1363,10 @@ async function boot(): Promise<void> {
     }
     studioEl.hidden = next !== 'studio'
     threadZoom.hidden = next !== 'thread'
+    document.body.dataset.mode = next
+    board.setInteractive(next === 'board')
+    if (next !== 'board') setSearchOpen(false)
+    if (next === 'studio' || next === 'viewer') assets.setPaused(true)
     if (next === 'board') {
       engine.setActiveScene(board.scene)
       topbar.hidden = false

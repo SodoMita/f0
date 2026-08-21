@@ -143,6 +143,10 @@ export class Board {
   /** Direct-3D models rendered in the visible scene (no render-to-texture). */
   readonly pool3d: Direct3DPool
   private threeD = false
+  /** Bumped on every 2D↔3D switch; async poster jobs capture it so a poster
+   *  that resolves AFTER the toggle cannot paint over a direct 3D model
+   *  (the "duplicated static poster over the animated model" regression). */
+  private modeGen = 0
   private assets: AssetCache | null = null
   private halfH = 20
   private aspect = 1.6
@@ -183,6 +187,8 @@ export class Board {
   private rowIds = ''
   private prefetchScreens = 1
   private contactStrength = 0.55
+  /** False while another view owns the canvas — cards must not steal taps. */
+  private interactive = true
   /**
    * Autoplay (settings → Interface → "Autoplay animations"): when ON, live
    * previews start as cards come into view (the historical feed behaviour);
@@ -204,6 +210,10 @@ export class Board {
     this.scene.skipPointerMovePicking = true
     // nothing here casts shadows / needs collision or offline caching
     this.scene.blockMaterialDirtyMechanism = true
+    // Overlay group (badge / play / spinner): rendered AFTER group 0
+    // (cards + 3D models) so a post can never paint over its buttons.
+    // Don't clear color/depth or group 1 would wipe the board.
+    this.scene.setRenderingAutoClearDepthStencil(1, false)
 
     // Ortho camera parked at -Z (see core/gfx.flatCamera): world +X is screen
     // right and card planes are seen from the front, so nothing is mirrored.
@@ -462,6 +472,24 @@ export class Board {
   }
 
   /**
+   * The board shares the one canvas. While studio/viewer/thread is up the
+   * cards must not remain pickable (a live feed event would re-bind them
+   * isPickable=true) and a leftover drag must not keep scrolling.
+   */
+  setInteractive(on: boolean): void {
+    this.interactive = on
+    if (!on) {
+      this.dragging = false
+      this.velocity = 0
+      this.activePointers.clear()
+    }
+    for (const slot of this.cards) {
+      slot.mesh.isPickable = on && !!slot.meta && slot.mesh.isEnabled()
+      slot.play.isPickable = on && slot.play.isEnabled()
+    }
+  }
+
+  /**
    * Settings → Interface → "Autoplay animations". Turning autoplay OFF pauses
    * every auto-started (non-manual) live slot in place — the feed freezes on
    * its current frame, matching "everything opens paused". User-started plays
@@ -511,6 +539,7 @@ export class Board {
     if (this.threeD === on) return
     const was = this.threeD
     this.threeD = on
+    this.modeGen++ // invalidate any in-flight poster jobs from the old mode
     // Free the pipeline we are leaving (never both resident at once).
     if (was) this.pool3d.releaseAll()
     else this.previewPool.releaseAll()
@@ -580,6 +609,7 @@ export class Board {
       spinner.setEnabled(false)
       spinner.isPickable = false
       spinner.position.z = -0.02
+      spinner.renderingGroupId = 1
       const spinnerMat = makeCardMaterial(this.scene)
       spinner.material = spinnerMat
       setCardTexture(spinnerMat, this.spinnerTex)
@@ -857,7 +887,7 @@ export class Board {
     // also keeps the whole board rendering
     slot.spinner.setEnabled(false)
     slot.mesh.setEnabled(true)
-    slot.mesh.isPickable = true
+    slot.mesh.isPickable = this.interactive
     const size = cardSize(row.meta)
     slot.w = size.w
     slot.h = size.h
@@ -930,8 +960,10 @@ export class Board {
     // NB both directions: leaving this latched at true kept isAnimating()
     // true forever, i.e. the board never stopped drawing after a scroll.
     this.pendingSettle = !settled
-    // stop chewing on GLBs while the feed is moving
-    this.assets?.setPaused(!settled)
+    // stop chewing on GLBs while the feed is moving. Only while THIS view
+    // owns the canvas — otherwise a live event would unpause the queue
+    // behind the studio / thread.
+    if (this.interactive) this.assets?.setPaused(!settled)
     for (const slot of this.cards) {
       const row = slot.row
       if (!slot.meta || !row) continue
@@ -958,8 +990,13 @@ export class Board {
       if (slot.spinner.isEnabled() !== ring) { slot.spinner.setEnabled(ring); this.invalidate(2) }
 
       if (settled && inRange) {
-        if (!slot.requested) { slot.requested = true; this.drive(slot) }
         if (in3D) {
+          // Keep asking: a full pool used to mark the card `failed` on the
+          // first refusal and never retry, so only the first N cards ever
+          // went 3D. Capacity misses are transient — retry until live.
+          if (!modelLive && !this.pool3d.isLoading(id) && !this.pool3d.isRejected(id)) {
+            this.drive3D(slot)
+          }
           // Autoplay / play gating for the direct model — same semantics as
           // the RTT live previews: silent auto-start as cards arrive, a
           // user-started post keeps its sound, a user-paused post stays
@@ -970,6 +1007,9 @@ export class Board {
             if ((auto || manual) && !this.pool3d.isPlaying(id)) this.pool3d.play(id, manual)
             else if (!(auto || manual) && this.pool3d.isPlaying(id)) this.pool3d.pause(id)
           }
+        } else if (!slot.requested) {
+          slot.requested = true
+          this.drive2D(slot)
         } else if (slot.poster && !slot.live && this.visiblePosts.has(id)) {
           // Live slots are for what the user can SEE. Requesting for every
           // prefetched (offscreen) card made the pool evict one offscreen slot
@@ -1054,7 +1094,9 @@ export class Board {
       slot.shadow.scaling.set(w / 4, h / 4, 1)
       slot.shadow.position.x = slot.mesh.position.x + (fp.cx - 0.5) * slot.w
       slot.shadow.position.y = slot.mesh.position.y + (fp.bottom - 0.5) * slot.h - h * 0.18
-      slot.shadow.position.z = 0.5
+      // 3D mode: the model has real depth (z ∈ [-d/2, +d/2]), so the contact
+      // shadow must sit BEHIND it — just in front of the backdrop (z=2).
+      slot.shadow.position.z = this.threeD ? 1.9 : 0.5
     }
   }
 
@@ -1099,6 +1141,7 @@ export class Board {
       const ev = info.event as PointerEvent
       switch (info.type) {
         case PointerEventTypes.POINTERDOWN: {
+          if (!this.interactive) return
           if (ev.button !== 0) return
           this.activePointers.add(ev.pointerId)
           if (this.activePointers.size > 1) { this.dragging = false; return }
@@ -1163,6 +1206,7 @@ export class Board {
       this.invalidate(2)
     }
     this.previewPool.tick(this.visiblePosts)
+    this.pool3d.tick(this.visiblePosts)
     // Drive the 120ms card crossfades (SPEC CARD "Crossfade 120ms"): the
     // same clock ramps the plate opacity AND the tex->tex2 blend; when the
     // ramp completes the card adopts tex2 as its texture and resets.
@@ -1214,6 +1258,7 @@ export class Board {
   }
 
   private tapAt(x: number, y: number): void {
+    if (!this.interactive) return
     // Hit-test in the same CSS→world space as screenPosOf. scene.pick can
     // disagree with the ortho layout (hardware scale, jittered scroll),
     // which opened the post one row above the one that was pressed.
@@ -1302,16 +1347,19 @@ export class Board {
     this.drive2D(slot)
   }
 
-  /** The card cell for a slot's model, in board-scene world units. */
+  /** The card cell for a slot's model, in board-scene world units.
+   *  z = 0 is the card plane; the model is centred there and its depth is
+   *  capped so it never pokes behind the backdrop (z=2) or through the
+   *  contact shadow (z≈1.9 in 3D mode). Overlays stay on top via group 1. */
   private placeFor(slot: CardSlot): Place3D {
     const row = slot.row
     return {
       x: this.colX(row?.col ?? 0),
       y: row ? this.worldY(row) : 0,
-      z: 0.25,
+      z: 0,
       w: slot.w,
       h: slot.h,
-      depth: Math.min(slot.w, slot.h) * 0.6,
+      depth: Math.min(slot.w, slot.h) * 0.4,
     }
   }
 
@@ -1323,12 +1371,15 @@ export class Board {
     if (meta.hashFailed || assets.isHashFailed(meta.eventId)) return
     // Hide the placeholder plate; the model renders in its place.
     this.setOpacityNow(slot, 0)
-    const ok = this.pool3d.request(meta.eventId, this.placeFor(slot))
+    const ok = this.pool3d.request(meta.eventId, this.placeFor(slot), this.visiblePosts)
     if (!ok) {
-      // Pool refused (rejected / over capacity with nothing evictable):
-      // fall back to the poster so the card still shows something.
-      slot.failed = true
-      this.drive2D(slot)
+      // Rejected (bad bytes / over-cap): fall back to the poster. A capacity
+      // miss is NOT a rejection — request() returns false and we retry next
+      // visibility pass. Don't latch `failed` or the card is stuck on 2D.
+      if (this.pool3d.isRejected(meta.eventId)) {
+        slot.failed = true
+        this.drive2D(slot)
+      }
     }
   }
 
@@ -1338,8 +1389,12 @@ export class Board {
     const assets = this.assets
     if (!meta || !assets) return
     if (meta.hashFailed || assets.isHashFailed(meta.eventId)) return
+    const gen = this.modeGen
     void assets.getPoster(meta).then((tex) => {
       if (slot.meta?.eventId !== meta.eventId) return
+      // The mode flipped while the poster rendered: a direct 3D model now
+      // owns this card, so the poster must not appear over/under it.
+      if (gen !== this.modeGen) return
       if (meta.hashFailed || assets.isHashFailed(meta.eventId)) {
         slot.failed = true
         slot.spinner.setEnabled(false)

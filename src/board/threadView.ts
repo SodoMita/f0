@@ -22,6 +22,9 @@ import {
 import type { ShaderMaterial } from '@babylonjs/core/Materials/shaderMaterial'
 import { flatCamera, makeBackdropTexture, paintBackdrop, makeSpinnerTexture, roundRect, luminance, shade } from '../core/gfx'
 import { theme } from '../theme'
+import { nodeWorthTexture } from './threadGate'
+
+export { nodeWorthTexture } from './threadGate'
 
 interface TNode {
   meta: ThreadMeta
@@ -142,18 +145,26 @@ export class ThreadView {
   /** Direct-3D models rendered in the visible thread scene (no RTT). */
   readonly pool3d: Direct3DPool
   private threeD = false
+  /** Bumped on every 2D↔3D switch; async poster jobs capture it so a poster
+   *  that resolves after the toggle cannot paint over a direct 3D model. */
+  private modeGen = 0
   /** Autoplay (settings → Interface): see Board.setAutoplay. */
   autoplay = true
   /** posts the user started with ▶ (kept playing even with autoplay off) */
   private manualPlay = new Set<string>()
   /** posts the user paused (autoplay must not re-start them) */
   private pausedByUser = new Set<string>()
+  /** 2D poster render failed this tree — do not retry every frame (that was a freeze). */
+  private posterFailed = new Set<string>()
 
   constructor(engine: FormEngine) {
     this.form = engine
     this.scene = new Scene(engine.engine)
     this.scene.clearColor = Color4.FromHexString(this.background + 'FF')
     this.scene.skipPointerMovePicking = true
+    // Overlay group (reply pill / play / spinner) draws after nodes + 3D
+    // models so a post can never paint over its buttons. Don't clear.
+    this.scene.setRenderingAutoClearDepthStencil(1, false)
     this.camera = flatCamera(this.scene, 'thread-cam', 30)
 
     // Animated nodes get live previews, same bounded pool as the board.
@@ -311,11 +322,30 @@ export class ThreadView {
   /** Render-on-demand probe: pointers down, a crossfade, a spinner, or a live node. */
   isAnimating(): boolean {
     if (this.pointers.size > 0) return true
+    // Only VISIBLE nodes count. Offscreen spinners (a failed/pending poster
+    // for a node the camera isn't looking at) used to latch this true and
+    // the thread never stopped drawing.
+    const visible = this.visibleNodeIds()
     for (const n of this.nodes.values()) {
+      if (!visible.has(n.meta.eventId)) continue
       if (n.spinner.isEnabled() || n.fadeStart > 0) return true
     }
-    if (this.threeD && this.pool3d.hasWork(this.visibleNodeIds())) return true
-    return this.previewPool.hasWork(this.visibleNodeIds())
+    // Trickled posters: a node that still needs a texture has no spinner
+    // yet (we start at most two getPoster jobs per pass). Without this the
+    // loop idles after the first wave and the rest of the tree never loads.
+    if (!this.threeD && this.hasPendingPosters()) return true
+    if (this.threeD && this.pool3d.hasWork(visible)) return true
+    return this.previewPool.hasWork(visible)
+  }
+
+  /** In-view, large-enough 2D nodes that still have no poster. */
+  private hasPendingPosters(): boolean {
+    if (!this.assets) return false
+    for (const n of this.nodes.values()) {
+      if (n.poster || n.live || this.posterFailed.has(n.meta.eventId)) continue
+      if (this.nodeInView(n, 1.8) && this.nodeWorthTexture(n)) return true
+    }
+    return false
   }
 
   /** Node ids whose card rect intersects the current viewport. */
@@ -354,6 +384,9 @@ export class ThreadView {
       }
       if (n.live || !n.poster) continue
       if (!visible.has(id) || this.previewPool.isRejected(id)) continue
+      // Postage-stamp nodes after fit() are "visible" but not readable —
+      // a live RTT parse of every animated reply froze the tab on open.
+      if (!this.nodeWorthTexture(n)) continue
       // same gate as the board: poster-render knowledge or v3 hints
       const animated = this.assets.isAnimated(n.meta)
       if (!(animated ?? (n.meta.animHint || n.meta.cameraCount > 0))) continue
@@ -415,6 +448,10 @@ export class ThreadView {
 
   /** Show the node's poster texture (fallback after its live preview is released). */
   private showNodePoster(n: TNode): void {
+    // In 3D mode the direct model owns the node; a stale preview release must
+    // not re-show a poster over it. (A real 3D-load failure goes through
+    // drivePoster2D with the current modeGen, which is the intended fallback.)
+    if (this.threeD) { this.setNodeOpacityNow(n, 0); return }
     if (n.poster) {
       this.crossfadeTo(n, n.poster, '#FFFFFF', 'rtt')
     } else {
@@ -620,6 +657,7 @@ export class ThreadView {
     if (this.threeD === on) return
     const was = this.threeD
     this.threeD = on
+    this.modeGen++ // invalidate in-flight poster jobs from the old mode
     // Free the pipeline we are leaving (never both resident at once).
     if (was) this.pool3d.releaseAll()
     else this.previewPool.releaseAll()
@@ -628,14 +666,15 @@ export class ThreadView {
       n.live = null
       if (on) {
         this.setNodeOpacityNow(n, 0)
-        n.spinner.setEnabled(true)
-        this.request3D(n)
+        n.spinner.setEnabled(false)
       } else {
         this.setNodeOpacityNow(n, 0.16)
-        this.drivePoster2D(n)
+        n.spinner.setEnabled(false)
       }
       this.positionPlayButton(n)
     }
+    if (on) this.sync3D()
+    else this.syncPosters()
     this.form.kick()
   }
 
@@ -643,39 +682,106 @@ export class ThreadView {
   private drivePoster2D(n: TNode): void {
     if (!this.assets) return
     const { meta, mesh, spinner } = n
+    spinner.setEnabled(true)
     const gen = this.generation
+    const modeGen = this.modeGen
     void this.assets.getPoster(meta).then((tex) => {
-      // the map may have been cleared/reopened while the poster rendered
-      if (!tex || gen !== this.generation || mesh.isDisposed()) return
+      if (gen !== this.generation || mesh.isDisposed()) return
+      // the mode flipped while the poster rendered: a direct 3D model now
+      // owns this node — the poster must not stack over/under it
+      if (modeGen !== this.modeGen) return
+      spinner.setEnabled(false)
+      // Failed / cancelled poster: stop the ring. Leaving it spinning
+      // latched isAnimating() and the 2D tree never idled (felt frozen).
+      if (!tex) {
+        // cancelPoster also resolves undefined. Only latch a failure when
+        // we still want this node — otherwise zoom-in would never retry.
+        if (this.nodeInView(n, 1.8) && this.nodeWorthTexture(n)) this.posterFailed.add(meta.eventId)
+        this.form.kick()
+        return
+      }
+      this.posterFailed.delete(meta.eventId)
       n.poster = tex
       this.crossfadeTo(n, tex, '#FFFFFF', 'rtt')
-      spinner.setEnabled(false)
       this.positionPlayButton(n) // animatable posts reveal their ▶ now
+      this.syncPosters() // next trickle wave
       this.syncPreviews()
       this.form.kick()
     })
   }
 
+  /**
+   * 2D posters follow the viewport the same way 3D models do. open() used
+   * to getPoster() every node in the tree up front — a large thread parsed
+   * every GLB on the main thread and froze. Load only what's near the camera
+   * AND large enough to read; pan/zoom picks up the rest.
+   *
+   * `fit()` frames the whole tree, so "in view" is every node on open.
+   * Two extra gates keep that from freezing the tab:
+   *   * peekPoster binds a GPU texture the board already rendered, instantly
+   *   * at most POSTER_START_PER_PASS new getPoster jobs per pass (trickle)
+   */
+  private static readonly POSTER_START_PER_PASS = 2
+  private syncPosters(): void {
+    if (this.threeD || !this.assets) return
+    let started = 0
+    for (const n of this.nodes.values()) {
+      const want = this.nodeInView(n, 1.8) && this.nodeWorthTexture(n)
+      if (!want) {
+        if (!n.poster && !n.live) {
+          this.assets.cancelPoster(n.meta.eventId)
+          if (n.spinner.isEnabled()) n.spinner.setEnabled(false)
+        }
+        continue
+      }
+      if (n.poster || n.live) continue
+      if (this.posterFailed.has(n.meta.eventId)) continue
+      const cached = this.assets.peekPoster(n.meta)
+      if (cached) {
+        n.poster = cached
+        n.spinner.setEnabled(false)
+        // Instant — a 120ms fade of every cached node on open was another
+        // hitch, and latched isAnimating for the whole tree.
+        setCardTexture(n.mat, cached)
+        setCardWhite(n.mat)
+        this.setNodeOpacityNow(n, 1)
+        setCardFlip(n.mat, 'rtt')
+        this.positionPlayButton(n)
+        continue
+      }
+      if (n.spinner.isEnabled()) continue
+      if (started >= ThreadView.POSTER_START_PER_PASS) continue
+      this.drivePoster2D(n)
+      started++
+    }
+    if (started > 0) this.form.kick()
+  }
+
   /** 3D mode: load this node's real model into the thread scene. */
   private request3D(n: TNode): void {
-    if (!this.assets) return
+    if (!this.threeD || !this.assets) return
     const meta = n.meta
     if (meta.hashFailed || this.assets.isHashFailed(meta.eventId)) return
     n.spinner.setEnabled(true)
-    const ok = this.pool3d.request(meta.eventId, this.placeFor(n))
+    const ok = this.pool3d.request(meta.eventId, this.placeFor(n), this.visibleNodeIds())
     if (!ok) {
-      // Pool refused (rejected / over capacity): fall back to the poster.
-      n.spinner.setEnabled(false)
-      this.drivePoster2D(n)
+      // Rejected (bad bytes): fall back to the poster. A capacity miss is
+      // transient — leave the spinner and let sync3D retry.
+      if (this.pool3d.isRejected(meta.eventId)) {
+        n.spinner.setEnabled(false)
+        this.drivePoster2D(n)
+      }
     }
   }
 
-  /** The node cell for a model, in thread-scene world units. */
+  /** The node cell for a model, in thread-scene world units. z = 0 is the
+   *  node plane; depth is capped so models stay clear of the frame plane.
+   *  Overlays stay on top via renderingGroupId 1. */
   private placeFor(n: TNode): Place3D {
     return {
-      x: n.x, y: n.y, z: 0.25,
+      x: n.x, y: n.y, z: 0,
       w: n.w, h: n.h,
-      depth: Math.min(n.w, n.h) * 0.6,
+      depth: Math.min(n.w, n.h) * 0.4,
     }
   }
 
@@ -688,13 +794,24 @@ export class ThreadView {
     return true
   }
 
+  /** True when this node is large enough on screen to fetch a poster / 3D model. */
+  private nodeWorthTexture(n: TNode): boolean {
+    const eng = this.scene.getEngine()
+    const cssH = eng.getRenderHeight() * eng.getHardwareScalingLevel()
+    return nodeWorthTexture(n.h, this.zoom, cssH)
+  }
+
   /**
    * 3D-mode counterpart of syncPreviews(): load models only near the
    * viewport (AMENDMENT 43), release them once panned away, and apply the
    * autoplay / ▶ gating to the direct models.
    */
   private sync3D(): void {
-    if (!this.assets) return
+    // MUST no-op in 2D. onBeforeRender used to call this every frame even
+    // with the cube toggle off, so opening a thread as posters also parsed
+    // every in-view GLB into the map (main-thread freeze) and left overflow
+    // spinners running forever (isAnimating latched → 30 fps forever).
+    if (!this.threeD || !this.assets) return
     const idle = this.pointers.size === 0
     for (const n of this.nodes.values()) {
       const id = n.meta.eventId
@@ -704,7 +821,7 @@ export class ThreadView {
         this.pool3d.release(id)
         continue
       }
-      if (inView && idle && !this.pool3d.isLive(id) && !this.pool3d.isLoading(id) && !this.pool3d.isRejected(id)) {
+      if (inView && idle && this.nodeWorthTexture(n) && !this.pool3d.isLive(id) && !this.pool3d.isLoading(id) && !this.pool3d.isRejected(id)) {
         this.request3D(n)
         continue
       }
@@ -763,14 +880,22 @@ export class ThreadView {
             if (t >= 1) this.finishNodeFade(n)
           }
         }
-        this.syncPreviews()
-        this.previewPool.tick(this.visibleNodeIds())
-        this.sync3D()
-        this.pool3d.tick(this.visibleNodeIds())
+        if (this.threeD) {
+          this.sync3D()
+          this.pool3d.tick(this.visibleNodeIds())
+        } else {
+          this.syncPosters()
+          this.syncPreviews()
+          this.previewPool.tick(this.visibleNodeIds())
+        }
       })
       this.spinObserver = true
     }
     if (!this.assets || !this.index) return
+    // Board pauses the poster queue while the feed is flung. Thread open
+    // happens on a different scene — if we leave the queue paused, every
+    // getPoster sits forever, spinners never stop, the tree looks frozen.
+    this.assets.setPaused(false)
     const metas = this.index.flatten(rootId).filter((m) => !m.hashFailed && !m.tombstoned)
     if (metas.length === 0) return
     // play-intent bookkeeping belongs to this tree: drop entries for posts
@@ -819,6 +944,8 @@ export class ThreadView {
       spinner.scaling.set(ring / 4, ring / 4, 1)
       spinner.position.set(p.x, p.y, -0.05)
       spinner.isPickable = false
+      spinner.renderingGroupId = 1
+      spinner.setEnabled(false)
 
       // reply pill, bottom-right, floating half out of the card like the
       // board badge; pickable and routed to the studio compose flow
@@ -831,13 +958,13 @@ export class ThreadView {
       reply.scaling.set(REPLY_W / 4, REPLY_H / 4, 1)
       reply.position.set(p.x + w / 2 - REPLY_W / 2 + 0.35, p.y - h / 2 + REPLY_H * 0.28, -0.1)
       reply.isPickable = true
-      reply.metadata = { treply: meta }
       // Corner overlays (reply pill + play button) must render above the node
       // they belong to: transparent meshes sort by bounding-sphere center
       // distance, so a corner-mounted pill can sort behind its own node and
       // be painted over by the node's opaque poster/live pixels. Group 1
       // renders after group 0 (nodes/backdrop) — always on top.
       reply.renderingGroupId = 1
+      reply.metadata = { treply: meta }
 
       // ▶/⏸ play button, bottom-left (mirrors the reply pill); toggles this
       // node's animation + embedded sound. Picked in tapAt before the node.
@@ -848,8 +975,8 @@ export class ThreadView {
       setCardWhite(playMat)
       setCardFlip(playMat, 'dyn')
       play.isPickable = true
-      play.metadata = { tplay: meta }
       play.renderingGroupId = 1 // same overlay pass as the reply pill
+      play.metadata = { tplay: meta }
 
       setCardTint(mat, meta.tint || theme.panel)
       const node: TNode = {
@@ -861,13 +988,9 @@ export class ThreadView {
       }
       this.setNodeOpacityNow(node, this.threeD ? 0 : 0.16)
       this.positionPlayButton(node)
-      if (this.threeD) {
-        node.spinner.setEnabled(true)
-        this.request3D(node)
-      } else {
-        this.drivePoster2D(node)
-      }
-
+      // Viewport-gated: fit() → applyCamera loads near-camera nodes
+      // (syncPosters in 2D, sync3D in 3D). Requesting every node here
+      // parsed the whole tree on open and froze the tab.
       this.nodes.set(meta.eventId, node)
     }
 
@@ -976,8 +1099,12 @@ export class ThreadView {
     this.backdrop.position.set(this.panX, this.panY, 4)
     // zoom changed -> the sharpness a node needs changed -> rescale the RTTs
     this.applyPreviewScale()
-    // viewport changed -> live previews must follow what is now on screen
-    this.syncPreviews()
+    // viewport changed -> posters / live previews / 3D models follow
+    if (this.threeD) this.sync3D()
+    else {
+      this.syncPosters()
+      this.syncPreviews()
+    }
   }
 
   /** Frame the whole map with a margin. */
@@ -1105,9 +1232,7 @@ export class ThreadView {
       this.moved += Math.abs(dx) + Math.abs(dy)
       this.panX -= dx * upx
       this.panY += dy * upx
-      this.clampPan()
-      this.applyCamera()
-      prev.x = ev.clientX
+            prev.x = ev.clientX
       prev.y = ev.clientY
       return
     }
@@ -1252,6 +1377,7 @@ export class ThreadView {
       n.play.dispose(); n.playMat.dispose()
     }
     this.nodes.clear()
+    this.posterFailed.clear()
     for (const l of this.lineMeshes) l.dispose()
     this.lineMeshes = []
     this.edges = []

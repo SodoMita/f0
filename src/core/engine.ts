@@ -325,7 +325,18 @@ export class FormEngine {
       // 150 ms, so the adaptive controller could never trigger.
       const gap = now - this.lastRenderAt
       this.lastRenderAt = now
+      // beginFrame/_measureFps is what fills engine.getDeltaTime(). We do NOT
+      // use engine.runRenderLoop (demand-driven RAF instead), so without this
+      // call deltaTime stayed 0 and AnimationGroup.start() on direct-3D cards
+      // never advanced — frozen models even while the loop kept drawing.
+      this.engine.beginFrame()
+      // After a long idle the first sample is "time since last frame" which
+      // can be seconds. Babylon then catch-up-animates that whole gap on the
+      // next scene.render() and the tab hitch-freezes. Cap like TrackAnimator.
+      const dt = this.engine.getDeltaTime()
+      if (dt > 100) (this.engine as unknown as { _deltaTime: number })._deltaTime = 100
       this.active.render()
+      this.engine.endFrame()
       const submitMs = performance.now() - now
       this.lastMs = submitMs
       if (gap < 250) this.emaMs = this.emaMs * 0.9 + Math.min(gap, submitMs > gap ? submitMs : gap) * 0.1

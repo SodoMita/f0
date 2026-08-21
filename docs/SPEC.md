@@ -1137,4 +1137,71 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     cards/nodes group 0, overlays geometrically in front, and that a
     centered card's center sorts nearer than its own button).
 
- (board+thread: overlays always render above their card/node (fix buttons hidden))
+77. DIRECT-3D CARDS BUGFIX (2026-08-20): the AMENDMENT 75 toggle shipped several
+    real bugs. Fix:
+    - `release()` of a still-loading post must CANCEL (same as PreviewPool),
+      not drop the id from `loading`. Dropping it let the parse land on a
+      recycled card (two models, or the wrong model). Scroll-back un-cancels.
+    - A full pool is not a failure. Capacity misses used to set `slot.failed`
+      and fall back to the poster forever; only the first N cards ever went
+      3D. Retry every visibility pass; fall back to the poster only when the
+      pool actually rejected the post (bad bytes / over-cap).
+    - Eviction uses the caller's fresh visible set, not stale `slot.visible`
+      (the same deadlock AMENDMENT 48 documented for the preview pool). The
+      board now calls `pool3d.tick()`.
+    - Thread 3D loads only near the viewport. Toggling 3D / opening a tree
+      used to request EVERY node and fill the 6-slot budget with offscreen
+      models (and leave every spinner running, so the thread never idled).
+    - Imported GLB lights and cameras are disabled — they lit neighbouring
+      cards. The pool's own rig is the only light; leftover board dummy hemi
+      is disabled so PBR is not double-lit.
+    - Models are centred on the card/node plane (z=0) with depth
+      0.4·min(w,h) so they do not poke behind the opaque backdrop (board z=2)
+      or through the contact shadow (moved to z=1.9 in 3D). Overlays (badge /
+      play / spinner / reply) render in group 1 so a post cannot paint over
+      its buttons. Transparent card materials disable depth write (an
+      opacity-0 tap target must not occlude the model).
+    - A 2D poster requested BEFORE the 3D toggle resolves asynchronously and
+      used to land on the card quad over the live model. Both views bump a
+      mode-generation counter on every 2D↔3D switch and drop poster results
+      whose generation is stale. A stale preview-pool release must not
+      re-show a poster over a direct model.
+    - The no-camera auto-fit rotation was `FromUnitVectorsToRef(facing, -Z)`;
+      for opposite vectors that picks an arbitrary 180° axis and flips flat
+      models. It is now the exact inverse of the poster's auto-fit camera
+      (`LookAtLH(eye=facing, target=0, up≈+Y)` → quaternion).
+    - A load that completes after the feed scrolled landed at the cell
+      captured at REQUEST time. The pool keeps the latest pending place per
+      post and applies it on completion (models stay glued to their cards).
+    - FormEngine calls `engine.beginFrame()`/`endFrame()` so
+      `getDeltaTime()` is real. Without that, AnimationGroup.start() on
+      direct-3D cards never advanced (demand-driven RAF is not
+      `runRenderLoop`). The viewer's TrackAnimator is unchanged (it pauses
+      the group and drives `goToFrame` itself).
+    - Thread `sync3D()` / `request3D()` MUST no-op when the 3D toggle is off.
+      `onBeforeRender` used to call `sync3D()` every frame even in 2D, so
+      opening a thread as posters also parsed every in-view GLB into the map
+      (main-thread freeze) and left overflow spinners running (isAnimating
+      latched → 30 fps forever).
+    - 2D thread posters are viewport-gated too (`syncPosters`). open() used
+      to getPoster() every node in the tree; a large thread froze the tab.
+      Failed posters must stop their spinner (else isAnimating latches).
+      Opening a thread unpauses the poster queue (the board may have paused
+      it mid-fling, and board.tick no longer runs to unpause).
+    - `fit()` frames the WHOLE tree, so "in view" is every node on open —
+      a viewport gate alone is a no-op. Skip postage-stamp nodes
+      (`nodeWorthTexture`, <48 CSS px tall), bind `peekPoster` instantly
+      (the board already rendered those textures), trickle at most two
+      new getPoster jobs per pass, and cancel queued posters that panned
+      off or shrank. Live previews and 3D models use the same size gate.
+    Guard: `bun scripts/direct3d-unit.mjs` + `bun scripts/thread-open-unit.mjs`.
+
+78. STUDIO MUST CLOSE THE BOARD (2026-08-21): opening the studio left the
+    feed "still open" — board-only topbar controls (search / shuffle / 3D /
+    create) stayed clickable over the editor, a live feed event re-bound
+    cards `isPickable=true`, and the studio camera called `attachControl`
+    in its constructor so it stole canvas pointers while the board was on
+    screen. Fix: `body[data-mode=studio]` hides those controls; `Board.setInteractive(false)`
+    while another view owns the canvas (bind/tap respect the flag); studio
+    camera attaches only in `attach()`/`detach()`. Poster queue pauses in
+    studio/viewer. Guard: `node scripts/studio-open.mjs`.

@@ -110,6 +110,11 @@ export function makeCardMaterial(scene: Scene, blend = true): ShaderMaterial {
     needAlphaBlending: blend,
   })
   mat.backFaceCulling = false
+  // Transparent quads must not write depth: a fully-transparent card plane
+  // (3D mode's invisible tap target) sitting at z=0 would otherwise occlude
+  // the real model behind it, and a poster card would hide its own badge
+  // whenever transparent-sort put the card later than the overlay.
+  if (blend) mat.disableDepthWrite = true
   mat.setTexture('tex', getWhite(scene))
   mat.setTexture('tex2', getWhite(scene))
   mat.setColor3('tint', Color3.White())

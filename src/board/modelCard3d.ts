@@ -26,6 +26,10 @@ export interface DirectModel {
 export interface Place3D {
   x: number
   y: number
+  /** Centre of the model on the card/node plane (z = 0). Depth is capped so
+   *  the mesh stays in front of the backdrop (board z=2) and the contact
+   *  shadow (z≈1.9 in 3D). Overlays render in group 1 so they stay on top
+   *  even when the mesh extends a little toward the camera. */
   z: number
   w: number
   h: number
@@ -73,6 +77,11 @@ export class Direct3DPool {
   private byPost = new Map<string, Slot>()
   private loading = new Set<string>()
   private rejected = new Set<string>()
+  /** Latest target cell for a post whose load is still in flight. The card
+   *  may scroll while the GLB parses; the model must land where the card is
+   *  NOW, not where it was when the request fired (a stale place left models
+   *  floating over the wrong card — "positions off sometimes"). */
+  private pendingPlace = new Map<string, Place3D>()
   /** In-flight loads whose result nobody wants any more (toggled off). */
   private cancelled = new Set<string>()
   private claimedSounds = new Set<Sound>()
@@ -91,6 +100,12 @@ export class Direct3DPool {
   ) {
     this.maxSlots = opts?.maxSlots ?? 12
     configureDraco()
+    // The board scene ships a leftover dummy hemi for unlit card quads (which
+    // ignore lights). Stacking another hemi + 3 directionals on top of it
+    // double-lit every PBR model. Disable anything that isn't our rig.
+    for (const l of this.scene.lights) {
+      if (!l.name.startsWith('d3-')) l.setEnabled(false)
+    }
     // Light rig for the lit (PBR/Standard) materials of direct models. The
     // flat card quads use an unlit ShaderMaterial, so these lights only
     // illuminate the 3D models — nothing else changes. No IBL (AGENTS rule 5:
@@ -123,12 +138,25 @@ export class Direct3DPool {
   /**
    * Load a post's model directly into the scene. Returns false when the post
    * was already rejected (a failed load) or the pool is at capacity with
-   * nothing evictable — the caller falls back to the poster.
+   * nothing evictable — the caller MUST retry on the next visibility pass,
+   * not latch the card onto the poster path (that was the "only the first
+   * N cards ever go 3D" bug).
+   *
+   * `visible` is the caller's fresh on-screen set. Eviction uses it instead
+   * of `slot.visible`, which is only updated in tick() AFTER the request
+   * pass (the same deadlock AMENDMENT 48 documented for the preview pool).
    */
-  request(postId: string, place: Place3D): boolean {
+  request(postId: string, place: Place3D, visible?: ReadonlySet<string>): boolean {
     const live = this.byPost.get(postId)
     if (live) { this.place(postId, place); return true }
-    if (this.loading.has(postId)) { this.cancelled.delete(postId); return true }
+    // Still parsing: un-cancel so a card that scrolled away and back keeps
+    // the in-flight result instead of discarding it and starting over, and
+    // refresh the landing cell (the card may have moved while we parsed).
+    if (this.loading.has(postId)) {
+      this.cancelled.delete(postId)
+      this.pendingPlace.set(postId, place)
+      return true
+    }
     if (this.rejected.has(postId)) return false
 
     let slot = this.slots.find((s) => !s.postId && !s.pending)
@@ -136,29 +164,36 @@ export class Direct3DPool {
       slot = this.makeSlot()
       this.slots.push(slot)
     }
-    if (!slot) slot = this.pickEvictable()
+    if (!slot) slot = this.pickEvictable(visible)
     if (!slot) return false
     if (slot.postId) this.release(slot.postId)
     slot.pending = true
     this.loading.add(postId)
-    void this.load(slot, postId, place)
+    this.pendingPlace.set(postId, place)
+    void this.load(slot, postId)
     return true
   }
 
   /** Move an already-resident model (the card scrolled / the map panned). */
   place(postId: string, place: Place3D): void {
     const slot = this.byPost.get(postId)
-    if (!slot) return
-    this.applyPlace(slot, place)
+    if (slot) { this.applyPlace(slot, place); return }
+    if (this.loading.has(postId)) this.pendingPlace.set(postId, place)
   }
 
   release(postId: string): void {
     const slot = this.byPost.get(postId)
     if (!slot) {
-      if (this.loading.has(postId)) this.loading.delete(postId)
+      // Still loading: mark cancelled so the parse discards its result
+      // instead of binding a model to a card nobody wants. Do NOT delete
+      // from `loading` — request() uses that to un-cancel a scroll-back.
+      // (Deleting it was the race: the parse landed on a recycled slot.)
+      if (this.loading.has(postId)) this.cancelled.add(postId)
+      this.pendingPlace.delete(postId)
       return
     }
     this.byPost.delete(postId)
+    this.pendingPlace.delete(postId)
     this.clearSlot(slot)
     this.onReleased?.(postId)
   }
@@ -166,7 +201,10 @@ export class Direct3DPool {
   releaseAll(): void {
     // In-flight loads keep parsing; mark them cancelled so their result is
     // discarded instead of landing in a scene that no longer wants them.
-    for (const id of this.loading) this.cancelled.add(id)
+    for (const id of this.loading) {
+      this.cancelled.add(id)
+      this.pendingPlace.delete(id)
+    }
     for (const id of [...this.byPost.keys()]) this.release(id)
   }
 
@@ -224,8 +262,14 @@ export class Direct3DPool {
     }
   }
 
-  private pickEvictable(): Slot | undefined {
-    const offscreen = this.slots.filter((s) => s.postId && !s.pending && !s.visible)
+  private pickEvictable(visible?: ReadonlySet<string>): Slot | undefined {
+    // Only offscreen slots: evicting a VISIBLE card makes the caller
+    // re-request it immediately (poster↔3D ping-pong). The caller's fresh
+    // visible set wins over slot.visible, which tick() updates too late.
+    const offscreen = this.slots.filter((s) => {
+      if (!s.postId || s.pending) return false
+      return visible ? !visible.has(s.postId) : !s.visible
+    })
     if (!offscreen.length) return undefined
     offscreen.sort((a, b) => a.placedAt - b.placedAt)
     return offscreen[0]
@@ -235,7 +279,12 @@ export class Direct3DPool {
    * The display rotation: inverse of the authored main camera's world
    * rotation when the model ships a camera (the static display camera looks
    * along +Z with identity rotation, so R_d·R_a⁻¹ = R_a⁻¹ — spec AMENDMENT
-   * 43); dominant-facing-to-camera otherwise.
+   * 43). Without a camera, the auto-fit camera the poster pipeline would
+   * build (positioned at center + facing·d, targeting center, up = +Y) is
+   * inverted the same way, so the flat camera shows exactly the poster's
+   * view. A FromUnitVectorsToRef(facing, -Z) fallback is NOT equivalent: for
+   * opposite vectors it picks an arbitrary 180° axis, which flips flat models
+   * upside-down or mirror-inverts them (the "inverted models" regression).
    */
   private displayRotation(container: AssetContainer, cameraIndex: number): Quaternion {
     const authored = cameraIndex >= 0 && cameraIndex < container.cameras.length ? container.cameras[cameraIndex] : null
@@ -247,9 +296,16 @@ export class Direct3DPool {
       authored.getWorldMatrix().decompose(undefined, quat, undefined)
       return quat.invertInPlace()
     }
-    const facing = dominantFacing(container)
+    // Auto-fit: model front (dominantFacing) turned toward the camera at -Z,
+    // up kept as +Y (or +Z when facing is vertical). LookAtLH(eye=facing,
+    // target=0) IS the inverse of the auto-fit camera's world rotation —
+    // exactly what rotating the model needs to reproduce the poster view.
+    const facing = dominantFacing(container).normalizeToNew()
+    const up = Math.abs(facing.y) > 0.99 ? new Vector3(0, 0, 1) : Vector3.Up()
+    const view = new Matrix()
+    Matrix.LookAtLHToRef(facing, Vector3.Zero(), up, view)
     const quat = new Quaternion()
-    Quaternion.FromUnitVectorsToRef(facing, Vector3.Backward(), quat)
+    Quaternion.FromRotationMatrixToRef(view, quat)
     return quat
   }
 
@@ -285,7 +341,7 @@ export class Direct3DPool {
     slot.root.position.set(place.x, place.y, place.z)
   }
 
-  private async load(slot: Slot, postId: string, place: Place3D): Promise<void> {
+  private async load(slot: Slot, postId: string): Promise<void> {
     let container: AssetContainer | null = null
     const alive = (): boolean => this.slots.includes(slot)
     try {
@@ -306,6 +362,10 @@ export class Direct3DPool {
         // Background content: taps must hit the card/node quads, never a mesh.
         m.isPickable = false
       }
+      // Imported GLB lights/cameras lit neighbouring cards. The pool's own
+      // rig is the only light; the flat camera is the only camera.
+      for (const l of container.lights) l.setEnabled(false)
+      for (const c of container.cameras) c.setEnabled(false)
 
       // Framing is computed BEFORE reparenting: the authored camera's world
       // matrix must reflect its authored transform, not the fit chain.
@@ -339,7 +399,7 @@ export class Direct3DPool {
       slot.postId = postId
       slot.started = false
       slot.playing = false
-      this.applyPlace(slot, place)
+      this.applyPlace(slot, this.pendingPlace.get(postId) ?? { x: 0, y: 0, z: 0, w: 1, h: 1, depth: 1 })
       this.byPost.set(postId, slot)
       this.onPlaced?.(postId)
     } catch {
@@ -350,6 +410,7 @@ export class Direct3DPool {
       if (!this.cancelled.has(postId)) this.onFailed?.(postId)
     } finally {
       this.cancelled.delete(postId)
+      this.pendingPlace.delete(postId)
       slot.pending = false
       this.loading.delete(postId)
       this.onLoadDone?.()
