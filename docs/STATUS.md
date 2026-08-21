@@ -33,7 +33,11 @@ move it to **Done** with a commit reference. One agent per area.
       transform chain (`dispose(true)` = do NOT recurse). Guards:
       `bun scripts/direct3d-camera-unit.mjs` (framing vs the authored view
       matrix) and `node scripts/direct3d-camera.mjs` (pixel census against
-      the offline rig, board + thread + scroll).
+      the offline rig, board + thread + scroll). Also un-rotted
+      `scripts/offline-verify.mjs`: its two "poster from authored camera"
+      checks predated AMENDMENT 6 (posters ALWAYS auto-fit) and had been
+      failing on every run, hiding real regressions — they now assert the
+      current contract and the suite is green end to end (43/43).
 
 - [x] **Studio left the board clickable** (agent arena, 2026-08-21, SPEC
       AMENDMENT 78): opening the studio left board-only topbar controls

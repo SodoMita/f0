@@ -23,8 +23,11 @@ shrink-to-fit, auto-fit only as the fallback (src/model/framing.ts). Also:
 noteMeta() so 3D-only posts can download at all (thread replies never went
 3D), loader-started animations stopped when autoplay is off, frames kept
 coming until model shaders are ready (blank cards), overlays depth-independent
-so models cannot cover their own buttons. Guards: check:direct3d-camera
-(headless math) + scripts/direct3d-camera.mjs (pixels vs the offline rig).
+so models cannot cover their own buttons. Guards: npm run check:3d
+(pool units + framing math + pixels vs the offline rig). offline-verify.mjs
+was also un-rotted: its two "poster from authored camera" checks predated
+AMENDMENT 6 (posters ALWAYS auto-fit) and had been red on every run — the
+whole suite is green again (43/43), so a real regression is now visible.
 
 INCIDENT LOG: Pages had a 503 outage (artifact fine, re-run); main was once
 force-pushed away and restored — unlanded work kept on salvage/dev-rewrite

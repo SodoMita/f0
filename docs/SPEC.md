@@ -1281,6 +1281,12 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     - `TransformNode.dispose(true)` means doNotRecurse, so every released
       model left its orient + fit nodes behind (46 orphans after a few 2D↔3D
       toggles). Released slots now dispose the whole chain.
+    Housekeeping: `scripts/offline-verify.mjs` still asserted the
+    pre-AMENDMENT-6 poster policy ("poster from authored camera", "poster
+    uses cam0"). Those two checks had failed on every run for months — a
+    permanently red suite hides real regressions — and now assert the
+    current contract (posters ALWAYS auto-fit; authored cameras drive the
+    viewer, live previews and 3D cards). The suite is green end to end again.
     Guards (`npm run check:3d` runs all three):
     `bun scripts/direct3d-unit.mjs` (pool lifecycle, AMENDMENT 77),
     `bun scripts/direct3d-camera-unit.mjs` (headless: the placed

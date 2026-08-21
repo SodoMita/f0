@@ -102,22 +102,33 @@ const fetchModel = (name) => page.evaluate(async (u) => {
 }, MODEL + name)
 
 // -------------------------------------------- 1. poster camera policy
+//
+// SPEC AMENDMENT 6 overrode the original design: POSTERS ALWAYS AUTO-FIT.
+// Authored cameras drive the viewer, the live previews and (AMENDMENT 79)
+// the 3D cards/nodes — never the poster snapshot, which must show the whole
+// model so a card is never a mystery crop. These two checks still asserted
+// the pre-AMENDMENT-6 behaviour and had failed on every run for months,
+// which hid real regressions behind a permanently red suite. They now
+// assert the CURRENT contract; the authored-camera path is covered by the
+// live-preview check below and by `npm run check:3d`.
 {
-  // a = camera framing ONLY the red cube (green cube is far off-axis)
+  // a = camera framing ONLY the red cube (green cube is far off-axis).
+  // The POSTER ignores that camera: both cubes, green dominant (it is 4x).
   const a = posterStats(await renderPosterPixels(await fetchModel('a.glb')))
-  check('poster from authored camera: red visible', a.red > 0.05, `red=${(a.red * 100).toFixed(1)}%`)
-  check('poster from authored camera: green out of frame', a.green < 0.01, `green=${(a.green * 100).toFixed(2)}%`)
+  check('poster auto-fits even when the model HAS a camera (AMENDMENT 6)',
+    a.red > 0.001 && a.green > 0.03, `red=${(a.red * 100).toFixed(2)}% green=${(a.green * 100).toFixed(1)}%`)
 
   // b = static, NO camera -> auto-fit must show both cubes
   const b = posterStats(await renderPosterPixels(await fetchModel('b.glb')))
   check('poster without camera auto-fits both cubes', b.red > 0.03 && b.green > 0.03,
     `red=${(b.red * 100).toFixed(1)}% green=${(b.green * 100).toFixed(1)}%`)
 
-  // d = cam0 red view, cam1 green view, event advertises preview-camera=1:
-  // poster (first camera) must be red; the LIVE preview must use cam1 (green)
+  // d = cam0 red view, cam1 green view, event advertises preview-camera=1.
+  // The poster auto-fits (both cubes); cam1 shows up in the LIVE preview
+  // (checked below) and on the 3D card (scripts/direct3d-camera.mjs).
   const d = posterStats(await renderPosterPixels(await fetchModel('d.glb')))
-  check('two-camera model: poster uses cam0 (red)', d.red > 0.05 && d.green < 0.01,
-    `red=${(d.red * 100).toFixed(1)}% green=${(d.green * 100).toFixed(2)}%`)
+  check('two-camera model: poster still auto-fits (cameras are for previews)',
+    d.red > 0.001 && d.green > 0.03, `red=${(d.red * 100).toFixed(2)}% green=${(d.green * 100).toFixed(1)}%`)
 
   // f = authored camera that frames NOTHING: the poster must fall back to
   // auto-fit (both cubes visible) instead of going blank -> placeholder.
