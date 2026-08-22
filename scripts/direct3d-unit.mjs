@@ -9,6 +9,7 @@ import { NullEngine } from '@babylonjs/core/Engines/nullEngine'
 import { Scene } from '@babylonjs/core/scene'
 import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight'
 import { Vector3 } from '@babylonjs/core/Maths/math.vector'
+import { LoadAssetContainerAsync } from '@babylonjs/core/Loading/sceneLoader'
 import { Direct3DPool } from '../src/board/modelCard3d.ts'
 
 const fails = []
@@ -193,6 +194,17 @@ async function waitUntil(pred, tries = 40, ms = 25) {
   pool.release('front')
   const leftover = scene.transformNodes.filter((n) => n.name.startsWith('d3-') && !n.isDisposed())
   check('release disposes the transform chain', leftover.length === 0, `before=${before} leftover=${leftover.map((n) => n.name).join(',')}`)
+  pool.dispose()
+}
+
+// ---- adopt skips getModel (AMENDMENT 88) ---------------------------------
+{
+  let loads = 0
+  const pool = new Direct3DPool(scene, async () => { loads++; return { bytes, sha256 } }, { maxSlots: 1 })
+  const container = await LoadAssetContainerAsync(bytes, scene, { pluginExtension: '.glb' })
+  check('adopt without getModel', pool.adopt('h', container, place) && pool.isLive('h') && loads === 0)
+  pool.release('h')
+  check('adopted model releases', !pool.isLive('h'))
   pool.dispose()
 }
 

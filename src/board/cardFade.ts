@@ -97,12 +97,12 @@ export function tickFade(s: CardFade, mat: ShaderMaterial, now: number): boolean
   return t < 1
 }
 
-/** Poster after a live slot is released; 3D mode keeps the plate invisible. */
+/** Poster after a live slot is released. 3D keeps a poster as a placeholder. */
 export function showPoster(
   s: CardFade, mat: ShaderMaterial,
   poster: TextureT | null, plateTint: string, threeD: boolean,
 ): void {
-  if (threeD) { setOpacityNow(s, mat, 0); return }
+  if (threeD && !poster) { setOpacityNow(s, mat, 0); return }
   if (poster) crossfadeTo(s, mat, poster, '#FFFFFF', 'rtt')
   else {
     setCardTexture(mat, null)

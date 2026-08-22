@@ -1416,6 +1416,10 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     composition preserved, near plane, re-frame incl. inertia, N of M,
     speed 0, audio claim/S-toggle/hand-off transfer, autoplay respect,
     no-camera path).
+88. 2D→3D MUST NOT RE-PARSE WHAT 2D LOADED (2026-08-21): cube toggle
+    hands live previews into Direct3DPool.adopt (handoffContainer) and
+    keeps cached posters as placeholders. Spinner only if nothing to show.
+    Guard: `bun scripts/direct3d-unit.mjs`.
 89. HOSTILE-RIG SECURITY HARDENING (2026-08-22). A local MALICIOUS relay +
     Blossom server + model server (scripts/hostile-rig.mjs, driven by
     scripts/hostile-audit.mjs through a real browser) was run against the

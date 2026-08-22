@@ -141,6 +141,27 @@ export class Direct3DPool {
     }
   }
 
+  /** Place an already-parsed container (2D preview hand-off). No getModel. */
+  adopt(postId: string, container: AssetContainer, place: Place3D, cameraIndex?: number, sounds?: Sound[]): boolean {
+    if (this.byPost.has(postId)) { this.place(postId, place); return true }
+    if (this.rejected.has(postId) || container.scene !== this.scene) return false
+    const slot = this.reserveSlot(new Set([postId]))
+    if (!slot) return false
+    this.pendingPlace.set(postId, place)
+    try {
+      container.addAllToScene()
+      slot.container = container
+      this.install(slot, postId, container, cameraIndex, sounds ?? claimModelSounds(
+        this.scene, container, this.scene.mainSoundTrack.soundCollection.length, this.claimedSounds,
+      ))
+      return true
+    } catch {
+      this.clearSlot(slot)
+      this.pendingPlace.delete(postId)
+      return false
+    }
+  }
+
   /**
    * Load a post's model directly into the scene. Returns false when the post
    * was already rejected (a failed load) or the pool is at capacity with
@@ -164,15 +185,8 @@ export class Direct3DPool {
       return true
     }
     if (this.rejected.has(postId)) return false
-
-    let slot = this.slots.find((s) => !s.postId && !s.pending)
-    if (!slot && this.slots.length < this.maxSlots) {
-      slot = this.makeSlot()
-      this.slots.push(slot)
-    }
-    if (!slot) slot = this.pickEvictable(visible)
+    const slot = this.reserveSlot(visible)
     if (!slot) return false
-    if (slot.postId) this.release(slot.postId)
     slot.pending = true
     this.loading.add(postId)
     this.pendingPlace.set(postId, place)
@@ -283,6 +297,18 @@ export class Direct3DPool {
 
   // ------------------------------------------------------------------ internals
 
+  private reserveSlot(visible?: ReadonlySet<string>): Slot | null {
+    let slot = this.slots.find((s) => !s.postId && !s.pending)
+    if (!slot && this.slots.length < this.maxSlots) {
+      slot = this.makeSlot()
+      this.slots.push(slot)
+    }
+    if (!slot) slot = this.pickEvictable(visible)
+    if (!slot) return null
+    if (slot.postId) this.release(slot.postId)
+    return slot
+  }
+
   private makeSlot(): Slot {
     return {
       postId: null, pending: false, visible: false, playing: false, started: false,
@@ -322,6 +348,70 @@ export class Direct3DPool {
     if (slot.clip) updateCellClip(slot.clip, place)
   }
 
+  /** Frame + parent a container that is already in this scene. */
+  private install(
+    slot: Slot,
+    postId: string,
+    container: AssetContainer,
+    cameraIndex: number | undefined,
+    sounds: Sound[],
+  ): void {
+    graphics.applyToContainer(container)
+    const clip = makeCellClip()
+    for (const mat of container.materials) {
+      mat.clipPlane = clip[0]
+      mat.clipPlane2 = clip[1]
+      mat.clipPlane3 = clip[2]
+      mat.clipPlane4 = clip[3]
+    }
+    for (const m of container.meshes) {
+      if (m.material) m.material.backFaceCulling = false
+      // Background content: taps must hit the card/node quads, never a mesh.
+      m.isPickable = false
+    }
+    // Imported GLB lights/cameras lit neighbouring cards. The pool's own
+    // rig is the only light; the flat camera is the only camera.
+    for (const l of container.lights) l.setEnabled(false)
+    for (const c of container.cameras) c.setEnabled(false)
+
+    const cell = this.pendingPlace.get(postId)
+    const aspect = cell && cell.h > 0 ? cell.w / cell.h : 1.6
+    const frame = frameModel(container, cameraIndex ?? 0, aspect)
+
+    const root = new TransformNode(`d3-${postId.slice(0, 8)}`, this.scene)
+    const orient = new TransformNode(`d3-orient-${postId.slice(0, 8)}`, this.scene)
+    const fit = new TransformNode(`d3-fit-${postId.slice(0, 8)}`, this.scene)
+    orient.parent = root
+    fit.parent = orient
+    orient.rotationQuaternion = frame.rot
+    fit.position = frame.pivot.scale(-1)
+    for (const n of container.rootNodes) n.parent = fit
+    root.computeWorldMatrix(true)
+    orient.computeWorldMatrix(true)
+    fit.computeWorldMatrix(true)
+    for (const n of container.rootNodes) {
+      ;(n as unknown as { computeWorldMatrix: (force?: boolean) => unknown }).computeWorldMatrix(true)
+    }
+
+    slot.root = root
+    slot.orient = orient
+    slot.fit = fit
+    slot.clip = clip
+    slot.anims = container.animationGroups.filter((g) => g.targetedAnimations.length > 0)
+    for (const g of container.animationGroups) g.stop()
+    for (const s of sounds) this.claimedSounds.add(s)
+    slot.sounds = sounds
+    slot.frame = frame
+    slot.postId = postId
+    slot.started = false
+    slot.playing = false
+    slot.warm = false
+    slot.warmUntil = performance.now() + WARMUP_MS
+    this.applyPlace(slot, this.pendingPlace.get(postId) ?? { x: 0, y: 0, z: 0, w: 1, h: 1, depth: 1 })
+    this.byPost.set(postId, slot)
+    this.onPlaced?.(postId)
+  }
+
   private async load(slot: Slot, postId: string): Promise<void> {
     let container: AssetContainer | null = null
     const alive = (): boolean => this.slots.includes(slot)
@@ -337,59 +427,8 @@ export class Direct3DPool {
       if (!alive()) { container.dispose(); throw new Error('slot recycled') }
       container.addAllToScene()
       slot.container = container // clearSlot() owns the cleanup from here on
-      graphics.applyToContainer(container)
-      const clip = makeCellClip()
-      for (const mat of container.materials) {
-        mat.clipPlane = clip[0]
-        mat.clipPlane2 = clip[1]
-        mat.clipPlane3 = clip[2]
-        mat.clipPlane4 = clip[3]
-      }
-      for (const m of container.meshes) {
-        if (m.material) m.material.backFaceCulling = false
-        // Background content: taps must hit the card/node quads, never a mesh.
-        m.isPickable = false
-      }
-      // Imported GLB lights/cameras lit neighbouring cards. The pool's own
-      // rig is the only light; the flat camera is the only camera.
-      for (const l of container.lights) l.setEnabled(false)
-      for (const c of container.cameras) c.setEnabled(false)
-
-      const cell = this.pendingPlace.get(postId)
-      const aspect = cell && cell.h > 0 ? cell.w / cell.h : 1.6
-      const frame = frameModel(container, model.cameraIndex ?? 0, aspect)
-
-      const root = new TransformNode(`d3-${postId.slice(0, 8)}`, this.scene)
-      const orient = new TransformNode(`d3-orient-${postId.slice(0, 8)}`, this.scene)
-      const fit = new TransformNode(`d3-fit-${postId.slice(0, 8)}`, this.scene)
-      orient.parent = root
-      fit.parent = orient
-      orient.rotationQuaternion = frame.rot
-      fit.position = frame.pivot.scale(-1)
-      for (const n of container.rootNodes) n.parent = fit
-      root.computeWorldMatrix(true)
-      orient.computeWorldMatrix(true)
-      fit.computeWorldMatrix(true)
-      for (const n of container.rootNodes) {
-        ;(n as unknown as { computeWorldMatrix: (force?: boolean) => unknown }).computeWorldMatrix(true)
-      }
-
-      slot.root = root
-      slot.orient = orient
-      slot.fit = fit
-      slot.clip = clip
-      slot.anims = container.animationGroups.filter((g) => g.targetedAnimations.length > 0)
-      for (const g of container.animationGroups) g.stop()
-      slot.sounds = claimModelSounds(this.scene, container, soundBaseline, this.claimedSounds)
-      slot.frame = frame
-      slot.postId = postId
-      slot.started = false
-      slot.playing = false
-      slot.warm = false
-      slot.warmUntil = performance.now() + WARMUP_MS
-      this.applyPlace(slot, this.pendingPlace.get(postId) ?? { x: 0, y: 0, z: 0, w: 1, h: 1, depth: 1 })
-      this.byPost.set(postId, slot)
-      this.onPlaced?.(postId)
+      const sounds = claimModelSounds(this.scene, container, soundBaseline, this.claimedSounds)
+      this.install(slot, postId, container, model.cameraIndex, sounds)
     } catch {
       // One cleanup path: clearSlot() disposes the container, the transform
       // chain and any claimed sounds, whatever stage the load reached.
