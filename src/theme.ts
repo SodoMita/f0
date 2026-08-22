@@ -51,7 +51,7 @@ export const LIMITS = {
   boardRoots: 48,
   maxEventsPage: 200,
   // Security caps (2026-08-22 hostile-rig audit). Each one stopped a
-  // concrete remote attack — see docs/SPEC.md AMENDMENT 88.
+  // concrete remote attack — see docs/SPEC.md AMENDMENT 89.
   // Replicas per post: a hostile `url`-tag storm (hundreds of slow URLs)
   // pinned a download lane for hours; the real format ships 1–3.
   replicasPerPost: 3,
@@ -73,6 +73,11 @@ export const LIMITS = {
   // Total embedded-audio bytes per model (MSFT_audio_emitter clips). A
   // hostile 15 MiB "silent" WAV is a decode bomb; real clips are small.
   audioBytes: 8 * 1024 * 1024,
+  // Max nodes rendered in one thread map. Each node is 5 textured planes,
+  // so a hostile reply storm (thousands of replies on one root) would
+  // freeze the tab on open; the view shows root + newest + a "+N more"
+  // notice instead.
+  threadNodes: 120,
   // Max chars of nostr event `content` we publish / accept as the model name
   // (AMENDMENT 66). Older posts have empty content; anything longer is
   // off-format and the event is skipped.

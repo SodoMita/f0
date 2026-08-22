@@ -1416,7 +1416,7 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     composition preserved, near plane, re-frame incl. inertia, N of M,
     speed 0, audio claim/S-toggle/hand-off transfer, autoplay respect,
     no-camera path).
-88. HOSTILE-RIG SECURITY HARDENING (2026-08-22). A local MALICIOUS relay +
+89. HOSTILE-RIG SECURITY HARDENING (2026-08-22). A local MALICIOUS relay +
     Blossom server + model server (scripts/hostile-rig.mjs, driven by
     scripts/hostile-audit.mjs through a real browser) was run against the
     app. Everything it serves is signed/consistent — the attacker controls
@@ -1471,6 +1471,15 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
       post per relay + stored in the owned-posts record). Fix: upload()
       refuses response bodies > 16 KiB and urls > 2048 chars
       (src/protocol/blossom.ts).
+    - Reply-storm thread open: 5000 replies on one root made open() build
+      5 meshes + a poster job per reply (multi-second freeze on open). Fix:
+      the thread renders root + newest up to LIMITS.threadNodes (120) plus
+      one "+N more" notice card (src/board/threadView.ts). Measured: 289
+      replies → 119 nodes, 308 ms open.
+    - Corrupt DRACO buffer: decode failure is fast (~38 ms) but cost scales
+      with the compressed payload. Fix: compressed-geometry payload
+      (KHR_draco_mesh_compression / EXT_meshopt_compression buffer views)
+      is capped at 4 MiB in validateGLB.
     Not exploitable (verified): DOM XSS via name/filename/content/color —
     all HUD sinks are textContent and the drawer/search render escaped text;
     the CSP (web: script-src 'self'; standalone: 'unsafe-inline' + data:,
@@ -1478,5 +1487,12 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     own JSON.parse of a deeply-nested (30k-deep) EVENT is contained by
     nostr-tools' try/catch. Reconnect floods hit the designed backoff and
     leave no socket leak (debugCounts stays flat).
-    Guard: bun scripts/hostile-rig.mjs + node scripts/hostile-audit.mjs
+    Final hostile-rig run (2026-08-22): all 22 attacks benign — hostile
+    relays lose their sockets on binary/oversized frames (E201, then
+    backoff), floods index ~300 of 3000–5000 events with zero measurable
+    freeze, the 400-replica URL storm tries exactly 3 replicas, the
+    gzip bomb inflates at most the 20 MiB model cap and is then hash
+    -rejected, and every hostile GLB is refused by validateGLB before
+    Babylon. Canonical gate (static + unit + e2e) green on the same build.
+    Guard: node scripts/hostile-rig.mjs + node scripts/hostile-audit.mjs
     (22 attacks; the table above is the expected-impact list).

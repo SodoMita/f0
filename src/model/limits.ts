@@ -264,6 +264,27 @@ export function validateGLB(bytes: Uint8Array): LimitReport {
     }
   }
 
+  // SECURITY (hostile-rig audit): compressed-geometry payloads are opaque
+  // to every check above — the decoder is the only thing that can read
+  // them, and a hostile CORRUPT draco buffer makes the WASM decoder burn
+  // main thread until it gives up (measured ~1.1 s for a 2 KB corrupt
+  // buffer; the cost scales with the buffer). Cap the compressed payload:
+  // real 2-million-vertex models compress to well under 4 MiB.
+  {
+    let compressed = 0
+    const dExt = gltf.extensions?.KHR_draco_mesh_compression
+    const mExt = gltf.extensions?.EXT_meshopt_compression
+    for (const ext of [dExt, mExt]) {
+      if (!ext) continue
+      for (const b of (ext.buffers ?? [])) {
+        const bv = bufferViews[b?.bufferView]
+        if (!bv || typeof bv.byteLength !== 'number') return fail('Compressed-geometry buffer view is missing.')
+        compressed += bv.byteLength
+      }
+    }
+    if (compressed > 4 * 1024 * 1024) return fail(`Compressed geometry payload ${(compressed / 1048576).toFixed(1)} MiB exceeds the 4 MiB budget.`)
+  }
+
   // SECURITY (hostile-rig audit): node transforms must be finite and
   // human-scale. translation/scale of 1e308 pushes the world matrix into
   // Inf/NaN, which poisons every downstream bounding-box/auto-fit (blank
