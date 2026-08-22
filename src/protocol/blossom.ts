@@ -38,14 +38,38 @@ function isGzipBytes(bytes: Uint8Array): boolean {
  * to us raw, so SHA-256 sees gzip bytes instead of the model. Best effort —
  * null when the stream is not actually gzip, the decompressor is missing,
  * or the inflated result would exceed the model cap.
+ *
+ * SECURITY (hostile-rig audit): the old path buffered the ENTIRE inflated
+ * body (`new Response(stream).arrayBuffer()`) and only THEN checked the
+ * cap — a 2 KB gzip bomb that inflates to gigabytes allocated the whole
+ * bomb in memory first (renderer OOM). The inflate is now streamed and the
+ * stream is aborted the moment the running total crosses `maxBytes`, so a
+ * bomb costs at most one cap's worth of memory.
  */
-async function tryInflateGzip(bytes: Uint8Array): Promise<Uint8Array<ArrayBuffer> | null> {
+async function tryInflateGzip(bytes: Uint8Array, maxBytes: number): Promise<Uint8Array<ArrayBuffer> | null> {
   if (!isGzipBytes(bytes) || typeof DecompressionStream === 'undefined') return null
   try {
     const blob = new Blob([bytes.buffer as ArrayBuffer])
-    const inflated = await new Response(blob.stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer()
-    if (inflated.byteLength === 0 || inflated.byteLength > LIMITS.modelBytesHard) return null
-    return new Uint8Array(inflated)
+    const reader = blob.stream().pipeThrough(new DecompressionStream('gzip')).getReader()
+    const chunks: Uint8Array[] = []
+    let total = 0
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (!value) continue
+      total += value.length
+      if (total > maxBytes) {
+        // bomb: stop decompressing instead of buffering the rest
+        try { await reader.cancel() } catch { /* already gone */ }
+        return null
+      }
+      chunks.push(value)
+    }
+    if (total === 0) return null
+    const out = new Uint8Array(total)
+    let off = 0
+    for (const c of chunks) { out.set(c, off); off += c.length }
+    return out
   } catch { return null }
 }
 
@@ -150,8 +174,9 @@ export class BlossomClient {
         if (got !== expect) {
           // gzip rescue (AMENDMENT 71): a body the browser did not
           // decompress itself. Re-hash the inflated bytes before giving up
-          // on this replica.
-          const plain = await tryInflateGzip(bytes)
+          // on this replica. The inflate is capped at the same cap the raw
+          // stream obeys (hostile-rig audit: unbounded inflate = OOM).
+          const plain = await tryInflateGzip(bytes, cap)
           if (plain && (await sha256Hex(plain)) === expect) {
             bytes = plain
             got = expect
@@ -208,12 +233,20 @@ export class BlossomClient {
           Authorization: `Nostr ${this.auth('upload', hash, secret)}`,
         }, 60000, originOf(server), signal)
         if (!res.ok) throw new Error(`${server} upload failed (${res.status})`)
+        // SECURITY (hostile-rig audit): the upload RESPONSE is hostile
+        // input. A 20 MiB JSON body (memory spike + parse cost) or a 2 MiB
+        // url string (the value lands in the PUBLISHED event's tags — a
+        // multi-megabyte post, repeated per relay, and stored in the
+        // owned-posts record) both make the player's own post the attack.
+        // A real response is a few hundred bytes; refuse anything fat.
+        if (res.body.length > 16 * 1024) throw new Error(`${server} returned an oversized response`)
         let json: { url?: string; sha256?: string }
         try { json = JSON.parse(res.body) as { url?: string; sha256?: string } } catch { throw new Error(`${server} returned invalid JSON`) }
         // A regex check alone lets through parseable-garbage like "https://"
         // (no host), which would later crash publish.ts's `new URL(u.url)`
         // while building the server tags. Parse and require a real host.
-        if (!json.url) throw new Error(`${server} returned invalid URL`)
+        if (typeof json.url !== 'string' || !json.url) throw new Error(`${server} returned invalid URL`)
+        if (json.url.length > 2048) throw new Error(`${server} returned an oversized URL`)
         let parsedUrl: URL
         try { parsedUrl = new URL(json.url) } catch { throw new Error(`${server} returned invalid URL`) }
         if (parsedUrl.protocol !== 'https:' || !parsedUrl.hostname) throw new Error(`${server} returned invalid URL`)

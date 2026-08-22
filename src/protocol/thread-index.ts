@@ -1,3 +1,5 @@
+import { LIMITS } from '../theme'
+
 export type ThreadRole = 'root' | 'reply' | 'malformed'
 
 export type ThreadMeta = {
@@ -71,9 +73,35 @@ export class ThreadIndex {
   readonly byId = new Map<string, ThreadMeta>()
   readonly children = new Map<string, Set<string>>()
   readonly roots = new Set<string>()
+  // SECURITY (hostile-rig audit): the index is BOUNDED game state, not a
+  // database. A hostile relay can push a million valid distinct events and
+  // grow this without limit (heap + per-refresh orderedRoots() cost). When
+  // the cap is hit the OLDEST entry is evicted (FIFO). `order` + `childOf`
+  // make eviction O(1) — a reverse-scan per eviction would be its own
+  // O(n²) freeze under a sustained reply storm.
+  private order: string[] = []
+  private childOf = new Map<string, string>()
+
+  private evictOldest(): void {
+    while (this.order.length) {
+      const oldId = this.order.shift()!
+      if (!this.byId.has(oldId)) continue // already gone
+      this.byId.delete(oldId)
+      this.roots.delete(oldId)
+      const pid = this.childOf.get(oldId)
+      if (pid) {
+        this.childOf.delete(oldId)
+        const kids = this.children.get(pid)
+        if (kids) { kids.delete(oldId); if (!kids.size) this.children.delete(pid) }
+      }
+      return
+    }
+  }
 
   add(meta: ThreadMeta): boolean {
     if (meta.role === 'malformed') return false
+    if (this.byId.size >= LIMITS.maxIndexedEvents) this.evictOldest()
+    if (!this.byId.has(meta.eventId)) this.order.push(meta.eventId)
     this.byId.set(meta.eventId, meta)
     if (meta.role === 'root' || !meta.refs.parentId) {
       this.roots.add(meta.eventId)
@@ -83,6 +111,7 @@ export class ThreadIndex {
     let set = this.children.get(meta.refs.parentId)
     if (!set) { set = new Set(); this.children.set(meta.refs.parentId, set) }
     set.add(meta.eventId)
+    this.childOf.set(meta.eventId, meta.refs.parentId)
     this.roots.delete(meta.eventId)
     return true
   }

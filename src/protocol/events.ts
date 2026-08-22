@@ -49,15 +49,27 @@ function getWorker(): Worker | null {
 }
 
 /**
- * Verify off the main thread. Falls back to synchronous verification when
- * workers are unavailable. The result is remembered per event object exactly
- * like `verifyFresh`, so `parseModelEvent` never pays for it again.
+ * Verify off the main thread. Falls back to synchronous verification only
+ * when workers are UNAVAILABLE (workerBroken / no Worker global).
+ *
+ * SECURITY (hostile-rig audit): under an event flood the worker queue
+ * backlogs past the old 8 s timeout and the "fallback" ran secp256k1 on the
+ * MAIN thread for every queued event — a multi-second UI freeze per burst.
+ * Timeouts and an over-full queue now FAIL CLOSED (event dropped, unverified
+ * content is never rendered). The synchronous path is reserved for the
+ * genuinely-workerless case, where each event pays its own verify inline.
  */
+const MAX_INFLIGHT_JOBS = 256
+
 export async function verifyFreshAsync(event: Event): Promise<boolean> {
   if (selfVerified.has(event)) return true
   try { delete (event as Record<symbol, unknown>)[verifiedSymbol] } catch { /* non-extensible */ }
   const w = getWorker()
   if (!w) return verifyFresh(event)
+  // Queue overflow = the relay is flooding faster than one secp256k1
+  // verification per ~10 ms can keep up. Drop (fail closed) instead of
+  // letting the backlog grow or spilling onto the main thread.
+  if (jobs.size >= MAX_INFLIGHT_JOBS) return false
   const id = nextJob++
   const ok = await new Promise<boolean>((resolve) => {
     let done = false
@@ -70,12 +82,14 @@ export async function verifyFreshAsync(event: Event): Promise<boolean> {
     }
     // A stuck worker used to pin every event in `jobs` forever (the Promise
     // never settled). Relays keep sending while the tab idles, so that map
-    // grew without bound. Time out to the sync path instead.
-    const timer = setTimeout(() => finish(verifyFresh(event)), 8000)
+    // grew without bound. Time out by DROPPING the event instead of
+    // re-verifying it on the main thread (flood-safe).
+    const timer = setTimeout(() => finish(false), 8000)
     jobs.set(id, finish)
     try {
       w.postMessage({ id, event })
     } catch {
+      // Structured clone failed (exotic event shape) — verify inline.
       finish(verifyEvent(event))
     }
   })
@@ -109,6 +123,10 @@ export function parseModelEvent(event: Event): ThreadMeta | null {
   // older format posts have it empty. Longer content is off-format — skip.
   if (event.kind !== MODEL_KIND || event.content.length > LIMITS.contentChars || !verifyFresh(event)) return null
   const tags = event.tags as string[][]
+  // SECURITY (hostile-rig audit): a 200k-tag event made every tag-array pass
+  // below (and nostr-tools' own filter matching) do O(n) work for nothing —
+  // no legitimate post carries more than a handful.
+  if (tags.length > LIMITS.maxEventTags) return null
 
   const mime = tag(tags, 'm')
   if (!mime || !(MODEL_MIMES as readonly string[]).includes(mime)) return null
@@ -124,7 +142,12 @@ export function parseModelEvent(event: Event): ThreadMeta | null {
   const urls = [
     ...tags.filter((t) => t[0] === 'url' && typeof t[1] === 'string').map((t) => t[1]),
     ...tags.filter((t) => t[0] === 'fallback' && typeof t[1] === 'string').map((t) => t[1]),
-  ].filter((u) => /^https:\/\//i.test(u))
+  // SECURITY (hostile-rig audit): a post can carry a `url`/`fallback` tag
+  // STORM (hundreds of slow replicas). download() tries them in order, so
+  // 400 slow URLs pinned a poster lane for >50 min — and every retry
+  // re-ran the whole list. The real format ships 1–3 replicas: keep the
+  // first `replicasPerPost`, ignore the rest.
+  ].filter((u) => /^https:\/\//i.test(u)).slice(0, LIMITS.replicasPerPost)
 
   const tintRaw = tag(tags, 'color')
   const tint = tintRaw && HEX.test(tintRaw) ? tintRaw : '#1b1a1a'

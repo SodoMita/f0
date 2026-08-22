@@ -23,7 +23,7 @@ import {
 } from './cardMaterial'
 import type { ShaderMaterial } from '@babylonjs/core/Materials/shaderMaterial'
 import { flatCamera, makeBackdropTexture, paintBackdrop, makeSpinnerTexture, paintPlayButtons, luminance, shade, roundRect } from '../core/gfx'
-import { theme } from '../theme'
+import { LIMITS, theme } from '../theme'
 import { nodeWorthTexture } from './threadGate'
 import { type CardFade, finishFade, setOpacityNow, crossfadeTo, tickFade } from './cardFade'
 import { PlayIntent, playVisible } from './playIntent'
@@ -108,6 +108,10 @@ export class ThreadView {
   private spinnerTex: DynamicTexture
   private rootFrameTex: DynamicTexture
   private replyTex!: DynamicTexture
+  // "+N more" notice card (the thread is capped — hostile-rig audit)
+  private noticeMesh: Mesh | null = null
+  private noticeMat: ShaderMaterial | null = null
+  private noticeTex: DynamicTexture | null = null
   // shared ▶/⏸ button textures (every node samples one of these)
   private playTexOff: DynamicTexture
   private playTexOn: DynamicTexture
@@ -739,8 +743,23 @@ export class ThreadView {
     // happens on a different scene — if we leave the queue paused, every
     // getPoster sits forever, spinners never stop, the tree looks frozen.
     this.assets.setPaused(false)
-    const metas = this.index.flatten(rootId).filter((m) => !m.hashFailed && !m.tombstoned)
-    if (metas.length === 0) return
+    const allMetas = this.index.flatten(rootId).filter((m) => !m.hashFailed && !m.tombstoned)
+    if (allMetas.length === 0) return
+    // SECURITY (hostile-rig audit): each node is 5 textured planes, so a
+    // hostile reply storm (thousands of replies on one root — the index
+    // cap allows it) would freeze the tab the moment the thread opens.
+    // Render root + the NEWEST replies up to LIMITS.threadNodes, plus one
+    // "+N more" notice card for the hidden tail.
+    let metas = allMetas
+    let hiddenCount = 0
+    if (allMetas.length > LIMITS.threadNodes) {
+      hiddenCount = allMetas.length - LIMITS.threadNodes
+      const rootMeta = allMetas.find((m) => m.eventId === rootId)
+      const rest = allMetas.filter((m) => m.eventId !== rootId).sort((a, b) => b.createdAt - a.createdAt)
+      metas = rootMeta
+        ? [rootMeta, ...rest.slice(0, LIMITS.threadNodes - 2)]
+        : rest.slice(0, LIMITS.threadNodes - 1)
+    }
     // play-intent bookkeeping belongs to this tree: drop entries for posts
     // that are no longer part of it (the map rebuilt)
     this.intent.prune(new Set(metas.map((m) => m.eventId)))
@@ -841,8 +860,56 @@ export class ThreadView {
         this.edges.push({ parent: parentId, child: meta.eventId })
       }
     }
+    if (hiddenCount > 0) this.addNoticeCard(pos, rootId, hiddenCount)
     this.buildEdges()
     this.fit()
+  }
+
+  /**
+   * "+N more" notice card, right of the tree. Not pickable: the hidden tail
+   * is a security boundary (a hostile storm), not pagination.
+   */
+  private addNoticeCard(
+    pos: Map<string, { x: number; y: number; depth: number }>,
+    rootId: string,
+    hiddenCount: number,
+  ): void {
+    this.disposeNotice()
+    const w = 6.4, h = 2.8
+    const rootP = pos.get(rootId)
+    let maxX = -Infinity
+    for (const p of pos.values()) maxX = Math.max(maxX, p.x)
+    const x = (rootP ? Math.max(rootP.x, maxX) : maxX) + w * 0.5 + 2.4
+    const y = rootP?.y ?? 0
+    const tex = new DynamicTexture('thread-more-tex', { width: 512, height: 200 }, this.scene, true)
+    tex.hasAlpha = true
+    const ctx = tex.getContext() as CanvasRenderingContext2D
+    ctx.clearRect(0, 0, 512, 200)
+    roundRect(ctx, 4, 4, 504, 192, 20)
+    ctx.fillStyle = this.isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'
+    ctx.fill()
+    ctx.lineWidth = 2
+    ctx.strokeStyle = this.isDark ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.25)'
+    ctx.stroke()
+    ctx.fillStyle = inkFor(this.isDark)
+    ctx.font = '600 54px system-ui, sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(`+${hiddenCount} more`, 256, 104)
+    tex.update()
+    const mat = makeOverlayMaterial(this.scene)
+    setCardTexture(mat, tex)
+    setCardWhite(mat)
+    setCardFlip(mat, 'dyn')
+    const mesh = MeshBuilder.CreatePlane('tnode-more', { width: 4, height: 4 }, this.scene)
+    mesh.material = mat
+    mesh.scaling.set(w / 4, h / 4, 1)
+    mesh.position.set(x, y, 0.05)
+    mesh.isPickable = false
+    mesh.renderingGroupId = 1
+    this.noticeMesh = mesh
+    this.noticeMat = mat
+    this.noticeTex = tex
   }
 
   /**
@@ -1220,7 +1287,17 @@ export class ThreadView {
     this.panX = 0
     this.panY = 0
     this.zoom = 1
+    this.disposeNotice()
     this.applyCamera()
+  }
+
+  private disposeNotice(): void {
+    try { this.noticeMesh?.dispose() } catch { /* already gone */ }
+    try { this.noticeMat?.dispose() } catch { /* already gone */ }
+    try { this.noticeTex?.dispose() } catch { /* already gone */ }
+    this.noticeMesh = null
+    this.noticeMat = null
+    this.noticeTex = null
   }
 
   dispose(): void {
