@@ -832,8 +832,10 @@ const httpsServer = createHttps({ key: KEY, cert: CERT }, (req, res) => {
       res.writeHead(200, { 'content-type': 'application/json', ...cors })
       res.end(JSON.stringify({ ok: true, name, clients: clients.size }))
     } catch (e) {
+      // log locally; never echo error detail back (no stack-trace exposure)
+      console.error('[hostile] attack failed:', e)
       res.writeHead(500, { 'content-type': 'application/json', ...cors })
-      res.end(JSON.stringify({ ok: false, error: String(e) }))
+      res.end(JSON.stringify({ ok: false, error: 'attack failed to arm' }))
     }
     return
   }
@@ -950,9 +952,10 @@ const proxy = createHttp((req, res) => {
   req.on('error', () => {})
   res.on('error', () => {})
   if (req.url?.startsWith('/__attack') || req.url === '/__attacks') {
-    // the hostile server is HTTPS — forward over TLS (self-signed is fine locally)
+    // the hostile server is HTTPS — forward over TLS, validated against the
+    // rig's own self-signed cert (localhost CN) rather than skipping checks
     const fwd = httpsRequest(
-      { host: 'localhost', port: RELAY_PORT, path: req.url, method: req.method, rejectUnauthorized: false },
+      { host: 'localhost', port: RELAY_PORT, path: req.url, method: req.method, ca: CERT },
       (up) => {
         res.writeHead(up.statusCode, { 'content-type': 'application/json' })
         up.pipe(res)
