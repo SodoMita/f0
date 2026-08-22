@@ -4,7 +4,10 @@ Claim a task by moving it to **In progress** with your name/date, push, then
 move it to **Done** with a commit reference. One agent per area.
 
 ## Done
-- [x] **Library palette texture + low-poly ball faces + voxel art** (agent
+- [x] **Board 3D toggle reuses 2D loads** (agent arena, 2026-08-21, SPEC
+      AMENDMENT 88): live previews hand off into Direct3DPool.adopt; posters
+      stay as placeholders. Guard: `bun scripts/direct3d-unit.mjs`.
+- [x] **Library palette texture + low-poly ball faces + voxel art** (agent)
       arena, 2026-08-21, SPEC AMENDMENT 86): colour left the vertices. All 61
       generated library pieces now sample ONE embedded 32x32 palette PNG
       (`scripts/palette.py`, 64 curated swatches, 4x4 px each, NEAREST) through
@@ -883,7 +886,6 @@ move it to **Done** with a commit reference. One agent per area.
   onto main instead of rewriting again. Branch protection now blocks force
   pushes to `main`.
 ## In progress
-
 
 - [ ] **Per-card play/pause (animation + sound) + autoplay setting** — claimed by
       agent arena, 2026-08-20. SPEC AMENDMENT 69. Board cards and thread nodes
