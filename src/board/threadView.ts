@@ -16,6 +16,7 @@ import type { ThreadIndex, ThreadMeta } from '../protocol/thread-index'
 import { PreviewPool } from './previewPool'
 import { Direct3DPool, type Place3D } from './modelCard3d'
 import type { LivePool } from './livePool'
+import { adoptPreviewInto3d } from './handoff3d'
 import {
   makeCardMaterial, setCardTexture, setCardTexture2, setCardTint, setCardTint2, setCardWhite,
   setCardFlip, setCardOpacity, type CardTextureKind,
@@ -188,6 +189,14 @@ export class ThreadView {
       const n = this.nodes.get(postId)
       if (!n || n.mesh.isDisposed()) return
       n.spinner.setEnabled(false)
+      this.setNodeOpacityNow(n, 0)
+      this.positionPlayButton(n)
+      this.form.kick()
+    }
+    this.pool3d.onReleased = (postId) => {
+      const n = this.nodes.get(postId)
+      if (!n || n.mesh.isDisposed()) return
+      if (this.threeD && n.poster) this.showNodePoster(n)
       this.positionPlayButton(n)
       this.form.kick()
     }
@@ -372,10 +381,13 @@ export class ThreadView {
 
   /** Show the node's poster texture (fallback after its live preview is released). */
   private showNodePoster(n: TNode): void {
-    // In 3D mode the direct model owns the node; a stale preview release must
-    // not re-show a poster over it. (A real 3D-load failure goes through
-    // drivePoster2D with the current modeGen, which is the intended fallback.)
-    if (this.threeD) { this.setNodeOpacityNow(n, 0); return }
+    // In 3D mode a live mesh owns the node. A stale preview release must
+    // not stack a poster over that mesh — but if 3D is not live yet, keep
+    // the 2D plate we already rendered (AMENDMENT 88).
+    if (this.threeD) {
+      if (this.pool3d.isLive(n.meta.eventId)) { this.setNodeOpacityNow(n, 0); return }
+      if (!n.poster) { this.setNodeOpacityNow(n, 0); return }
+    }
     if (n.poster) {
       this.crossfadeTo(n, n.poster, '#FFFFFF', 'rtt')
     } else {
@@ -498,17 +510,18 @@ export class ThreadView {
     this.modeGen++ // invalidate in-flight poster jobs from the old mode
     // Free the pipeline we are leaving (never both resident at once).
     if (was) this.pool3d.releaseAll()
-    else if (this.live.ownsPreview('thread')) this.previewPool.releaseAll()
+    else if (this.live.ownsPreview('thread')) {
+      const cells = new Map<string, { place: Place3D; cameraIndex?: number }>()
+      for (const n of this.nodes.values())
+        cells.set(n.meta.eventId, { place: this.placeFor(n), cameraIndex: n.meta.previewCamera })
+      adoptPreviewInto3d(this.previewPool, this.pool3d, this.scene, cells)
+      this.previewPool.releaseAll()
+    }
     for (const n of this.nodes.values()) {
-      n.poster = null
       n.live = null
-      if (on) {
-        this.setNodeOpacityNow(n, 0)
-        n.spinner.setEnabled(false)
-      } else {
-        this.setNodeOpacityNow(n, 0.16)
-        n.spinner.setEnabled(false)
-      }
+      n.spinner.setEnabled(false)
+      if (on && this.pool3d.isLive(n.meta.eventId)) this.setNodeOpacityNow(n, 0)
+      else if (!on) this.setNodeOpacityNow(n, n.poster ? 1 : 0.16)
       this.positionPlayButton(n)
     }
     if (on) this.sync3D()
@@ -600,7 +613,7 @@ export class ThreadView {
     if (!this.threeD || !this.assets) return
     const meta = n.meta
     if (meta.hashFailed || this.assets.isHashFailed(meta.eventId)) return
-    n.spinner.setEnabled(true)
+    if (!n.poster) n.spinner.setEnabled(true)
     const ok = this.pool3d.request(meta.eventId, this.placeFor(n), this.visibleNodeIds())
     if (!ok) {
       // Rejected (bad bytes): fall back to the poster. A capacity miss is

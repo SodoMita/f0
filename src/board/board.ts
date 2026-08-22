@@ -18,6 +18,7 @@ import type { AssetCache } from '../core/assets'
 import type { PreviewPool } from './previewPool'
 import { type Direct3DPool, type Place3D } from './modelCard3d'
 import { LivePool } from './livePool'
+import { adoptPreviewInto3d } from './handoff3d'
 import {
   makeCardMaterial, setCardTexture, setCardTexture2, setCardTint, setCardTint2, setCardWhite, setCardFlip, setCardOpacity, type CardTextureKind,
 } from './cardMaterial'
@@ -239,7 +240,7 @@ export class Board {
         if (!slot || !slot.live) return
         slot.live = null
         slot.pendingLive = null
-        this.showPoster(slot)
+        if (!this.threeD) this.showPoster(slot)
         this.invalidate()
         this.positionExtras(slot)
       },
@@ -264,8 +265,7 @@ export class Board {
       const slot = this.cards.find((c) => c.meta?.eventId === postId)
       if (!slot) return
       slot.spinner.setEnabled(false)
-      // A real model stands on the card: a default contact shadow (the poster
-      // footprint is 2D-only and never computed in 3D mode).
+      this.setOpacityNow(slot, 0)
       slot.footprint = this.pool3d.footprintOf(postId) ?? { cx: 0.5, bottom: 0.1, w: 0.66 }
       slot.shadow.setEnabled(this.contactStrength > 0)
       this.positionExtras(slot)
@@ -283,8 +283,10 @@ export class Board {
     this.pool3d.onReleased = (postId) => {
       const slot = this.cards.find((c) => c.meta?.eventId === postId)
       if (!slot) return
-      slot.footprint = null
-      slot.shadow.setEnabled(false)
+      slot.footprint = (slot.meta && this.assets?.getFootprint(slot.meta)) ?? null
+      slot.shadow.setEnabled(!!slot.footprint && this.contactStrength > 0)
+      this.showPoster(slot)
+      this.positionExtras(slot)
     }
     this.pool3d.onLoadDone = () => { if (this.live.view === 'board') this.refreshVisibility() }
 
@@ -478,16 +480,23 @@ export class Board {
     const was = this.threeD
     this.threeD = on
     this.modeGen++ // invalidate any in-flight poster jobs from the old mode
-    // Free the pipeline we are leaving (never both resident at once).
     if (was) this.pool3d.releaseAll()
-    else if (this.live.ownsPreview('board')) this.previewPool.releaseAll()
+    else if (this.live.ownsPreview('board')) {
+      const cells = new Map<string, { place: Place3D; cameraIndex?: number }>()
+      for (const s of this.cards) if (s.meta && s.row)
+        cells.set(s.meta.eventId, { place: this.placeFor(s), cameraIndex: s.meta.previewCamera })
+      adoptPreviewInto3d(this.previewPool, this.pool3d, this.scene, cells)
+      this.previewPool.releaseAll()
+    }
     for (const slot of this.cards) {
       if (!slot.meta || !slot.row) continue
-      if (was) { slot.poster = null; slot.live = null }
-      this.bind(slot, slot.row) // bind() is 3D-aware
+      slot.live = null
       slot.requested = false
       slot.failed = false
       slot.spinSince = 0
+      slot.spinner.setEnabled(false)
+      if (on && this.pool3d.isLive(slot.meta.eventId)) this.setOpacityNow(slot, 0)
+      else if (!on) this.bind(slot, slot.row)
     }
     this.lastSyncScroll = Number.NEGATIVE_INFINITY
     this.refreshVisibility()
@@ -693,26 +702,10 @@ export class Board {
     slot.h = size.h
     slot.mesh.scaling.set(size.w / 4, size.h / 4, 1)
 
-    if (this.threeD) {
-      // Direct-3D mode: the card quad is an invisible tap target; the real
-      // model is loaded into the scene by drive3D() once the feed settles.
-      slot.poster = null
-      slot.live = null
-      slot.footprint = null
-      setCardTexture(slot.mat, null)
-      setCardTint(slot.mat, row.meta.tint || theme.panel)
-      this.setOpacityNow(slot, 0)
-      setCardFlip(slot.mat, 'raw')
-      slot.shadow.setEnabled(false)
-      this.drawBadge(slot)
-      return
-    }
-
-    // Fast path: poster texture still on the GPU -> rebind synchronously.
     const cached = this.assets?.peekPoster(row.meta)
     if (cached) {
       slot.poster = cached
-      slot.requested = true // nothing to download; skip the drive() round trip
+      slot.requested = true
       setCardTexture(slot.mat, cached)
       setCardWhite(slot.mat)
       this.setOpacityNow(slot, 1)
@@ -722,10 +715,9 @@ export class Board {
     } else {
       slot.poster = null
       slot.footprint = null
-      // Placeholder: a barely-there plate, not an opaque slab.
       setCardTexture(slot.mat, null)
       setCardTint(slot.mat, row.meta.tint || theme.panel)
-      this.setOpacityNow(slot, 0.14)
+      this.setOpacityNow(slot, this.threeD ? 0 : 0.14)
       setCardFlip(slot.mat, 'raw')
       slot.shadow.setEnabled(false)
     }
@@ -779,7 +771,7 @@ export class Board {
       const in3D = this.threeD
       const modelLive = in3D && this.pool3d.isLive(id)
       let ring = in3D
-        ? inRange && !slot.failed && !modelLive
+        ? inRange && !slot.failed && !modelLive && !slot.poster
         : inRange && !slot.poster && !slot.live && !slot.failed
       if (ring) {
         if (!slot.spinner.isEnabled() && slot.spinSince === 0) slot.spinSince = now
@@ -1145,8 +1137,6 @@ export class Board {
     const assets = this.assets
     if (!meta || !assets) return
     if (meta.hashFailed || assets.isHashFailed(meta.eventId)) return
-    // Hide the placeholder plate; the model renders in its place.
-    this.setOpacityNow(slot, 0)
     const ok = this.pool3d.request(meta.eventId, this.placeFor(slot), this.visiblePosts)
     if (!ok) {
       // Rejected (bad bytes / over-cap): fall back to the poster. A capacity
@@ -1266,4 +1256,3 @@ export class Board {
     this.scene.dispose()
   }
 }
-
