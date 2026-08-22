@@ -241,6 +241,11 @@ export function validateGLB(bytes: Uint8Array): LimitReport {
   }
   for (const mesh of meshes) {
     for (const prim of (mesh.primitives ?? []) as any[]) {
+      // Draco/meshopt primitives are opaque here: their attribute accessors
+      // carry count/type but NO bufferView (the bytes live in the extension),
+      // per KHR_draco_mesh_compression. Same carve-out the POSITION
+      // finiteness scan already uses; container-level caps still bound them.
+      if (prim.extensions?.KHR_draco_mesh_compression || prim.extensions?.EXT_meshopt_compression) continue
       const used: any[] = []
       const attrs = prim.attributes
       if (attrs && typeof attrs === 'object') for (const acc of Object.values(attrs)) if (typeof acc === 'number') used.push(accessors[acc])
