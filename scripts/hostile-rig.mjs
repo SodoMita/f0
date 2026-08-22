@@ -54,6 +54,7 @@
 import { createServer as createHttps } from 'node:https'
 import { createServer as createHttp } from 'node:http'
 import { request as httpRequest } from 'node:http'
+import { request as httpsRequest } from 'node:https'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
@@ -272,7 +273,7 @@ function makeOobModel() {
   gltf.bufferViews[2].byteLength = gltf.bufferViews[2].byteLength + 64 // overflow
   gltf.buffers[0].byteLength = binLen // keep claimed bin size honest
   const jsonBuf = Buffer.from(JSON.stringify(gltf) + '   ')
-  const bin = base.slice(20 + jsonLen) // unchanged BIN bytes
+  const bin = base.slice(20 + jsonLen + 8) // unchanged BIN bytes
   const total = 20 + jsonBuf.length + 8 + bin.length
   const out = Buffer.alloc(total)
   out.write('glTF', 0)
@@ -297,7 +298,7 @@ function makeNanModel() {
   gltf.nodes[0].scale = [1e308, 1e308, 1e308]
   gltf.nodes[0].rotation = [0, 0, 0, 0] // zero quaternion
   const jsonBuf = Buffer.from(JSON.stringify(gltf) + '   ')
-  const bin = base.slice(20 + jsonLen)
+  const bin = base.slice(20 + jsonLen + 8)
   const total = 20 + jsonBuf.length + 8 + bin.length
   const out = Buffer.alloc(total)
   out.write('glTF', 0)
@@ -325,7 +326,7 @@ function makeChainModel() {
   }
   gltf.scenes[0].nodes = nodes.map((_, i) => i)
   const jsonBuf = Buffer.from(JSON.stringify(gltf) + '   ')
-  const bin = base.slice(20 + jsonLen)
+  const bin = base.slice(20 + jsonLen + 8)
   const total = 20 + jsonBuf.length + 8 + bin.length
   const out = Buffer.alloc(total)
   out.write('glTF', 0)
@@ -354,7 +355,7 @@ function patchJson(base, fn) {
   const gbinLen = gltf.buffers[0].byteLength
   fn(gltf, appendExtra)
   const jsonBuf = Buffer.from(JSON.stringify(gltf) + '   ')
-  const bin = Buffer.concat([base.slice(20 + jsonLen), ...extra])
+  const bin = Buffer.concat([base.slice(20 + jsonLen + 8), ...extra])
   const total = 20 + jsonBuf.length + 8 + bin.length
   const out = Buffer.alloc(total)
   out.write('glTF', 0)
@@ -609,6 +610,7 @@ const RIG_HOOK = `(() => {
 })();`
 
 const clients = new Set() // ws
+let slowHits = 0
 const subs = new Map() // subId -> { ws, filters }
 const state = { mode: 'normal', floodTimer: null }
 const attackLog = []
@@ -773,11 +775,14 @@ const attacks = {
   'glb-draco': () => pushToAll([modelEvent('dracogarbage', [], 108)]),
   'glb-bomb': (params) => {
     if (params.mib) buildBomb(Number(params.mib))
+    // LIE about size: a real `size` tag > 20 MiB is refused at parse time.
+    // The download cap is max(claimed, 20 MiB hard), so the small gzip body
+    // streams through and the gzip-rescue path inflates without a cap.
     pushToAll([finalizeEvent({
       kind: 1063, created_at: BOOT_NOW - 8000 - (params.nonce ?? 0),
       tags: [
         ['t', 'form-zero'], ['t', 'root'], ['m', 'model/gltf-binary'],
-        ['x', bomb.sha], ['ox', bomb.sha], ['size', String(bomb.size)],
+        ['x', bomb.sha], ['ox', bomb.sha], ['size', '512'],
         ['url', `https://localhost:${RELAY_PORT}/models/bomb.glb`],
         ['dim', '448x280'], ['v', 'form-zero:4'], ['filename', 'bomb.glb'],
       ],
@@ -834,10 +839,11 @@ const httpsServer = createHttps({ key: KEY, cert: CERT }, (req, res) => {
   }
   if (url.pathname === '/__attacks') {
     res.writeHead(200, { 'content-type': 'application/json', ...cors })
-    res.end(JSON.stringify({ available: Object.keys(attacks), log: attackLog, clients: clients.size }))
+    res.end(JSON.stringify({ available: Object.keys(attacks), log: attackLog, clients: clients.size, slowHits }))
     return
   }
   if (url.pathname === '/slow') {
+    slowHits++
     const d = Math.min(Number(url.searchParams.get('d') ?? 5), 30)
     setTimeout(() => {
       try { res.writeHead(404, cors); res.end('slow') } catch { /* client gone */ }
@@ -944,10 +950,14 @@ const proxy = createHttp((req, res) => {
   req.on('error', () => {})
   res.on('error', () => {})
   if (req.url?.startsWith('/__attack') || req.url === '/__attacks') {
-    const fwd = httpRequest({ host: 'localhost', port: RELAY_PORT, path: req.url, method: req.method }, (up) => {
-      res.writeHead(up.statusCode, { 'content-type': 'application/json' })
-      up.pipe(res)
-    })
+    // the hostile server is HTTPS — forward over TLS (self-signed is fine locally)
+    const fwd = httpsRequest(
+      { host: 'localhost', port: RELAY_PORT, path: req.url, method: req.method, rejectUnauthorized: false },
+      (up) => {
+        res.writeHead(up.statusCode, { 'content-type': 'application/json' })
+        up.pipe(res)
+      },
+    )
     fwd.on('error', () => { try { res.writeHead(502); res.end() } catch { /* gone */ } })
     fwd.end()
     return

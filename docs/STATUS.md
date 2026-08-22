@@ -4,6 +4,27 @@ Claim a task by moving it to **In progress** with your name/date, push, then
 move it to **Done** with a commit reference. One agent per area.
 
 ## Done
+- [x] **Hostile-rig security hardening** (agent arena, 2026-08-22, SPEC
+      AMENDMENT 88): a local MALICIOUS relay + Blossom + model server
+      (`scripts/hostile-rig.mjs`) driven by a real-browser harness
+      (`scripts/hostile-audit.mjs`, 22 attacks) found and the following were
+      fixed: binary WS frame → uncaught TypeError in nostr-tools (guarded at
+      the socket boundary, socket closed); 45 MiB WS frame → main-thread
+      JSON.parse freeze (frames > 512 KiB dropped + socket closed); event
+      flood → verify-worker backlog spilled secp256k1 onto the main thread
+      (8.3 s measured) → verify now fails closed on timeout/queue overflow
+      + per-relay token bucket; unbounded ThreadIndex → 20k cap with O(1)
+      FIFO eviction; 200k-tag event → maxEventTags 1000; 400 slow replica
+      URLs → replicasPerPost 3; gzip bomb → streaming inflate with a hard
+      cap; OOB INDICES bufferView → validateGLB range-checks every view +
+      accessor; 1e308 node transforms → finite/≤1e6 check; malicious
+      MSFT_audio_emitter (4 GB header over 1 KiB buffer → unhandled decode
+      pageerror; 15 MiB silent decode bomb) → audio validated up front,
+      8 MiB budget; hostile Blossom upload response (20 MiB JSON / 2 MiB url
+      into the published event) → 16 KiB body + 2048-char url caps. Not
+      exploitable: DOM XSS (all sinks are textContent + locked CSP), deep
+      JSON (contained by nostr-tools), reconnect flood (designed backoff, no
+      socket leak). `tsc --noEmit` clean; hostile suite re-run pending.
 - [x] **Library palette texture + low-poly ball faces + voxel art** (agent
       arena, 2026-08-21, SPEC AMENDMENT 86): colour left the vertices. All 61
       generated library pieces now sample ONE embedded 32x32 palette PNG

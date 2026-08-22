@@ -1,7 +1,7 @@
 import { finalizeEvent, generateSecretKey, type Event, type EventTemplate } from 'nostr-tools'
 import { Relay } from 'nostr-tools/relay'
 import { verifyFreshAsync } from './events'
-import { DEFAULTS, DELETE_KIND, FORM_ZERO_TAG, MODEL_KIND } from '../theme'
+import { DEFAULTS, DELETE_KIND, FORM_ZERO_TAG, LIMITS, MODEL_KIND } from '../theme'
 
 export type RelayState = 'connecting' | 'online' | 'offline'
 
@@ -33,6 +33,8 @@ export class RelayPool {
    *  clear a newer one (applyRelays mid-connect) or stack sockets. */
   private opening = new Map<string, Relay>()
   private retryTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  /** Per-relay event-rate token bucket (flood defence, hostile-rig audit). */
+  private rates = new Map<string, { tokens: number; last: number }>()
   state = new Map<string, RelayState>()
   onEvent: ((event: Event) => void) | null = null
   onState: ((url: string, state: RelayState) => void) | null = null
@@ -185,6 +187,7 @@ export class RelayPool {
     for (const r of this.relays.values()) { r.onclose = null; try { r.close() } catch { /* already closed */ } }
     this.relays.clear()
     this.attempts.clear()
+    this.rates.clear()
     for (const url of [...this.state.keys()]) {
       if (this.urls.includes(url)) continue
       this.state.delete(url)
@@ -259,6 +262,7 @@ export class RelayPool {
     ;(relay as unknown as { verifyEvent: (e: Event, url: string) => boolean }).verifyEvent = () => true
     this.opening.set(url, relay)
     this.relays.set(url, relay)
+    this.rates.set(url, { tokens: LIMITS.relayEventBurst, last: Date.now() })
     // nostr-tools fires BOTH ws.onerror and ws.onclose (and connect() also
     // rejects) on a single drop. Without a settled-gate those three paths
     // each scheduled a retry AND open() built a new Relay without closing
@@ -284,6 +288,16 @@ export class RelayPool {
         if (!this.closed && this.urls.includes(url)) this.scheduleRetry(url)
         return
       }
+      // SECURITY (hostile-rig audit): the browser WebSocket API has NO
+      // frame-size limit and nostr-tools' message handler runs a string
+      // scan + JSON.parse per frame on the MAIN thread. A hostile relay can
+      // send one 45 MiB frame (multi-second JSON.parse freeze) or a BINARY
+      // frame (ev.data is a Blob; nostr-tools' getSubscriptionId — called
+      // OUTSIDE its try/catch — throws an uncaught TypeError per frame).
+      // Guard at the boundary: NIP-01 is text-only JSON, frames above
+      // wsFrameBytes are hostile — drop the socket, the pool retries with
+      // backoff and the hostile relay keeps losing connections.
+      this.guardFrames(url, relay)
       // The handshake IS a round trip — seed the ping from it so a row shows
       // a latency immediately instead of waiting for the first explicit ping.
       this.pings.set(url, Math.round(performance.now() - t0))
@@ -307,8 +321,9 @@ export class RelayPool {
       try { sub.close() } catch { /* already closed */ }
     }
     const relay = this.relays.get(url)
-    if (!relay) return
+    if (!relay) { this.rates.delete(url); return }
     this.relays.delete(url)
+    this.rates.delete(url)
     relay.onclose = null
     try { relay.close() } catch { /* already closed */ }
   }
@@ -340,6 +355,54 @@ export class RelayPool {
     this.retryTimers.set(url, timer)
   }
 
+  /**
+   * SECURITY (hostile-rig audit): wrap the live socket's message handler.
+   * NIP-01 is text-only JSON. A BINARY frame makes `ev.data` a Blob, and
+   * nostr-tools' `getSubscriptionId` (called OUTSIDE its try/catch) throws
+   * an uncaught TypeError per frame. An oversized TEXT frame (a hostile
+   * 45 MiB message) freezes the main thread in JSON.parse. Both are dropped
+   * here; an oversized frame additionally closes the socket so the hostile
+   * relay loses the connection (the pool reconnects with backoff).
+   */
+  private guardFrames(url: string, relay: Relay): void {
+    const ws = (relay as unknown as { ws?: WebSocket }).ws
+    if (!ws || ws.onmessage === null) return
+    const orig = ws.onmessage
+    ws.onmessage = (ev: MessageEvent) => {
+      if (typeof ev.data !== 'string') {
+        // binary frame = protocol violation; also drop the relay (a real
+        // NIP-01 relay never sends binary) so it stops costing us frames.
+        try { ws.close() } catch { /* already closing */ }
+        return
+      }
+      if (ev.data.length > LIMITS.wsFrameBytes) {
+        try { ws.close() } catch { /* already closing */ }
+        return
+      }
+      orig.call(ws, ev)
+    }
+    void url
+  }
+
+  /**
+   * SECURITY (hostile-rig audit): per-relay token bucket. A relay can push
+   * a million valid distinct events; past `relayEventsPerSec` (burst
+   * `relayEventBurst`) the excess is DROPPED (fail closed — unverified
+   * content is never rendered) instead of burning the main thread and the
+   * ThreadIndex. The burst covers the initial ~200-event feed.
+   */
+  private admitEvent(url: string): boolean {
+    const now = Date.now()
+    let r = this.rates.get(url)
+    if (!r) { r = { tokens: LIMITS.relayEventBurst, last: now }; this.rates.set(url, r) }
+    const dt = Math.max(0, now - r.last) / 1000
+    r.last = now
+    r.tokens = Math.min(LIMITS.relayEventBurst, r.tokens + dt * LIMITS.relayEventsPerSec)
+    if (r.tokens < 1) return false
+    r.tokens -= 1
+    return true
+  }
+
   private subscribe(url: string, relay: Relay): void {
     this.subs.get(url)?.close()
     const since = Math.floor(Date.now() / 1000) - 60 * 60 * 24 * 14
@@ -354,6 +417,9 @@ export class RelayPool {
         // chatty relay cannot burn the main thread on events we would drop
         onevent: (event) => {
           if (event.kind !== MODEL_KIND && event.kind !== DELETE_KIND) return
+          // SECURITY (hostile-rig audit): rate gate — a flood past the
+          // bucket is dropped (fail closed), never verified/indexed.
+          if (!this.admitEvent(url)) return
           void verifyFreshAsync(event).then((ok) => {
             if (!ok) return
             // per-relay delivery count: the panel says which relay is
@@ -386,6 +452,7 @@ export class RelayPool {
     this.subs.clear()
     for (const r of this.relays.values()) { r.onclose = null; try { r.close() } catch { /* already closed */ } }
     this.relays.clear()
+    this.rates.clear()
   }
 }
 

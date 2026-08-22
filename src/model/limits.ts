@@ -212,6 +212,74 @@ export function validateGLB(bytes: Uint8Array): LimitReport {
   if (stats.lights > LIMITS.lights) return fail(`lights ${stats.lights} > ${LIMITS.lights}`)
   if (stats.skins > LIMITS.skins) return fail(`skins ${stats.skins} > ${LIMITS.skins}`)
 
+  // SECURITY (hostile-rig audit): EVERY bufferView must lie inside the BIN
+  // chunk, not just the POSITION and image ones the old scanner checked.
+  // An out-of-range INDICES (or normal) view made Babylon's typed-array
+  // construction read OOB or throw mid-load — a stall the error sheet
+  // barely caught and a blank card at best. Reject up front instead.
+  for (const bv of bufferViews) {
+    if (!bv || typeof bv.byteLength !== 'number' || bv.byteLength < 0) continue
+    const start = bv.byteOffset ?? 0
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(bv.byteLength) || start < 0 || start + bv.byteLength > binLength) {
+      return fail('Buffer view lies outside the BIN chunk.')
+    }
+  }
+
+  // SECURITY (hostile-rig audit): every accessor a primitive uses must fit
+  // its bufferView. The old scanner only proved POSITION finite, so a
+  // hostile indices/normal accessor (count past the end of the view) fell
+  // through to Babylon, which built typed arrays over bytes that are not
+  // there. Byte size is count * componentType size * type multiplicity.
+  const COMPONENT_BYTES: Record<number, number> = { 5120: 1, 5121: 1, 5122: 2, 5123: 2, 5125: 4, 5126: 4 }
+  const TYPE_MULT: Record<string, number> = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4, MAT2: 4, MAT3: 9, MAT4: 16 }
+  const accessorSize = (acc: any): number | null => {
+    if (!acc || !Number.isSafeInteger(acc.count) || acc.count < 0) return null
+    const cb = COMPONENT_BYTES[acc.componentType]
+    const tm = TYPE_MULT[acc.type]
+    if (!cb || !tm) return null
+    return acc.count * cb * tm
+  }
+  for (const mesh of meshes) {
+    for (const prim of (mesh.primitives ?? []) as any[]) {
+      const used: any[] = []
+      const attrs = prim.attributes
+      if (attrs && typeof attrs === 'object') for (const acc of Object.values(attrs)) if (typeof acc === 'number') used.push(accessors[acc])
+      if (prim.indices !== undefined && prim.indices !== null) used.push(accessors[prim.indices])
+      for (const acc of used) {
+        if (acc === undefined) continue
+        if (acc.sparse) return fail('Sparse accessors are not accepted by the safety scanner.')
+        const bv = bufferViews[acc.bufferView]
+        if (!bv) return fail('Accessor references a missing buffer view.')
+        const start = (acc.byteOffset ?? 0)
+        const size = accessorSize(acc)
+        if (size === null || !Number.isSafeInteger(start) || start < 0 || start + size > bv.byteLength) {
+          return fail('Accessor lies outside its buffer view.')
+        }
+      }
+    }
+  }
+
+  // SECURITY (hostile-rig audit): node transforms must be finite and
+  // human-scale. translation/scale of 1e308 pushes the world matrix into
+  // Inf/NaN, which poisons every downstream bounding-box/auto-fit (blank
+  // poster, mis-framed viewer) and can make Babylon's fit math hang on a
+  // NaN radius. A 4D zero quaternion is equally off-format. No real model
+  // needs 1e6-unit geometry, so bound it.
+  const T_MAX = 1e6
+  for (const node of nodes) {
+    if (!node) continue
+    for (const key of ['translation', 'rotation', 'scale'] as const) {
+      const v = node[key]
+      if (!Array.isArray(v)) continue
+      for (const c of v) {
+        if (typeof c !== 'number' || !Number.isFinite(c) || Math.abs(c) > T_MAX) {
+          return fail(`Non-finite or absurd node ${key}.`)
+        }
+      }
+      if (key === 'rotation' && v.length === 4 && v.every((c) => c === 0)) return fail('Zero-length rotation quaternion.')
+    }
+  }
+
   for (const mesh of meshes) {
     const prims = mesh.primitives ?? []
     stats.primitives += prims.length
@@ -307,6 +375,55 @@ export function validateGLB(bytes: Uint8Array): LimitReport {
   }
   if (stats.decodedPixels > limitDecodedPixels()) {
     return fail(`decoded texture memory ${(stats.decodedPixels / 1048576).toFixed(0)} MiB > ${(limitDecodedPixels() / 1048576).toFixed(0)} MiB`)
+  }
+
+  // SECURITY (hostile-rig audit): embedded audio (MSFT_audio_emitter) is
+  // hostile input too. A clip bufferView may be a WAV whose header CLAIMS
+  // gigabytes of data while the buffer is ~1 KiB — Babylon's decode fails
+  // with an UNHANDLED rejection (a remote-triggered pageerror), and even a
+  // well-formed 15 MiB "silent" clip is a decode/loop bomb. Validate the
+  // clips up front: range, MIME allowlist, honest WAV sizes, and a total
+  // byte budget.
+  {
+    const ext = gltf.extensions?.MSFT_audio_emitter
+    if (ext) {
+      const clips = Array.isArray(ext.clips) ? ext.clips : []
+      let audioTotal = 0
+      const AUDIO_MIMES = /^audio\/(wav|mpeg|mp3|ogg|mp4|x-wav|x-mpeg)$/i
+      for (const clip of clips) {
+        const bv = bufferViews[clip?.bufferView]
+        if (!bv || typeof bv.byteLength !== 'number') return fail('Audio clip references a missing buffer view.')
+        const start = bv.byteOffset ?? 0
+        if (start + bv.byteLength > binLength) return fail('Audio clip lies outside the BIN chunk.')
+        audioTotal += bv.byteLength
+        if (audioTotal > LIMITS.audioBytes) return fail(`Embedded audio exceeds the ${LIMITS.audioBytes / 1048576} MiB budget.`)
+        const mime = String(clip?.mimeType ?? '')
+        if (!AUDIO_MIMES.test(mime)) return fail(`Audio clip has an unsupported MIME type: ${mime || '(none)'}`)
+        if (mime.toLowerCase().endsWith('wav') || mime.toLowerCase() === 'audio/x-wav') {
+          // RIFF/WAVE: the `data` chunk size must not outgrow the buffer
+          // (a forged 4 GB header over a 1 KiB buffer is the trunc-bomb).
+          const s = start
+          if (bv.byteLength < 44) return fail('Audio clip is too small to be a WAV.')
+          const magic = (code: string, o: number): boolean => {
+            for (let i = 0; i < code.length; i++) if (bytes[binOffset + s + o + i] !== code.charCodeAt(i)) return false
+            return true
+          }
+          if (!magic('RIFF', 0) || !magic('WAVE', 8)) return fail('Audio clip is not a WAV file.')
+          const dvA = new DataView(bytes.buffer, bytes.byteOffset + binOffset + s, bv.byteLength)
+          // walk chunks to find 'data'
+          let o = 12
+          let dataLen = -1
+          while (o + 8 <= bv.byteLength) {
+            const id = String.fromCharCode(bytes[binOffset + s + o], bytes[binOffset + s + o + 1], bytes[binOffset + s + o + 2], bytes[binOffset + s + o + 3])
+            const cl = dvA.getUint32(o + 4, true)
+            if (id === 'data') { dataLen = cl; break }
+            o += 8 + cl + (cl & 1)
+          }
+          if (dataLen < 0) return fail('Audio clip has no data chunk.')
+          if (dataLen > bv.byteLength - 44) return fail('Audio clip declares more audio data than it contains.')
+        }
+      }
+    }
   }
 
   // Scene-graph depth (cycles → reject).

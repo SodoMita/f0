@@ -50,6 +50,29 @@ export const LIMITS = {
   posterAspectMax: 2.0,
   boardRoots: 48,
   maxEventsPage: 200,
+  // Security caps (2026-08-22 hostile-rig audit). Each one stopped a
+  // concrete remote attack — see docs/SPEC.md AMENDMENT 88.
+  // Replicas per post: a hostile `url`-tag storm (hundreds of slow URLs)
+  // pinned a download lane for hours; the real format ships 1–3.
+  replicasPerPost: 3,
+  // Max tags a kind-1063 event may carry. A 200k-tag message cost tens of
+  // ms per tag-array pass; no legitimate post comes close.
+  maxEventTags: 1000,
+  // Max relay websocket frame (bytes). NIP-01 frames are small JSON; a
+  // 45 MiB frame froze the main thread in JSON.parse. Bigger frames are
+  // treated as hostile and the socket is dropped.
+  wsFrameBytes: 512 * 1024,
+  // Token bucket for relay events: 100/sec sustained, 500 burst. The
+  // burst covers the initial 200-event feed; a sustained flood is dropped
+  // (fail closed — unverified events are never rendered).
+  relayEventsPerSec: 100,
+  relayEventBurst: 500,
+  // Max events held in the ThreadIndex. A relay can push a million
+  // distinct valid events; the index is a bounded game state, not a DB.
+  maxIndexedEvents: 20000,
+  // Total embedded-audio bytes per model (MSFT_audio_emitter clips). A
+  // hostile 15 MiB "silent" WAV is a decode bomb; real clips are small.
+  audioBytes: 8 * 1024 * 1024,
   // Max chars of nostr event `content` we publish / accept as the model name
   // (AMENDMENT 66). Older posts have empty content; anything longer is
   // off-format and the event is skipped.

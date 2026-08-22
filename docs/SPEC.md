@@ -1416,3 +1416,67 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     composition preserved, near plane, re-frame incl. inertia, N of M,
     speed 0, audio claim/S-toggle/hand-off transfer, autoplay respect,
     no-camera path).
+88. HOSTILE-RIG SECURITY HARDENING (2026-08-22). A local MALICIOUS relay +
+    Blossom server + model server (scripts/hostile-rig.mjs, driven by
+    scripts/hostile-audit.mjs through a real browser) was run against the
+    app. Everything it serves is signed/consistent — the attacker controls
+    the GLB AND the `x` hash, so hash verification is no defence; the
+    client must be robust to hostile-but-verified content. Confirmed
+    attacks and their fixes:
+    - Binary WebSocket frame → uncaught TypeError in nostr-tools'
+      _onmessage (getSubscriptionId runs OUTSIDE its try/catch on a Blob).
+      Fix: RelayPool guards the live socket's onmessage (src/protocol/nostr.ts
+      guardFrames): non-text frames are dropped and the socket closed.
+    - 45 MiB single WS frame → multi-second main-thread JSON.parse freeze
+      (browser WebSocket has no maxPayload). Fix: frames above
+      LIMITS.wsFrameBytes (512 KiB) are dropped and the socket closed —
+      the pool reconnects with backoff and the hostile relay keeps losing.
+    - Event flood (3000–5000 valid distinct events) → the verify worker
+      backlog passed the old 8 s timeout and the "fallback" ran secp256k1 on
+      the MAIN thread for every queued event (measured 8.3 s freeze). Fix:
+      verifyFreshAsync (src/protocol/events.ts) now FAILS CLOSED on timeout
+      and when the in-flight queue is over 256 (event dropped — unverified
+      content is never rendered); the sync path is reserved for the
+      genuinely-workerless case. Plus a per-relay token bucket
+      (LIMITS.relayEventsPerSec=100, burst 500) in the pool's onevent gate.
+    - Unbounded ThreadIndex growth under a flood. Fix: byId is capped at
+      LIMITS.maxIndexedEvents (20 000) with O(1) FIFO eviction (an order
+      queue + childOf reverse map; a reverse-scan per eviction would be its
+      own O(n²) freeze under a reply storm).
+    - 200k-tag event → O(n) per tag-array pass (parse + nostr filter
+      matching). Fix: parseModelEvent refuses > LIMITS.maxEventTags (1000).
+    - 400 slow `url` replicas per post → download tried them in order and
+      pinned a poster lane for >50 min (every retry re-ran the list). Fix:
+      keep the first LIMITS.replicasPerPost (3) replica URLs.
+    - Gzip bomb (2 KB gzip → gigabytes) → the old tryInflateGzip buffered the
+      ENTIRE inflated body and only then checked the cap (renderer OOM). Fix:
+      the inflate is streamed and the stream is aborted the moment the
+      running total crosses the model cap (src/protocol/blossom.ts).
+    - Out-of-range bufferView on INDICES/NORMAL (only POSITION and images
+      were range-checked) → Babylon built typed arrays over bytes that are
+      not there (mid-load stall / blank card). Fix: validateGLB now
+      range-checks EVERY bufferView against BIN and every accessor a
+      primitive uses against its view (src/model/limits.ts).
+    - Node translation/scale of 1e308 → Inf/NaN world matrices poison every
+      bounding-box/auto-fit downstream. Fix: node translation/rotation/scale
+      must be finite and ≤ 1e6 in magnitude; a zero 4D quaternion is
+      refused.
+    - Malicious MSFT_audio_emitter: a WAV header claiming 4 GB over a 1 KiB
+      buffer → UNHANDLED decode rejection (remote-triggered pageerror); a
+      well-formed 15 MiB "silent" clip is a decode/loop bomb. Fix: validateGLB
+      validates audio clips up front — range, MIME allowlist, honest WAV data
+      size, total ≤ LIMITS.audioBytes (8 MiB).
+    - Hostile Blossom upload RESPONSE: a 20 MiB JSON body (memory spike) or a
+      2 MiB url string (lands in the PUBLISHED event's tags → a multi-MB
+      post per relay + stored in the owned-posts record). Fix: upload()
+      refuses response bodies > 16 KiB and urls > 2048 chars
+      (src/protocol/blossom.ts).
+    Not exploitable (verified): DOM XSS via name/filename/content/color —
+    all HUD sinks are textContent and the drawer/search render escaped text;
+    the CSP (web: script-src 'self'; standalone: 'unsafe-inline' + data:,
+    locked base/object/frame) has no remote script channel. The relay's
+    own JSON.parse of a deeply-nested (30k-deep) EVENT is contained by
+    nostr-tools' try/catch. Reconnect floods hit the designed backoff and
+    leave no socket leak (debugCounts stays flat).
+    Guard: bun scripts/hostile-rig.mjs + node scripts/hostile-audit.mjs
+    (22 attacks; the table above is the expected-impact list).
