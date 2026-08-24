@@ -2,6 +2,7 @@ import type { AbstractEngine } from '@babylonjs/core/Engines/abstractEngine'
 import type { Scene } from '@babylonjs/core/scene'
 import { PreviewPool, type PreviewModel, type PreviewPoolOptions } from './previewPool'
 import { Direct3DPool } from './modelCard3d'
+import type { Vector3 } from '@babylonjs/core/Maths/math.vector'
 
 export type LiveView = 'board' | 'thread' | 'viewer' | 'idle'
 
@@ -36,6 +37,18 @@ export class LivePool {
     if (which === 'board') this.board3d = pool
     else this.thread3d = pool
     return pool
+  }
+
+  /** Per-view card-position providers for spatial audio (2D preview stage).
+   *  The stage anchors sounds at the ACTIVE view's card positions, so the
+   *  provider is re-applied on every view switch. */
+  private soundProviders = new Map<'board' | 'thread', (postId: string) => Vector3 | null>()
+
+  registerSoundPosition(which: 'board' | 'thread', provider: (postId: string) => Vector3 | null): void {
+    this.soundProviders.set(which, provider)
+    if ((which === 'board' && this.view !== 'thread') || (which === 'thread' && this.view === 'thread')) {
+      this.preview.opts.soundPosition = provider
+    }
   }
 
   setMaxSlots(n: number): void { this.preview.setMaxSlots(n) }
@@ -82,6 +95,9 @@ export class LivePool {
       this.preview.releaseAll()
       this.preview.prune()
     }
+    // Spatial audio: anchor stage sounds at the active view's cards.
+    const active = view === 'thread' ? 'thread' : 'board'
+    this.preview.opts.soundPosition = this.soundProviders.get(active) ?? undefined
   }
 
   dispose(): void {

@@ -30,12 +30,6 @@ export function flatCamera(scene: Scene, name: string, radius = 30): ArcRotateCa
   return cam
 }
 
-/** Device pixel ratio, clamped so huge-DPR phones don't melt the GPU. */
-export function dpr(): number {
-  const r = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1
-  return Math.max(1, Math.min(2.5, r))
-}
-
 // ---------------------------------------------------------------- colours
 
 export function clampByte(n: number): number {

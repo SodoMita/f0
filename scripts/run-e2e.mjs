@@ -27,7 +27,7 @@ const CERTS = '/tmp/rig-certs'
 const CERT = join(CERTS, 'cert.pem')
 const KEY = join(CERTS, 'key.pem')
 const TARGET_URL = process.env.TARGET_URL || 'http://localhost:4173/'
-const SUITES = (process.env.SUITES || 'smoke codec-browser features offline-verify').split(/\s+/).filter(Boolean)
+const SUITES = (process.env.SUITES || 'smoke codec-browser features offline-verify image-plane').split(/\s+/).filter(Boolean)
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -92,9 +92,25 @@ async function waitFor(desc, url, timeoutMs = 120000) {
 function runSuite(name) {
   return new Promise((resolve) => {
     const child = spawn('node', [join(here, name + '.mjs')], {
-      cwd: ROOT, stdio: 'inherit', env: { ...process.env, TARGET_URL },
+      cwd: ROOT, env: { ...process.env, TARGET_URL },
     })
-    child.on('exit', (code) => resolve(code ?? 1))
+    let out = ''
+    child.stdout.on('data', (d) => { out += d; process.stdout.write(d) })
+    child.stderr.on('data', (d) => { out += d; process.stderr.write(d) })
+    child.on('exit', (code) => {
+      if (code !== 0) {
+        // GitHub Actions: print the failing suite's tail as annotations so
+        // the failure is visible from the check-run annotations API even
+        // when log downloads are unavailable.
+        const tail = out.split('\n').slice(-60).join('\n')
+        const msg = `suite ${name} failed (exit ${code})\n${tail}`.slice(0, 60000)
+        // Workflow-command escaping (CodeQL: escape % BEFORE newlines, or the
+        // literal '%0A' in suite output would be double-escaped).
+        const escaped = msg.replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A')
+        console.log(`::error::${escaped}`)
+      }
+      resolve(code ?? 1)
+    })
   })
 }
 

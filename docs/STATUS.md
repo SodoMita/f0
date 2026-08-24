@@ -4,6 +4,29 @@ Claim a task by moving it to **In progress** with your name/date, push, then
 move it to **Done** with a commit reference. One agent per area.
 
 ## Done
+- [x] **Merge pass + image-as-plane feature** (agent arena, 2026-08-24,
+      SPEC AMENDMENTS 90–92): surveyed all 60 unmerged agent branches;
+      most were already absorbed into main. Merged the four still-valuable
+      ones — (a) preview-pool RTT hasAlpha+samples fix (01a0266f-f0), (b)
+      3D board/thread cell clip planes + 2D→3D toggle settle-gate fix
+      (01a02667-f0), (c) dead-code cleanup (01a023bb-f0: `dpr()`, legacy
+      settings loaders, card-flip escape hatch, paint math/store helpers,
+      re-exports — ~250 lines), (d) positional post audio (01a01d04-f0:
+      the branch's 1500-line HTMLMediaElement player was superseded by
+      main's Babylon-Sound stack, so the FEATURE was ported as a ~250-line
+      `src/audio/spatial.ts` — HRTF panners anchored at the real card
+      positions, node-attached in 3D/viewer, listener bound to the active
+      camera, hand-off pairing preserved). Did NOT merge: design mockup
+      branches, the site build, and the old dev-rewrite (size/obsolete).
+      New feature: **studio image tab** — upload PNG/JPG/WebP → flat
+      double-sided unlit textured plane at NATIVE resolution (no cap; the
+      post size limit is the bound, engine's 4096 px texture ceiling
+      refused up front with a clear error), select/transform/delete like
+      any studio object, exports a textured GLB (KHR_materials_unlit
+      exporter registration added). Guards:
+      `check:spatial-unit`, `check:image-unit`, `image-plane` e2e suite
+      (upload → GLB structure → delete). Full gate green: check:static
+      (standalone 5.16 MB), check:unit (15 files), check:e2e (5 suites).
 - [x] **Hostile-rig security hardening** (agent arena, 2026-08-22, SPEC
       AMENDMENT 89): a local MALICIOUS relay + Blossom + model server
       (`scripts/hostile-rig.mjs`) driven by a real-browser harness

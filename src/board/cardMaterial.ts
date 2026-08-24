@@ -173,11 +173,4 @@ export function setCardFlip(mat: ShaderMaterial, kind: CardTextureKind): void {
   mat.setVector2('flip', new Vector2(x, y))
 }
 
-/** Escape hatch for the orientation test page. */
-export function setCardFlipRaw(mat: ShaderMaterial, x: 0 | 1, y: 0 | 1): void {
-  mat.setVector2('flip', new Vector2(x, y))
-}
 
-export function getCardFlips(): Record<CardTextureKind, readonly [0 | 1, 0 | 1]> {
-  return FLIPS
-}

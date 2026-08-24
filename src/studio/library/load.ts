@@ -1,4 +1,4 @@
-import { LIBRARY, type LibraryItem } from './catalog'
+import type { LibraryItem } from './catalog'
 
 const urls = import.meta.glob(['./2d/*.glb', './glb/*.glb'], {
   query: '?url',
@@ -27,6 +27,4 @@ export async function libraryBytes(item: LibraryItem): Promise<Uint8Array> {
   return bytes
 }
 
-export function libraryIds(): string[] {
-  return LIBRARY.map((item) => item.id)
-}
+

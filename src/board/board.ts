@@ -31,6 +31,7 @@ import {
 import { theme, LIMITS } from '../theme'
 import { type CardFade, fadeInit, finishFade, setOpacityNow, crossfadeTo, fadeOpacityTo, tickFade, showPoster } from './cardFade'
 import { PlayIntent, playVisible } from './playIntent'
+import { setSpatialListener } from '../audio/spatial'
 import { OVERLAY_GROUP, disableOverlayAutoClear, makeQuad, bindDyn, makePlayTextures, paintGlassPill, strokeReplyArrow, inkFor } from './overlays'
 
 export interface BoardCallbacks {
@@ -110,6 +111,8 @@ const TAP_SLOP = 8
 export class Board {
   readonly scene: Scene
   private camera: ArcRotateCamera
+  /** Spatial audio listens through this view's camera (src/audio/spatial.ts). */
+  get viewCamera(): ArcRotateCamera { return this.camera }
   private cards: CardSlot[] = []
   private pool = 24
   private cb: BoardCallbacks
@@ -181,6 +184,9 @@ export class Board {
     // Ortho camera parked at -Z (see core/gfx.flatCamera): world +X is screen
     // right and card planes are seen from the front, so nothing is mirrored.
     this.camera = flatCamera(this.scene, 'board-cam', 30)
+    // Spatial post audio: the shared preview stage listens through whichever
+    // user-facing camera is active (2D cards, see src/audio/spatial.ts).
+    setSpatialListener(this.camera)
     new HemisphericLight('l', new Vector3(0, 1, 0), this.scene)
 
     // Gradient backdrop behind the cards (opaque -> renders in the opaque
@@ -213,6 +219,9 @@ export class Board {
         targetFps: isMobile ? 12 : 15,
       },
     )
+    // 2D mode: anchor each playing sound at its card's world position
+    // (spatial post audio, src/audio/spatial.ts).
+    this.live.registerSoundPosition('board', (postId) => this.cardPosition(postId))
     this.live.preview.watch({
       onLive: (postId, rtt) => {
         const slot = this.cards.find((c) => c.meta?.eventId === postId)
@@ -474,6 +483,11 @@ export class Board {
    * Toggle "3D models" (the topbar button / settings → Interface). ON swaps
    * the board from poster + offscreen preview RTTs to real GLB meshes
    * rendered directly in the board scene; OFF restores the poster pipeline.
+   *
+   * The toggle must take effect immediately — even while the feed is
+   * settling — so the board never shows a stale 2D poster after the user
+   * asked for 3D (the "shows initially 2d" regression). We therefore clear
+   * the scroll-settle gate before refreshing visibility.
    */
   setDirect3D(on: boolean): void {
     if (this.threeD === on) return
@@ -499,6 +513,13 @@ export class Board {
       else if (!on) this.bind(slot, slot.row)
     }
     this.lastSyncScroll = Number.NEGATIVE_INFINITY
+    // Force the next visibility pass to treat the feed as settled: the user
+    // explicitly asked for a pipeline switch, so 3D models must start loading
+    // on this frame, not after the next scroll idle.
+    this.velocity = 0
+    this.lastScrollAt = 0
+    this.pendingSettle = false
+    this.assets?.setPaused(false)
     this.refreshVisibility()
     this.invalidate(3)
   }
@@ -732,6 +753,16 @@ export class Board {
       if (this.threeD) this.pool3d.place(slot.meta.eventId, this.placeFor(slot))
       this.positionExtras(slot)
     }
+    // Cards moved: re-anchor playing sounds (2D preview stage, spatial audio).
+    this.live.preview.refreshSoundPositions()
+  }
+
+  /** World position of a card, for anchoring its sound (spatial audio). */
+  private cardPosition(postId: string): Vector3 | null {
+    for (const slot of this.cards) {
+      if (slot.meta?.eventId === postId) return slot.mesh.position
+    }
+    return null
   }
 
   /**
