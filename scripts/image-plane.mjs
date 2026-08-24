@@ -103,10 +103,44 @@ check('GLB has one plane mesh', glb.meshes === 1, `meshes=${glb.meshes}`)
 check('material is unlit (picture stays a picture)', glb.hasExt === true)
 check('export is small (4x4 PNG)', glb.size < 20000, `${glb.size} bytes`)
 
-// 4. deleting the plane removes the image from content
+// 4. a large source is downscaled to the 2048 px cap, and the tab's width
+//    control sets the plane's world size (height follows the aspect)
+await page.fill('#image-width', '8')
+const big = await page.evaluate(async () => {
+  const canvas = document.createElement('canvas')
+  canvas.width = 3000
+  canvas.height = 1000
+  const ctx = canvas.getContext('2d')
+  ctx.fillStyle = '#0b6b6b'
+  ctx.fillRect(0, 0, 3000, 1000)
+  const blob = await new Promise((r) => canvas.toBlob(r, 'image/png'))
+  const file = new File([blob], 'wide.png', { type: 'image/png' })
+  const dt = new DataTransfer()
+  dt.items.add(file)
+  const input = document.getElementById('studio-image-file')
+  input.files = dt.files
+  input.dispatchEvent(new Event('change'))
+  return true
+})
+check('large upload dispatched', big === true)
+await page.waitForFunction(() => window.__form0.studio.imageCount === 2, { timeout: 15000 })
+const bigPlane = await page.evaluate(() => {
+  const p = window.__form0.studio.imagePlanes[1]
+  return p ? { px: p.pixelW, py: p.pixelH, w: p.width.toFixed(2), h: p.height.toFixed(2) } : null
+})
+check('wide image downscaled to the 2048 px cap', bigPlane?.px === 2048 && bigPlane?.py === 683,
+  JSON.stringify(bigPlane))
+check('world size follows the width control + aspect', bigPlane?.w === '8.00' && bigPlane?.h === '2.67',
+  JSON.stringify(bigPlane))
+
+// 5. deleting the planes removes the image from content (an object must be
+//    selected first — delete acts on the selection, like every studio object)
 await page.evaluate(() => { window.__form0.studio.deleteSelection() })
-await page.waitForFunction(() => window.__form0.studio.imageCount === 0, { timeout: 5000 })
-check('deleteSelection removes the plane', await page.evaluate(() => !window.__form0.studio.hasContent()))
+await page.waitForFunction(() => window.__form0.studio.imageCount === 1, undefined, { timeout: 5000 })
+await page.evaluate(() => { window.__form0.studio.select(window.__form0.studio.imagePlanes[0].mesh) })
+await page.evaluate(() => { window.__form0.studio.deleteSelection() })
+await page.waitForFunction(() => window.__form0.studio.imageCount === 0, undefined, { timeout: 5000 })
+check('deleteSelection removes the planes', await page.evaluate(() => !window.__form0.studio.hasContent()))
 
 check('no page errors', errs.length === 0, errs.join(' | ').slice(0, 300))
 
