@@ -92,9 +92,22 @@ async function waitFor(desc, url, timeoutMs = 120000) {
 function runSuite(name) {
   return new Promise((resolve) => {
     const child = spawn('node', [join(here, name + '.mjs')], {
-      cwd: ROOT, stdio: 'inherit', env: { ...process.env, TARGET_URL },
+      cwd: ROOT, env: { ...process.env, TARGET_URL },
     })
-    child.on('exit', (code) => resolve(code ?? 1))
+    let out = ''
+    child.stdout.on('data', (d) => { out += d; process.stdout.write(d) })
+    child.stderr.on('data', (d) => { out += d; process.stderr.write(d) })
+    child.on('exit', (code) => {
+      if (code !== 0) {
+        // GitHub Actions: print the failing suite's tail as annotations so
+        // the failure is visible from the check-run annotations API even
+        // when log downloads are unavailable.
+        const tail = out.split('\n').slice(-60).join('\n')
+        const msg = `suite ${name} failed (exit ${code})\n${tail}`.slice(0, 60000)
+        console.log(`::error::${msg.replace(/\n/g, '%0A').replace(/%/g, '%25')}`)
+      }
+      resolve(code ?? 1)
+    })
   })
 }
 
