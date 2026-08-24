@@ -104,7 +104,10 @@ function runSuite(name) {
         // when log downloads are unavailable.
         const tail = out.split('\n').slice(-60).join('\n')
         const msg = `suite ${name} failed (exit ${code})\n${tail}`.slice(0, 60000)
-        console.log(`::error::${msg.replace(/\n/g, '%0A').replace(/%/g, '%25')}`)
+        // Workflow-command escaping (CodeQL: escape % BEFORE newlines, or the
+        // literal '%0A' in suite output would be double-escaped).
+        const escaped = msg.replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A')
+        console.log(`::error::${escaped}`)
       }
       resolve(code ?? 1)
     })
