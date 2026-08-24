@@ -39,6 +39,7 @@ const MANIFEST = {
   'publish-unit.mjs':     { run: ['bun'],            tier: 'unit' },
   'relay-pool-unit.mjs':  { run: ['npx', '--yes', 'tsx'], tier: 'unit' },
   'search-unit.mjs':      { run: ['bun'],            tier: 'unit' },
+  'spatial-unit.mjs':     { run: ['bun'],            tier: 'unit' },
   'studio-unit.mjs':      { run: ['bun'],            tier: 'unit' },
   'thread-open-unit.mjs': { run: ['bun'],            tier: 'unit' },
 }

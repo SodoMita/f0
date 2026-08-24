@@ -28,6 +28,7 @@ import { nodeWorthTexture } from './threadGate'
 import { type CardFade, finishFade, setOpacityNow, crossfadeTo, tickFade } from './cardFade'
 import { PlayIntent, playVisible } from './playIntent'
 import { disableOverlayAutoClear, makeOverlayMaterial, makePlayTextures, paintGlassPill, strokeReplyArrow, inkFor } from './overlays'
+import { setSpatialListener } from '../audio/spatial'
 
 export { nodeWorthTexture } from './threadGate'
 
@@ -96,6 +97,8 @@ const PLAY_H = 2.2
 export class ThreadView {
   readonly scene: Scene
   private camera: ArcRotateCamera
+  /** Spatial audio listens through this view's camera (src/audio/spatial.ts). */
+  get viewCamera(): ArcRotateCamera { return this.camera }
   private nodes = new Map<string, TNode>()
   private edges: TEdge[] = []
   private lineMeshes: LinesMesh[] = []
@@ -152,6 +155,9 @@ export class ThreadView {
     this.scene.skipPointerMovePicking = true
     disableOverlayAutoClear(this.scene)
     this.camera = flatCamera(this.scene, 'thread-cam', 30)
+    // Spatial post audio: the shared preview stage listens through whichever
+    // user-facing camera is active (2D nodes, see src/audio/spatial.ts).
+    setSpatialListener(this.camera)
 
     this.previewPool = live.preview
     this.previewPool.watch({
@@ -189,6 +195,9 @@ export class ThreadView {
     })
 
     this.pool3d = live.attach3d('thread', this.scene, 6)
+    // 2D mode: anchor each playing sound at its node's world position
+    // (spatial post audio, src/audio/spatial.ts).
+    this.live.registerSoundPosition('thread', (postId) => this.nodePosition(postId))
     this.pool3d.onPlaced = (postId) => {
       const n = this.nodes.get(postId)
       if (!n || n.mesh.isDisposed()) return
@@ -872,6 +881,13 @@ export class ThreadView {
     if (hiddenCount > 0) this.addNoticeCard(pos, rootId, hiddenCount)
     this.buildEdges()
     this.fit()
+    // Nodes were (re)placed: re-anchor playing sounds (spatial audio).
+    this.previewPool.refreshSoundPositions()
+  }
+
+  /** World position of a node, for anchoring its sound (spatial audio). */
+  private nodePosition(postId: string): Vector3 | null {
+    return this.nodes.get(postId)?.mesh.position ?? null
   }
 
   /**

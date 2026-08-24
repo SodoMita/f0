@@ -29,6 +29,7 @@ import { detectCapabilities } from './settings/capabilities'
 import { applySettings } from './settings/apply'
 import { graphics } from './render/graphics'
 import { mixer } from './audio/mixer'
+import { setSpatialListener } from './audio/spatial'
 import { Legend } from './hud/legend'
 import { NetworkPanel } from './hud/networkPanel'
 import { ErrorSheet, ERRORS, bindCopyButton } from './hud/errorSheet'
@@ -1725,6 +1726,7 @@ async function boot(): Promise<void> {
     if (next === 'studio' || next === 'viewer') assets.setPaused(true)
     if (next === 'board') {
       board.live.activate('board')
+      setSpatialListener(board.viewCamera)
       engine.setActiveScene(board.scene)
       topbar.hidden = false
       viewerBar.hidden = true
@@ -1743,6 +1745,7 @@ async function boot(): Promise<void> {
       syncSoundButton() // stale-state guard: load/sync below refines it
     } else if (next === 'thread') {
       board.live.activate('thread')
+      setSpatialListener(threadView.viewCamera)
       engine.setActiveScene(threadView.scene)
       topbar.hidden = false
       viewerBar.hidden = true

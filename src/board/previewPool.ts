@@ -21,6 +21,7 @@ import { dominantFacing, worldBox, frameDistance } from '../model/facing'
 import { validateGLBCached } from '../model/limits'
 import { graphics } from '../render/graphics'
 import { claimModelSounds, playModelSounds } from './modelSounds'
+import { attachSound, bindSceneListener, detachSound, moveSound, spatializeSounds } from '../audio/spatial'
 
 const EMPTY_SOUNDS: ReadonlySet<Sound> = new Set()
 
@@ -39,6 +40,10 @@ interface Slot {
   anims: AnimationGroup[]
   /** MSFT_audio_emitter sounds owned by this slot's model (via mixer bus). */
   sounds: Sound[]
+  /** Emitter nodes the sounds were loader-attached to (spatial audio: the
+   *  stage detaches them so the fake strip layout cannot drive the panner,
+   *  and re-attaches them on acquire() so hand-off pairing still works). */
+  soundEmitters: Map<Sound, TransformNode>
   /** bounded retry timer for sounds that were still decoding at play time */
   soundTimer: number | null
   /** animation + audio currently running (paused slots render nothing) */
@@ -65,6 +70,12 @@ export interface PreviewPoolOptions {
   slotsPerFrame: number
   /** per-slot refresh cap; live cards do not need 60 fps */
   targetFps: number
+  /**
+   * World position of the card for a live post (2D mode). The offscreen
+   * stage's slot layout (index * 800) is NOT the board layout, so positional
+   * audio anchors each playing sound at the REAL card position instead.
+   */
+  soundPosition?: (postId: string) => Vector3 | null
 }
 
 export interface PreviewHooks {
@@ -142,6 +153,10 @@ export class PreviewPool {
     this.opts = { maxSlots: 6, rttWidth: 448, rttHeight: 280, slotsPerFrame: 2, targetFps: PREVIEW_FPS, ...opts }
     configureDraco()
     this.stage = new Scene(engine)
+    // Spatial post audio (2D mode): the stage's own cameras are offscreen
+    // per-slot rigs, so the listener follows the user-facing camera instead
+    // (see src/audio/spatial.ts).
+    bindSceneListener(this.stage)
     // Transparent clear per render (see model/poster.ts): the scene owns the
     // clear when rendering through camera.outputRenderTarget, so `rtt.clearColor`
     // alone left live previews sitting on an opaque black rectangle.
@@ -266,8 +281,28 @@ export class PreviewPool {
     // play() restarts paused animatables from their pause point instead of
     // resetting to frame 0 (AnimationGroup.start would).
     for (const a of slot.anims) a.play(true)
-    if (sound) playModelSounds(slot)
+    if (sound) {
+      this.positionSlotSounds(slot)
+      playModelSounds(slot)
+    }
     slot.playing = true
+  }
+
+  /** Anchor a slot's sounds to its card's current world position. */
+  private positionSlotSounds(slot: Slot): void {
+    if (slot.sounds.length === 0) return
+    const pos = this.opts.soundPosition?.(slot.postId ?? '')
+    if (!pos) return
+    for (const s of slot.sounds) moveSound(s, pos)
+  }
+
+  /**
+   * Re-anchor every playing slot's sounds (called when cards move — scroll,
+   * resize, 2D↔3D toggle). Babylon refreshes panners at its own rate, so a
+   * single call per reposition pass is enough.
+   */
+  refreshSoundPositions(): void {
+    for (const slot of this.byPost.values()) this.positionSlotSounds(slot)
   }
 
   /** Free every live slot (used when the board/thread goes off screen). */
@@ -366,6 +401,7 @@ export class PreviewPool {
       s.dispose()
     }
     slot.sounds = []
+    slot.soundEmitters.clear()
     slot.playing = false
     if (slot.container) {
       // rootNodes were reparented under the stage root, which is NOT part
@@ -416,6 +452,9 @@ export class PreviewPool {
     // Pause the model's sound with the animation (it belongs to the stage
     // scene; the viewer adopts no audio, so commit() just releases it).
     for (const s of slot.sounds) if (s.isPlaying) s.pause()
+    // Re-attach sounds to their emitter nodes: handoffContainer pairs each
+    // sound with its cloned node via _connectedTransformNode (AMENDMENT 87).
+    for (const [s, emitter] of slot.soundEmitters) attachSound(s, emitter)
     // Detach rootNodes from slot.root so handoffContainer's
     // instantiateModelsToScene finds them at the root level and the move
     // does not warn about the soon-to-be-disposed offset root.
@@ -465,6 +504,7 @@ export class PreviewPool {
         // above). The slot stays in byPost, so tick() will re-render it
         // once the anims spin back up.
         for (const a of anims) a.start(true)
+        self.positionSlotSounds(slot)
         playModelSounds(slot)
         slot.playing = true
       },
@@ -551,7 +591,7 @@ export class PreviewPool {
     rtt.clearColor = new Color4(0, 0, 0, 0)
     const camera = new FreeCamera(`slot-cam-${index}`, Vector3.Zero(), this.stage)
     const slot: Slot = {
-      index, rtt, camera, container: null, root: null, anims: [], sounds: [], soundTimer: null, playing: false,
+      index, rtt, camera, container: null, root: null, anims: [], sounds: [], soundEmitters: new Map(), soundTimer: null, playing: false,
       postId: null, pending: false, visible: false,
       facing: new Vector3(0, 0, 1), lastRenderAt: 0,
     }
@@ -652,6 +692,17 @@ export class PreviewPool {
       // dispose them — otherwise they stay registered (and silent) in the
       // stage scene's mainSoundTrack for the whole session.
       slot.sounds = claimModelSounds(this.stage, container, soundBaseline, this.claimedSounds)
+      // Spatial audio (2D mode): the stage layout is a fake strip (index *
+      // 800), so drop the loader's node attachment and anchor at the REAL
+      // card position via the soundPosition provider (spatial.ts). The
+      // emitter refs are kept for acquire()'s re-attach (hand-off pairing).
+      slot.soundEmitters.clear()
+      for (const s of slot.sounds) {
+        const emitter = (s as unknown as { _connectedTransformNode?: TransformNode })._connectedTransformNode ?? null
+        if (emitter) slot.soundEmitters.set(s, emitter)
+        detachSound(s)
+      }
+      spatializeSounds(slot.sounds)
       slot.postId = postId
 
       // Render the first frame through the scene path (compiles shaders).
@@ -670,7 +721,10 @@ export class PreviewPool {
       for (const a of slot.anims) a.start(true)
       // Sound only ever starts from the per-card ▶ button (a user gesture):
       // autoplay animation stays silent (SPEC: audio "no autoplay").
-      if (sound) playModelSounds(slot)
+      if (sound) {
+        this.positionSlotSounds(slot)
+        playModelSounds(slot)
+      }
       this.byPost.set(postId, slot)
       this.emitLive(postId, slot.rtt)
     } catch {

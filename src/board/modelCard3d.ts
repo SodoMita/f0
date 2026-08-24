@@ -14,6 +14,7 @@ import { frameModel, placeFrame, makeCellClip, updateCellClip, type ModelFrame }
 import { validateGLBCached } from '../model/limits'
 import { graphics } from '../render/graphics'
 import { claimModelSounds, playModelSounds } from './modelSounds'
+import { attachSound, spatializeSounds } from '../audio/spatial'
 
 /** Model bytes + content hash + the authored camera index (v3 `preview-camera`). */
 export interface DirectModel {
@@ -401,6 +402,11 @@ export class Direct3DPool {
     for (const g of container.animationGroups) g.stop()
     for (const s of sounds) this.claimedSounds.add(s)
     slot.sounds = sounds
+    // Spatial post audio: the model is a real mesh in the visible scene, so
+    // its sounds follow the placed root (the scene's active camera is the
+    // listener — real HRTF positioning as the camera orbits).
+    spatializeSounds(sounds)
+    if (root) for (const s of sounds) attachSound(s, root)
     slot.frame = frame
     slot.postId = postId
     slot.started = false

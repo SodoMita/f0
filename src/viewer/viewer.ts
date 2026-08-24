@@ -19,6 +19,7 @@ import type { ThreadMeta } from '../protocol/thread-index'
 import { validateGLBCached } from '../model/limits'
 import { worldBox, frameDistance, dominantFacing } from '../model/facing'
 import { playModelSounds } from '../board/modelSounds'
+import { attachSound, spatializeSound } from '../audio/spatial'
 import type { ShaderMaterial } from '@babylonjs/core/Materials/shaderMaterial'
 import {
   makeCardMaterial, setCardTexture, setCardTint, setCardWhite, setCardFlip, setCardOpacity,
@@ -353,6 +354,10 @@ export class Viewer {
       if (attached && nodes.has(attached)) {
         this.claimedSounds.add(s)
         this.soundOwner.sounds.push(s)
+        // Spatial post audio: the viewer orbits the real model, so sounds
+        // follow their emitter (the scene's active camera is the listener).
+        spatializeSound(s)
+        attachSound(s, attached)
       }
     }
   }
