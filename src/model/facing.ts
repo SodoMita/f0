@@ -1,4 +1,4 @@
-import { Matrix, Vector3 } from '@babylonjs/core/Maths/math.vector'
+import { Vector3 } from '@babylonjs/core/Maths/math.vector'
 import { VertexBuffer } from '@babylonjs/core/Buffers/buffer'
 import type { AssetContainer } from '@babylonjs/core/assetContainer'
 import type { AbstractMesh } from '@babylonjs/core/Meshes/abstractMesh'
@@ -207,5 +207,3 @@ export function frameDistance(
   const radius = Vector3.Distance(min, max) / 2
   return Math.max(radius * 1.15, d / Math.max(0.2, Math.min(1, fill)))
 }
-
-export { Matrix }

@@ -1,4 +1,4 @@
-import { GROUPS, SETTINGS, BY_ID, type SettingDef, type SettingsValues } from './schema'
+import { GROUPS, SETTINGS, type SettingDef } from './schema'
 import type { SettingsStore } from './store'
 import type { Capabilities } from './capabilities'
 
@@ -368,5 +368,4 @@ function clamp(value: number, def: SettingDef): number {
   return Math.min(max, Math.max(min, value))
 }
 
-export { BY_ID }
-export type { SettingsValues }
+

@@ -89,15 +89,6 @@ function quatFromBasis(x: Vec3, y: Vec3, z: Vec3): Quat {
   return [qx / l, qy / l, qz / l, qw / l]
 }
 
-export function mulQuat(a: Quat, b: Quat): Quat {
-  return [
-    a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],
-    a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0],
-    a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3],
-    a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2],
-  ]
-}
-
 /** Y-up cylinder → align +Y with tangent. */
 export function quatCylinder(tangent: Vec3): Quat {
   return quatAlign(cross(tangent, absLeast(tangent)), tangent)
