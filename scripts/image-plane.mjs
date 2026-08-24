@@ -10,7 +10,9 @@ const URL = process.env.TARGET_URL || 'http://localhost:4173/'
 const browser = await chromium.launch({
   headless: true,
   executablePath: process.env.BROWSER_PATH || undefined,
-  args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox', '--disable-dev-shm-usage'],
+  // --ignore-certificate-errors: the rig relay serves wss://localhost:8443
+  // with a self-signed cert; the headless test browser must accept it.
+  args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox', '--disable-dev-shm-usage', '--ignore-certificate-errors'],
 })
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
 const errs = []
