@@ -1504,15 +1504,19 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
 90. IMAGE AS PLANE (2026-08-24): the studio gains an **image** tab (rail,
     right of shapes). Pick a PNG/JPG/WebP and it becomes a flat,
     double-sided, UNLIT plane whose material carries the picture
-    (src/studio/imageTool.ts). Decode is bounded before any GPU work: the
-    long side is capped at 2048 px (aspect preserved, alpha kept, canvas
-    re-encode), which keeps the embedded PNG well under the 8 MiB
-    recommended post budget; the plane's width in world units is set on the
-    tab (default 4) and its height follows the image aspect. The plane is a
-    normal studio object — selectable, gizmo-transformable, deleteable, and
-    reset via "remove additions" — and publishes through the normal export
-    review: the texture is embedded in the GLB exactly like any library
-    piece's texture, so the WebP codec can still lossy-compress it. The
+    (src/studio/imageTool.ts). Images keep their NATIVE resolution — no
+    downscale cap: the post's own size limit (20 MiB hard / 8 MiB
+    recommended) is what bounds how large a picture can be. The only
+    up-front refusal is the engine's hard texture ceiling
+    (LIMITS.textureSide = 4096 px): a larger side could not pass
+    validateGLB at publish, so it surfaces as a clear error instead of a
+    silent resize. Alpha is preserved through a canvas re-encode; the
+    plane's width in world units is set on the tab (default 4) and its
+    height follows the image aspect. The plane is a normal studio object —
+    selectable, gizmo-transformable, deleteable, and reset via "remove
+    additions" — and publishes through the normal export review: the
+    texture is embedded in the GLB exactly like any library piece's
+    texture, so the WebP codec can still lossy-compress it. The
     serializer's KHR_materials_unlit EXPORTER was never registered (only
     the loader was): the side-effect import now sits beside GLTF2Export so
     unlit materials publish as unlit. Image-only posts name the GLB after

@@ -1,9 +1,10 @@
 // Image-as-plane units — no browser needed:
 //   bun scripts/image-unit.mjs
-// Guards src/studio/imageTool.ts: the long-side cap stays inside the GLB
-// safety-scan limits, and waitTextureReady resolves on ready/load and
-// rejects on timeout without leaking its timer.
-import { IMAGE_MAX_SIDE, waitTextureReady } from '../src/studio/imageTool.ts'
+// Guards src/studio/imageTool.ts: images keep their NATIVE resolution (no
+// downscale cap — the post size limit bounds them), the only up-front
+// refusal is the engine's hard texture-side ceiling, and waitTextureReady
+// resolves on ready/load and rejects on timeout without leaking its timer.
+import { IMAGE_SIDE_HARD_LIMIT, waitTextureReady } from '../src/studio/imageTool.ts'
 import { LIMITS } from '../src/theme.ts'
 
 const fails = []
@@ -12,10 +13,11 @@ const check = (name, ok, detail = '') => {
   if (!ok) fails.push(name)
 }
 
-// 1. the plane cap is inside the engine's texture limits
-check('IMAGE_MAX_SIDE ≤ engine textureSide', IMAGE_MAX_SIDE <= LIMITS.textureSide,
-  `${IMAGE_MAX_SIDE} vs ${LIMITS.textureSide}`)
-check('IMAGE_MAX_SIDE is a power of two', (IMAGE_MAX_SIDE & (IMAGE_MAX_SIDE - 1)) === 0, String(IMAGE_MAX_SIDE))
+// 1. there is NO resolution cap below the engine's hard limit (native res
+//    is the default — see decodeImageFile, which downscales nothing)
+check('no cap below the engine texture ceiling',
+  typeof IMAGE_SIDE_HARD_LIMIT === 'number' && IMAGE_SIDE_HARD_LIMIT === LIMITS.textureSide,
+  `hard limit = ${IMAGE_SIDE_HARD_LIMIT}px`)
 
 // 2. waitTextureReady resolves immediately when already ready
 {

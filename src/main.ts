@@ -1106,9 +1106,7 @@ async function boot(): Promise<void> {
       const r = await studio.addImage(file, worldWidth)
       btnStudioPublish.disabled = false
       syncImageBudget()
-      setStudioStatus(r.downscaled
-        ? `image added · downscaled to ${r.width}×${r.height}`
-        : `image added · ${r.width}×${r.height}`, 'ok')
+      setStudioStatus(`image added · ${r.width}×${r.height}`, 'ok')
     } catch (err) {
       setStudioStatus('')
       errorSheet.show(ERRORS.STUDIO_IMPORT(err instanceof Error ? err.message : 'image failed'))

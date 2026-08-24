@@ -103,8 +103,9 @@ check('GLB has one plane mesh', glb.meshes === 1, `meshes=${glb.meshes}`)
 check('material is unlit (picture stays a picture)', glb.hasExt === true)
 check('export is small (4x4 PNG)', glb.size < 20000, `${glb.size} bytes`)
 
-// 4. a large source is downscaled to the 2048 px cap, and the tab's width
-//    control sets the plane's world size (height follows the aspect)
+// 4. a large source keeps its NATIVE resolution (no cap — the post size
+//    limit is the bound), and the tab's width control sets the plane's
+//    world size (height follows the aspect)
 await page.fill('#image-width', '8')
 const big = await page.evaluate(async () => {
   const canvas = document.createElement('canvas')
@@ -128,7 +129,7 @@ const bigPlane = await page.evaluate(() => {
   const p = window.__form0.studio.imagePlanes[1]
   return p ? { px: p.pixelW, py: p.pixelH, w: p.width.toFixed(2), h: p.height.toFixed(2) } : null
 })
-check('wide image downscaled to the 2048 px cap', bigPlane?.px === 2048 && bigPlane?.py === 683,
+check('wide image keeps native resolution (no cap)', bigPlane?.px === 3000 && bigPlane?.py === 1000,
   JSON.stringify(bigPlane))
 check('world size follows the width control + aspect', bigPlane?.w === '8.00' && bigPlane?.h === '2.67',
   JSON.stringify(bigPlane))

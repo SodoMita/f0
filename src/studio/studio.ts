@@ -714,12 +714,14 @@ export class Studio {
 
   /**
    * Decode a picture file and place it as a flat plane (image tab). The
-   * image is bounded to the app's texture limits; the plane is selectable,
+   * image keeps its native resolution — the post's own size limit bounds
+   * how large it can be (only the engine's hard texture-side ceiling is
+   * refused up front, with a clear error). The plane is selectable,
    * gizmo-transformable and deleteable like any other studio object, and
    * the export review/publish pipeline embeds its texture in the GLB.
-   * @returns the decoded pixel size (and whether it was downscaled).
+   * @returns the decoded pixel size.
    */
-  async addImage(file: File, worldWidth = 4): Promise<{ width: number; height: number; downscaled: boolean }> {
+  async addImage(file: File, worldWidth = 4): Promise<{ width: number; height: number }> {
     if (this.frozen) throw new Error('publish in progress')
     const decoded = await decodeImageFile(file)
     const n = this.imagePlanes.length
@@ -739,7 +741,7 @@ export class Studio {
     this.select(plane.mesh)
     this.fitSelected()
     this.form.kick(800)
-    return { width: decoded.width, height: decoded.height, downscaled: decoded.downscaled }
+    return { width: decoded.width, height: decoded.height }
   }
 
   get imageCount(): number { return this.imagePlanes.length }

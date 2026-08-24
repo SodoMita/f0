@@ -19,9 +19,11 @@ move it to **Done** with a commit reference. One agent per area.
       camera, hand-off pairing preserved). Did NOT merge: design mockup
       branches, the site build, and the old dev-rewrite (size/obsolete).
       New feature: **studio image tab** — upload PNG/JPG/WebP → flat
-      double-sided unlit textured plane (2048 px long-side cap), select/
-      transform/delete like any studio object, exports a textured GLB
-      (KHR_materials_unlit exporter registration added). Guards:
+      double-sided unlit textured plane at NATIVE resolution (no cap; the
+      post size limit is the bound, engine's 4096 px texture ceiling
+      refused up front with a clear error), select/transform/delete like
+      any studio object, exports a textured GLB (KHR_materials_unlit
+      exporter registration added). Guards:
       `check:spatial-unit`, `check:image-unit`, `image-plane` e2e suite
       (upload → GLB structure → delete). Full gate green: check:static
       (standalone 5.16 MB), check:unit (15 files), check:e2e (5 suites).

@@ -3,21 +3,26 @@ import { PBRMaterial } from '@babylonjs/core/Materials/PBR/pbrMaterial'
 import { Texture } from '@babylonjs/core/Materials/Textures/texture'
 import type { Mesh } from '@babylonjs/core/Meshes/mesh'
 import type { Scene } from '@babylonjs/core/scene'
+import { LIMITS } from '../theme'
 
 /**
  * Upload a picture as a flat plane (studio).
  *
- * The chosen PNG/JPG/WebP is decoded, bounded to the app's texture limits
- * (long side ≤ IMAGE_MAX_SIDE, decoded pixels within the GLB safety scan
- * budget) and placed in the studio as one double-sided unlit plane whose
- * material carries the image. Publishing re-exports the studio scene, so
- * the texture lands in the GLB exactly like any library piece's texture
- * (the export review codec can still lossy-compress it to WebP).
+ * The chosen PNG/JPG/WebP is decoded at its NATIVE resolution — no
+ * downscaling: the post's own size limit (modelBytesHard) is what bounds
+ * how large a picture can be. The only up-front refusal is the engine's
+ * hard texture ceiling (LIMITS.textureSide): a larger side could not pass
+ * validateGLB at publish, so it is surfaced as a clear error instead of a
+ * silent resize. The plane is double-sided and unlit; publishing re-exports
+ * the studio scene, so the texture lands in the GLB exactly like any
+ * library piece's texture (the export review codec can still lossy-compress
+ * it to WebP).
  */
 
-/** Long-side cap: keeps the embedded PNG well under the 8 MiB recommended
- *  post budget while staying far inside the 4096 px engine limit. */
-export const IMAGE_MAX_SIDE = 2048
+/** Hard platform ceiling: validateGLB refuses any texture with a side
+ *  above this, so a picture that big could never publish. Kept as the
+ *  refusal threshold, not a downscale target. */
+export const IMAGE_SIDE_HARD_LIMIT = LIMITS.textureSide
 
 /** Resolve once the texture's pixels are available (data-URI decode). */
 export function waitTextureReady(tex: Texture, timeoutMs = 5000): Promise<void> {
@@ -32,8 +37,6 @@ export interface DecodedImage {
   canvas: HTMLCanvasElement
   width: number
   height: number
-  /** True when the source was larger than IMAGE_MAX_SIDE and got resized. */
-  downscaled: boolean
 }
 
 function objectUrlToImage(url: string): Promise<HTMLImageElement> {
@@ -46,11 +49,11 @@ function objectUrlToImage(url: string): Promise<HTMLImageElement> {
 }
 
 /**
- * Decode an image file to a canvas bounded to the app's texture limits.
- * Throws a readable error for undecodable files. Alpha is preserved.
+ * Decode an image file at its native resolution. Throws a readable error
+ * for undecodable files and for images whose side exceeds the engine's
+ * hard texture limit (they could not publish anyway). Alpha is preserved.
  */
 export async function decodeImageFile(file: File): Promise<DecodedImage> {
-  const limit = IMAGE_MAX_SIDE
   let bitmap: ImageBitmap | null = null
   let img: HTMLImageElement | null = null
   let url: string | null = null
@@ -67,16 +70,16 @@ export async function decodeImageFile(file: File): Promise<DecodedImage> {
     const srcW = src.width
     const srcH = src.height
     if (srcW < 1 || srcH < 1) throw new Error('image has no pixels')
-    const scale = Math.min(1, limit / Math.max(srcW, srcH))
-    const w = Math.max(1, Math.round(srcW * scale))
-    const h = Math.max(1, Math.round(srcH * scale))
+    if (srcW > IMAGE_SIDE_HARD_LIMIT || srcH > IMAGE_SIDE_HARD_LIMIT) {
+      throw new Error(`image is ${srcW}×${srcH} — a side exceeds the engine's ${IMAGE_SIDE_HARD_LIMIT} px texture limit and the post could not be published`)
+    }
     const canvas = document.createElement('canvas')
-    canvas.width = w
-    canvas.height = h
+    canvas.width = srcW
+    canvas.height = srcH
     const ctx = canvas.getContext('2d')
     if (!ctx) throw new Error('2D canvas unavailable')
-    ctx.drawImage(src, 0, 0, w, h)
-    return { canvas, width: w, height: h, downscaled: scale < 1 }
+    ctx.drawImage(src, 0, 0, srcW, srcH)
+    return { canvas, width: srcW, height: srcH }
   } finally {
     if (bitmap?.close) bitmap.close()
     if (url) URL.revokeObjectURL(url)
