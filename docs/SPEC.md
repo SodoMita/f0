@@ -1500,3 +1500,54 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     Babylon. Canonical gate (static + unit + e2e) green on the same build.
     Guard: node scripts/hostile-rig.mjs + node scripts/hostile-audit.mjs
     (22 attacks; the table above is the expected-impact list).
+
+90. IMAGE AS PLANE (2026-08-24): the studio gains an **image** tab (rail,
+    right of shapes). Pick a PNG/JPG/WebP and it becomes a flat,
+    double-sided, UNLIT plane whose material carries the picture
+    (src/studio/imageTool.ts). Decode is bounded before any GPU work: the
+    long side is capped at 2048 px (aspect preserved, alpha kept, canvas
+    re-encode), which keeps the embedded PNG well under the 8 MiB
+    recommended post budget; the plane's width in world units is set on the
+    tab (default 4) and its height follows the image aspect. The plane is a
+    normal studio object — selectable, gizmo-transformable, deleteable, and
+    reset via "remove additions" — and publishes through the normal export
+    review: the texture is embedded in the GLB exactly like any library
+    piece's texture, so the WebP codec can still lossy-compress it. The
+    serializer's KHR_materials_unlit EXPORTER was never registered (only
+    the loader was): the side-effect import now sits beside GLTF2Export so
+    unlit materials publish as unlit. Image-only posts name the GLB after
+    the source file (checker.png → checker.glb). Guards:
+    `check:image-unit` (cap within the engine limits, waitTextureReady
+    resolve/timeout/timer hygiene) and the `image-plane` e2e suite
+    (upload → plane in scene → GLB with one texture/one image/one mesh →
+    delete restores an empty studio).
+
+91. POSITIONAL POST AUDIO (2026-08-24): embedded post audio
+    (MSFT_audio_emitter) is now SPATIAL — the sound comes from the post's
+    on-screen position and moves as the camera orbits (3D cards, viewer)
+    or the feed scrolls (2D cards), using Babylon's native HRTF panner
+    (src/audio/spatial.ts). Distance curve matches the flat cameras
+    (ref 30 / max 240 / rolloff 0.35, inverse, 360° cones). Direct-3D
+    cards and the viewer render the real model in the visible scene, so
+    their sounds attachToMesh their emitters and the scene's active
+    camera is the listener; the offscreen preview stage's slot layout is a
+    fake strip, so its sounds are detached from their nodes and anchored
+    at the REAL card position via a per-view provider (LivePool re-applies
+    it on view switches) while the stage listener follows the active
+    user-facing camera. acquire() re-attaches sounds to their emitters so
+    the viewer hand-off pairing (AMENDMENT 87) keeps working. No UI or
+    play/pause semantics changed; without WebAudio everything stays flat.
+    Guard: `check:spatial-unit` (curve, error-swallowing, listener
+    providers).
+
+92. MERGED 2D/3D CARD FIXES (2026-08-24): two board/thread fixes from
+    unmerged agent branches, still present on main, are folded in: (a) live
+    preview RTTs set hasAlpha=true + samples=1 (matching PosterRenderer) so
+    preview brightness is stable whether or not a pipeline effect (MSAA/
+    FXAA) is on — without it the preview sat on an opaque black slab that
+    turned transparent (brighter) under effects; (b) the cell clip planes
+    used by direct-3D cards had every normal flipped, so the four kept
+    half-spaces intersected empty and every fragment inside the card was
+    discarded — normals are now inward (keep x0≤x≤x1, y0≤y≤y1), and the
+    2D→3D toggle clears the scroll/pinch settle gate so 3D models start
+    loading on the same frame instead of showing a stale 2D poster.

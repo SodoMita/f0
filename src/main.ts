@@ -133,6 +133,10 @@ async function boot(): Promise<void> {
   const studioFilename = $('studio-filename')
   const studioStatus = $('studio-status')
   const btnStudioImport = $('btn-studio-import') as HTMLButtonElement
+  const btnStudioImage = $('btn-studio-image') as HTMLButtonElement
+  const studioImageFile = $('studio-image-file') as HTMLInputElement
+  const imageWidth = $('image-width') as HTMLInputElement
+  const imageBudget = $('image-budget') as HTMLSpanElement
   const btnStudioPublish = $('btn-studio-publish') as HTMLButtonElement
   const studioText = $('studio-text') as HTMLTextAreaElement
   const studioAlign = $('studio-align') as HTMLButtonElement
@@ -1067,7 +1071,7 @@ async function boot(): Promise<void> {
   })
 
   // ---- Studio tabs ----
-  type StudioTab = 'upload' | 'type' | 'paint' | 'symbols'
+  type StudioTab = 'upload' | 'type' | 'paint' | 'symbols' | 'image'
   function setStudioTab(tab: StudioTab): void {
     document.querySelectorAll<HTMLButtonElement>('.rail-btn').forEach((b) => {
       b.classList.toggle('active', b.dataset.tab === tab)
@@ -1078,10 +1082,38 @@ async function boot(): Promise<void> {
     studio.setPaintMode(tab === 'paint')
     // Empty text field = NO text (AMEND 66/69): the type tab never seeds
     // '/0', so a blank field adds nothing and publish stays disabled until
-    // the player actually adds content (text, model, symbols or paint).
-    if (tab === 'paint' || tab === 'type') btnStudioPublish.disabled = !studio.hasContent()
+    // the player actually adds content (text, model, symbols, paint, image).
+    if (tab === 'paint' || tab === 'type' || tab === 'image') {
+      btnStudioPublish.disabled = !studio.hasContent()
+      if (tab === 'image') syncImageBudget()
+    }
     studio.kick(120)
   }
+  function syncImageBudget(): void {
+    const n = studio.imageCount
+    imageBudget.textContent = n === 0
+      ? 'no images yet'
+      : `${n} plane${n === 1 ? '' : 's'} · ${(studio.imagePixels / 1048576).toFixed(1)} MiB decoded`
+  }
+  btnStudioImage.addEventListener('click', () => { if (!publishing) studioImageFile.click() })
+  studioImageFile.addEventListener('change', async () => {
+    const file = studioImageFile.files?.[0]
+    studioImageFile.value = ''
+    if (!file || publishing) return
+    try {
+      setStudioStatus('adding image…', 'busy')
+      const worldWidth = Math.max(0.25, Number(imageWidth.value) || 4)
+      const r = await studio.addImage(file, worldWidth)
+      btnStudioPublish.disabled = false
+      syncImageBudget()
+      setStudioStatus(r.downscaled
+        ? `image added · downscaled to ${r.width}×${r.height}`
+        : `image added · ${r.width}×${r.height}`, 'ok')
+    } catch (err) {
+      setStudioStatus('')
+      errorSheet.show(ERRORS.STUDIO_IMPORT(err instanceof Error ? err.message : 'image failed'))
+    }
+  })
   document.querySelectorAll<HTMLButtonElement>('.rail-btn').forEach((b) =>
     b.addEventListener('click', () => setStudioTab(b.dataset.tab as StudioTab)),
   )

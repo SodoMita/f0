@@ -101,6 +101,9 @@
         <button class="rail-btn" data-tab="symbols" title="shapes — faces, reactions, primitives" aria-label="shapes">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l10 10-10 10L2 12z"/></svg>
         </button>
+        <button class="rail-btn" data-tab="image" title="image — upload a picture as a flat plane" aria-label="image">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="M3 17l5-5 4 4 3-3 6 6"/></svg>
+        </button>
       </aside>
 
       <!-- Card preview (format v4: the card is a local render). Upper-left
@@ -211,6 +214,17 @@
               <label class="full">object tint · next symbol placed takes it</label>
             </div>
             <div class="symbol-grid" id="symbol-grid"></div>
+          </section>
+
+          <section class="studio-panel" data-panel="image" hidden>
+            <button id="btn-studio-image" class="big-button">choose image…</button>
+            <input id="studio-image-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden />
+            <p class="hint">PNG / JPG / WebP becomes a flat plane in your scene and publishes as a textured GLB. Images are capped at 2048&nbsp;px on the long side (downscaled to fit).</p>
+            <div class="text-controls">
+              <label>width<input id="image-width" type="number" step="0.25" value="4" min="0.25" title="plane width in world units — the height follows the picture's aspect" /></label>
+              <label class="full">plane width in world units · move / rotate / scale it with the gizmos, delete with the trash button</label>
+            </div>
+            <p class="hint" id="image-budget">no images yet</p>
           </section>
 
           <!-- Camera settings are GLOBAL to the studio (not tab-specific). -->

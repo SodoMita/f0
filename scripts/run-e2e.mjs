@@ -27,7 +27,7 @@ const CERTS = '/tmp/rig-certs'
 const CERT = join(CERTS, 'cert.pem')
 const KEY = join(CERTS, 'key.pem')
 const TARGET_URL = process.env.TARGET_URL || 'http://localhost:4173/'
-const SUITES = (process.env.SUITES || 'smoke codec-browser features offline-verify').split(/\s+/).filter(Boolean)
+const SUITES = (process.env.SUITES || 'smoke codec-browser features offline-verify image-plane').split(/\s+/).filter(Boolean)
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 

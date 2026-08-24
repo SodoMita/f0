@@ -11,6 +11,9 @@ import '../model/gltf'
 // Deep import (SPEC 24 discipline): the '@babylonjs/serializers/glTF'
 // barrel drags every serializer extension into the bundle (+330 KB).
 import { GLTF2Export } from '@babylonjs/serializers/glTF/2.0/glTFSerializer'
+// Side-effect import: registers the KHR_materials_unlit EXPORTER so image
+// planes (unlit materials) publish as unlit GLBs instead of lit ones.
+import '@babylonjs/serializers/glTF/2.0/Extensions/KHR_materials_unlit'
 import type { FormEngine } from '../core/engine'
 import { toFile } from '../model/poster'
 import { validateGLB, type LimitReport } from '../model/limits'
@@ -51,6 +54,7 @@ function normalizeYaw(deg: number): number {
 }
 
 import { buildTextMesh, type TextMeshResult } from './textTool'
+import { decodeImageFile, buildImagePlane, waitTextureReady, type ImagePlane } from './imageTool'
 import { PaintSession } from './paint/session'
 import { importModelFiles } from '../model/importSidecar'
 import { UtilityLayerRenderer } from '@babylonjs/core/Rendering/utilityLayerRenderer'
@@ -86,6 +90,8 @@ export class Studio {
   private camera: ArcRotateCamera
   private container: AssetContainer | null = null
   private extras: AssetContainer[] = []
+  /** Uploaded pictures placed as flat textured planes (image tab). */
+  private imagePlanes: ImagePlane[] = []
   private imported: ImportedModel | null = null
   private tint: string = theme.accent
   /** Per-symbol color override, keyed by AssetContainer. Empty string means use global tint. */
@@ -533,6 +539,11 @@ export class Studio {
       this.extras = this.extras.filter((c) => c !== extra)
       this.extraColors.delete(extra)
     } else {
+      const image = this.imagePlanes.find((p) => p.mesh === m)
+      if (image) {
+        image.texture.dispose()
+        this.imagePlanes = this.imagePlanes.filter((p) => p !== image)
+      }
       m.dispose(false, true)
     }
     if (isText) this.touched() // empty text = no text in the export at all
@@ -566,7 +577,8 @@ export class Studio {
 
   hasModel(): boolean { return this.imported !== null }
   hasContent(): boolean {
-    return this.imported !== null || this.textValue.trim().length > 0 || this.paint.count > 0 || this.extras.length > 0
+    return this.imported !== null || this.textValue.trim().length > 0 || this.paint.count > 0
+      || this.extras.length > 0 || this.imagePlanes.length > 0
   }
   get libraryCount(): number { return this.extras.length }
 
@@ -586,6 +598,7 @@ export class Studio {
     }
     this.clearCameras()
     this.clearExtras()
+    this.clearImagePlanes()
     this.imported = null
     this.paint.clear()
     this.meshEdits = false
@@ -697,6 +710,53 @@ export class Studio {
     pbr.emissiveColor = Color3.Black()
     pbr.metallic = 0
     pbr.backFaceCulling = false
+  }
+
+  /**
+   * Decode a picture file and place it as a flat plane (image tab). The
+   * image is bounded to the app's texture limits; the plane is selectable,
+   * gizmo-transformable and deleteable like any other studio object, and
+   * the export review/publish pipeline embeds its texture in the GLB.
+   * @returns the decoded pixel size (and whether it was downscaled).
+   */
+  async addImage(file: File, worldWidth = 4): Promise<{ width: number; height: number; downscaled: boolean }> {
+    if (this.frozen) throw new Error('publish in progress')
+    const decoded = await decodeImageFile(file)
+    const n = this.imagePlanes.length
+    const plane = buildImagePlane(this.scene, decoded, worldWidth)
+    plane.sourceName = file.name
+    try {
+      await waitTextureReady(plane.texture)
+    } catch {
+      plane.texture.dispose()
+      plane.mesh.dispose(false, true)
+      throw new Error('could not decode the image texture')
+    }
+    // Grid placement, like library pieces: avoid stacking on the origin.
+    plane.mesh.position.set((n % 6) * 1.2, 0, Math.floor(n / 6) * 1.2 + 0.2)
+    this.imagePlanes.push(plane)
+    this.markDirty()
+    this.select(plane.mesh)
+    this.fitSelected()
+    this.form.kick(800)
+    return { width: decoded.width, height: decoded.height, downscaled: decoded.downscaled }
+  }
+
+  get imageCount(): number { return this.imagePlanes.length }
+
+  /** Total decoded pixels of every placed picture (status readout). */
+  get imagePixels(): number {
+    let total = 0
+    for (const p of this.imagePlanes) total += p.pixelW * p.pixelH
+    return total
+  }
+
+  private clearImagePlanes(): void {
+    for (const p of this.imagePlanes) {
+      p.texture.dispose()
+      p.mesh.dispose(false, true)
+    }
+    this.imagePlanes = []
   }
 
   // ---- typed text tool (SPEC TEXT+ANIM: flat low-poly geometry) ----
@@ -1121,7 +1181,7 @@ export class Studio {
     }
     // Pass-through only when the published bytes are still the imported GLB.
     // A detached copy: the File may alias live import buffers.
-    if (this.imported && !hasUserCams && !hasPaint && !hasText && !this.meshEdits) {
+    if (this.imported && !hasUserCams && !hasPaint && !hasText && !this.meshEdits && this.imagePlanes.length === 0) {
       const bytes = copyBytes(this.imported.bytes)
       return {
         blob: new Blob([bytes.buffer as ArrayBuffer], { type: 'model/gltf-binary' }),
@@ -1153,6 +1213,7 @@ export class Studio {
         exportableMeshes.add(m)
       }
     }
+    for (const p of this.imagePlanes) exportableMeshes.add(p.mesh)
     // Thin-instance sources must not export (unit mesh at origin). Bake first.
     const baked = hasPaint ? this.paint.bake() : []
     for (const m of baked) exportableMeshes.add(m)
@@ -1174,14 +1235,21 @@ export class Studio {
 
     // If we have only user cameras but no mesh (edge), still export cameras + text if present.
     // When there is no text and no container (should not happen due to hasContent check) fallback to original path.
-    const res = await GLTF2Export.GLBAsync(this.scene, this.textMesh ? 'text' : (this.imported?.file.name.replace(/\.[^.]+$/, '') || 'model'), {
+    const imageBase = this.imagePlanes[0]?.sourceName.replace(/\.[^.]+$/, '') || 'image'
+    const baseName = this.textMesh ? 'text'
+      : this.imagePlanes.length ? imageBase
+      : (this.imported?.file.name.replace(/\.[^.]+$/, '') || 'model')
+    const res = await GLTF2Export.GLBAsync(this.scene, baseName, {
       shouldExportNode: exportableMeshes.size === 0 && exportableCams.size === 0 ? (n: any) => n === this.textMesh?.mesh : shouldExportNode,
     })
     const file = Object.values((res as any).glTFFiles ?? (res as any).files ?? res)[0] as any
     const raw = file instanceof Blob ? new Uint8Array(await file.arrayBuffer()) : new Uint8Array(file as ArrayBuffer)
     const bytes = copyBytes(raw)
     const blob = new Blob([bytes.buffer as ArrayBuffer], { type: 'model/gltf-binary' })
-    return { blob, filename: this.textMesh ? 'text.glb' : (this.imported?.file.name ?? 'model.glb'), sourceFormat: this.imported ? this.imported.sourceFormat : 'generated' }
+    const outName = this.textMesh ? 'text.glb'
+      : this.imagePlanes.length ? `${imageBase}.glb`
+      : (this.imported?.file.name ?? 'model.glb')
+    return { blob, filename: outName, sourceFormat: this.imported ? this.imported.sourceFormat : 'generated' }
   }
 
   dispose(): void {

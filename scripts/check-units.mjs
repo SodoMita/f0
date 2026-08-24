@@ -32,6 +32,7 @@ const MANIFEST = {
   'direct3d-unit.mjs':    { run: ['bun'],            tier: 'unit' },
   'error-copy-unit.mjs':  { run: ['node'],           tier: 'browser' },
   'hash-unit.mjs':        { run: ['bun'],            tier: 'unit' },
+  'image-unit.mjs':       { run: ['bun'],            tier: 'unit' },
   'library-unit.mjs':     { run: ['node'],           tier: 'unit' },
   'load-unit.mjs':        { run: ['bun'],            tier: 'unit' },
   'model-info-unit.mjs':  { run: ['bun'],            tier: 'unit' },
