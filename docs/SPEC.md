@@ -1555,3 +1555,63 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     discarded — normals are now inward (keep x0≤x≤x1, y0≤y≤y1), and the
     2D→3D toggle clears the scroll/pinch settle gate so 3D models start
     loading on the same frame instead of showing a stale 2D poster.
+
+93. EXPORT REVIEW: CARD SIZE, MODEL NAME, BITS DIAL (2026-08-21, renumbered
+    from 86 for main): the review (AMENDMENT 84/85) owns everything the
+    author decides at publish time:
+    - CARD ASPECT + SIZE dials restamp `previewDim`, which publish writes
+      into the post's `dim` tag — the frame every client renders the card at.
+      Aspect is a slider over the format bounds (0.5–2.0, step 0.05, labelled
+      with the nearest named preset: 1:1, 4:3, 16:9…); resolution is the LONG
+      edge in px (64–4096, step 8, label shows the computed W×H). The short
+      edge follows the aspect and is floored so it never drops under
+      posterDimMin. Changing the dials re-renders the lossy preview at the
+      new size; the GLB BYTES never change (dim is a tag, not part of the
+      model).
+    - MODEL NAME text input pre-fills exactly what the old code derived
+      (file base name or first text line) and publish uses the typed value
+      (sanitised + capped at LIMITS.contentChars, NIP-50 searchable content).
+    - GEOMETRY BITS: the 14/12/10 preset buttons (AMENDMENT 85) are one
+      slider now (6–16, default 12). It sets POSITION directly and scales the
+      other attribute kinds from the balanced ratios — dracoBits(12) is byte-
+      identical to the old `balanced` preset; the note reports every applied
+      bit value. (AMENDMENT 94 replaces this single dial with one per
+      attribute kind.)
+    Numeric-control rule: a dial whose domain has MORE than four possible
+    values is a slider / number input, never a button row (aspect, size,
+    bits, webp quality all follow it).
+    Guards: `check:codec` fine-settings + new `export-card-unit` (pure
+    helpers in `src/studio/exportInfo.ts`), `check:codec-browser` (dials
+    restamp previewDim, name publish roundtrip, dim publish).
+    NOTE (pre-existing, not fixed here): headless SwiftShader squashes poster
+    readbacks when the RTT size changes between `renderPosterFor` calls
+    (reproduced on main without this amendment; JS-level viewport/framebuffer
+    state is correct, so it is a driver quirk, not app state). Real GPUs are
+    unaffected; the codec-browser guard restores the default card size before
+    its module-level webp pixel check to stay deterministic.
+
+94. EXPORT CODEC SETTINGS = EVERY ENCODER SETTING, IN THE ENCODER'S RANGE
+    (2026-08-22, renumbered from 87 for main): AMENDMENT 93's single
+    "geometry bits" dial was still an abstraction over several encoder
+    knobs. The fine-settings section now lists EVERY option the local
+    encoders actually accept, each bounded to the range the encoder
+    supports:
+    - Draco quantization bits, per attribute kind, 1–30: POSITION, NORMAL,
+      TEX_COORD, COLOR, GENERIC. There is deliberately NO TANGENT dial —
+      Babylon's Draco path maps TANGENT to GENERIC (GetDracoAttributeName),
+      so a TANGENT quantizationBits key would be dead; the GENERIC dial is
+      what controls tangents. Defaults (12/9/11/8/11) reproduce the old
+      `balanced` preset byte-for-byte, so untouched reviews encode identical
+      bytes. 0 (keep floats) is not offered because "raw" already covers it.
+    - Draco encode/decode speed, 0–10 (encoder default 5): 0 = slowest,
+      best compression; 10 = fastest, worst. Both flow through
+      DracoEncodeOptions (they were already plumbed, just not exposed).
+    - WebP quality now spans the canvas encoder's FULL 0–100% (was 50–100).
+    The codec note reports every applied value (`pos 12/nrm 9/uv 11/col 8/
+    gen 11 bits`, plus `encode n/decode n` when speeds leave the default).
+    Each dial is an independent lossy control: changing one re-derives +
+    re-validates + re-previews. Guards: `check:codec` (speed options reach
+    the encoder + still produce valid bytes), `export-card-unit` (ranges,
+    clamping, per-attribute independence, defaults), `check:codec-browser`
+    (all dials visible with encoder ranges, per-attribute note changes,
+    speed note + valid derive, webp 0% valid).

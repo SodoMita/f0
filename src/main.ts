@@ -41,7 +41,7 @@ import { bindPaintHud } from './studio/paintHud'
 import { formatCount, formatSize, modelNameForPublish, modelWarnings, sizeHeatColor } from './studio/modelInfo'
 import type { ImportedModel } from './studio/studio'
 import { bindLibraryHud } from './studio/library/hud'
-import { exportBreakdown, inspectGLB, type GLBExportInfo } from './studio/exportInfo'
+import { exportBreakdown, inspectGLB, aspectLabel, cardDimFromSettings, cardSettingsFromDim, sanitizeDracoBits, dracoBitsNote, DRACO_ATTRIBS, DRACO_BITS_DEFAULT, DRACO_SPEED_DEFAULT, type GLBExportInfo } from './studio/exportInfo'
 import { compressGLB, type CompressReport } from './model/compressGlb'
 import { configureDracoEncoder, dracoCodec, dracoEncoderReady } from './model/dracoEncode'
 import { webpCodec, webpEncoderSupported } from './model/webpEncode'
@@ -172,10 +172,25 @@ async function boot(): Promise<void> {
   const exportCodecs = $('export-codecs')
   const exportCodecSettings = $('export-codec-settings')
   const dracoQualityRow = $('draco-quality-row')
-  const dracoQuality = $('draco-quality')
+  // Every setting the draco encoder supports (SPEC AMENDMENT 94): quantization
+  // bits per attribute kind (POSITION/NORMAL/TEX_COORD/COLOR/GENERIC — TANGENT
+  // is not a draco kind, GENERIC controls it) + encode/decode speed.
+  const dracoBitsEls = new Map<string, { input: HTMLInputElement; label: HTMLElement }>()
+  for (const a of DRACO_ATTRIBS) {
+    dracoBitsEls.set(a, { input: $(`draco-bits-${a}`) as HTMLInputElement, label: $(`draco-bits-${a}-label`) })
+  }
+  const dracoEncodeSpeed = $('draco-encode-speed') as HTMLInputElement
+  const dracoEncodeSpeedLabel = $('draco-encode-speed-label')
+  const dracoDecodeSpeed = $('draco-decode-speed') as HTMLInputElement
+  const dracoDecodeSpeedLabel = $('draco-decode-speed-label')
   const webpQualityRow = $('webp-quality-row')
   const webpQuality = $('webp-quality') as HTMLInputElement
   const webpQualityLabel = $('webp-quality-label')
+  const exportAspect = $('export-aspect') as HTMLInputElement
+  const exportAspectLabel = $('export-aspect-label')
+  const exportResolution = $('export-resolution') as HTMLInputElement
+  const exportResolutionLabel = $('export-resolution-label')
+  const exportName = $('export-name') as HTMLInputElement
   const exportPreview = $('export-preview')
   const exportPreviewRaw = $('export-preview-raw') as HTMLCanvasElement
   const exportPreviewCodec = $('export-preview-codec') as HTMLCanvasElement
@@ -196,15 +211,14 @@ async function boot(): Promise<void> {
   // Choices/settings clicked while a derive is running are queued (same
   // pattern as the studio preview) — a busy pass must never swallow a click.
   let exportCodecQueued = false
-  // Fine settings (SPEC AMENDMENT 85): both codecs are LOSSY, so the review
-  // renders the compressed bytes next to the raw export and exposes quality.
-  const DRACO_PRESETS = {
-    high: { POSITION: 14, NORMAL: 10, TANGENT: 12, TEX_COORD: 12, COLOR: 8, GENERIC: 12 },
-    balanced: { POSITION: 12, NORMAL: 9, TANGENT: 10, TEX_COORD: 11, COLOR: 8, GENERIC: 11 },
-    small: { POSITION: 10, NORMAL: 8, TANGENT: 8, TEX_COORD: 9, COLOR: 6, GENERIC: 9 },
-  } as const
-  type DracoPreset = keyof typeof DRACO_PRESETS
-  let dracoPreset: DracoPreset = 'balanced'
+  // Fine settings (SPEC AMENDMENT 85/93/94): both codecs are LOSSY, so the
+  // review renders the compressed bytes next to the raw export and exposes
+  // quality. The settings section lists EVERY option the encoders support in
+  // the encoder's own range: per-attribute draco quantization bits (defaults
+  // reproduce the old `balanced` preset byte-for-byte), draco encode/decode
+  // speed (0–10, encoder default 5), and webp quality (0–100%).
+  let dracoBitsState = { ...DRACO_BITS_DEFAULT }
+  let dracoSpeeds = { encode: DRACO_SPEED_DEFAULT, decode: DRACO_SPEED_DEFAULT }
   // Card-rendered preview of the CURRENT pristine export (raw baseline).
   let rawPreview: { pixels: Uint8Array; width: number; height: number } | null = null
   const netDot = $('net-dot')
@@ -562,8 +576,10 @@ async function boot(): Promise<void> {
           height: previewDim.height,
           tint: studio.tintColor,
           filename: content.filename,
-          // the model name fills the nostr event's `content` (NIP-50 finds it)
-          name: modelNameForPublish(content.filename, studio.hasModel() ? '' : studio.text),
+          // the model name fills the nostr event's `content` (NIP-50 finds
+          // it). The review's name field wins (SPEC AMENDMENT 93); empty
+          // falls back to the file/text-derived name.
+          name: modelNameForPublish(undefined, exportName.value) || modelNameForPublish(content.filename, studio.hasModel() ? '' : studio.text),
           sourceFormat: content.sourceFormat,
           role: studioReply ? 'reply' : 'root',
           rootId: studioReply?.rootId,
@@ -622,8 +638,12 @@ async function boot(): Promise<void> {
   function codecNote(report: CompressReport | null, before?: GLBExportInfo, after?: GLBExportInfo): string {
     if (!report) return ''
     const parts: string[] = []
-    const b = DRACO_PRESETS[dracoPreset]
-    if (report.draco.prims) parts.push(`draco ${report.draco.prims} mesh${report.draco.prims === 1 ? '' : 'es'} ${formatSize(report.draco.bytesBefore)} → ${formatSize(report.draco.bytesAfter)} · pos ${b.POSITION}/nrm ${b.NORMAL}/uv ${b.TEX_COORD}/col ${b.COLOR} bits`)
+    const b = sanitizeDracoBits(dracoBitsState)
+    if (report.draco.prims) {
+      let note = `draco ${report.draco.prims} mesh${report.draco.prims === 1 ? '' : 'es'} ${formatSize(report.draco.bytesBefore)} → ${formatSize(report.draco.bytesAfter)} · ${dracoBitsNote(b)}`
+      if (dracoSpeeds.encode !== DRACO_SPEED_DEFAULT || dracoSpeeds.decode !== DRACO_SPEED_DEFAULT) note += ` · encode ${dracoSpeeds.encode}/decode ${dracoSpeeds.decode}`
+      parts.push(note)
+    }
     if (report.webp.images) parts.push(`webp ${report.webp.images} texture${report.webp.images === 1 ? '' : 's'} q${Math.round(webpQuality.valueAsNumber)}% ${formatSize(report.webp.bytesBefore)} → ${formatSize(report.webp.bytesAfter)}`)
     if (before && after && !report.keptOriginal) parts.push(`file ${formatSize(before.bytes)} → ${formatSize(after.bytes)} · −${Math.round((1 - after.bytes / before.bytes) * 100)}%`)
     const reasons = [...new Set([...report.draco.reasons, ...report.webp.reasons])]
@@ -644,7 +664,6 @@ async function boot(): Promise<void> {
     }
     codecChoice.geometry = sync(codecGeometry, dracoOn === true, codecChoice.geometry) as typeof codecChoice.geometry
     codecChoice.texture = sync(codecTexture, webpOn === true, codecChoice.texture) as typeof codecChoice.texture
-    for (const btn of Array.from(dracoQuality.querySelectorAll<HTMLButtonElement>("button[data-v]"))) btn.classList.toggle("on", btn.dataset.v === dracoPreset)
     exportCodecs.hidden = !(dracoOn === true || webpOn === true)
     dracoQualityRow.hidden = !(codecChoice.geometry === 'draco' && dracoOn === true)
     webpQualityRow.hidden = !(codecChoice.texture === 'webp' && webpOn === true)
@@ -727,7 +746,7 @@ async function boot(): Promise<void> {
       const src = new Uint8Array(await pristineExport.blob.arrayBuffer())
       const { bytes: out, report } = await compressGLB(src, {
         draco: wantDraco ? dracoCodec : undefined,
-        dracoOptions: wantDraco ? { quantizationBits: { ...DRACO_PRESETS[dracoPreset] } } : undefined,
+        dracoOptions: wantDraco ? { quantizationBits: { ...sanitizeDracoBits(dracoBitsState) }, encodeSpeed: dracoSpeeds.encode, decodeSpeed: dracoSpeeds.decode } : undefined,
         webp: wantWebp ? webpCodec : undefined,
         webpQuality: webpQuality.valueAsNumber / 100,
       })
@@ -780,6 +799,11 @@ async function boot(): Promise<void> {
       pristineExport = { blob, filename: content.filename, sourceFormat: content.sourceFormat, info }
       reviewedExport = { blob, filename: content.filename, sourceFormat: content.sourceFormat }
       rawPreview = null // new export: the raw baseline must re-render
+      // Seed the review's own dials + name (SPEC AMENDMENT 93): the card
+      // size mirrors the studio preview's previewDim (= the published `dim`),
+      // and the name prefills exactly what would have been published before.
+      syncExportCardControls()
+      exportName.value = modelNameForPublish(content.filename, studio.hasModel() ? '' : studio.text)
       renderExportInfo(info)
       exportState.textContent = 'validated · exact bytes'
       exportCodecNote.textContent = ''
@@ -847,22 +871,80 @@ async function boot(): Promise<void> {
     syncCodecButtons()
     requestCodecApply()
   })
-  // Draco quantization preset: a lossy dial, so it re-derives + re-previews.
-  dracoQuality.addEventListener('click', (e) => {
-    const btn = (e.target as HTMLElement).closest('button[data-v]') as HTMLButtonElement | null
-    if (!btn) return
-    const value = btn.dataset.v as DracoPreset
-    if (!value || !(value in DRACO_PRESETS) || value === dracoPreset) return
-    dracoPreset = value
-    syncCodecButtons()
-    if (codecChoice.geometry === 'draco') requestCodecApply()
-  })
+  // Draco fine settings: every encoder setting in the encoder's range, each
+  // a lossy dial, so any change re-derives + re-previews.
+  const paintDracoSettings = (): void => {
+    for (const a of DRACO_ATTRIBS) {
+      const el = dracoBitsEls.get(a)
+      if (el) el.label.textContent = String(sanitizeDracoBits(dracoBitsState)[a])
+    }
+    dracoEncodeSpeedLabel.textContent = String(dracoSpeeds.encode)
+    dracoDecodeSpeedLabel.textContent = String(dracoSpeeds.decode)
+  }
+  const bindDracoBitsDial = (a: string, input: HTMLInputElement, label: HTMLElement): void => {
+    input.addEventListener('input', () => { label.textContent = input.value })
+    input.addEventListener('change', () => {
+      dracoBitsState = sanitizeDracoBits({ ...dracoBitsState, [a]: input.valueAsNumber })
+      label.textContent = input.value
+      if (codecChoice.geometry === 'draco') requestCodecApply()
+    })
+  }
+  for (const a of DRACO_ATTRIBS) {
+    const el = dracoBitsEls.get(a)
+    if (el) bindDracoBitsDial(a, el.input, el.label)
+  }
+  const bindDracoSpeed = (input: HTMLInputElement, label: HTMLElement, key: 'encode' | 'decode'): void => {
+    input.addEventListener('input', () => { label.textContent = input.value })
+    input.addEventListener('change', () => {
+      dracoSpeeds[key] = input.valueAsNumber
+      label.textContent = input.value
+      if (codecChoice.geometry === 'draco') requestCodecApply()
+    })
+  }
+  bindDracoSpeed(dracoEncodeSpeed, dracoEncodeSpeedLabel, 'encode')
+  bindDracoSpeed(dracoDecodeSpeed, dracoDecodeSpeedLabel, 'decode')
+  paintDracoSettings()
   webpQuality.addEventListener('input', () => {
     webpQualityLabel.textContent = `${webpQuality.valueAsNumber}%`
   })
   webpQuality.addEventListener('change', () => {
     if (codecChoice.texture === 'webp') requestCodecApply()
   })
+
+  // ---- Card size + model name (SPEC AMENDMENT 93) ----
+  // The review owns the published `dim` and the model name. The card dials
+  // restamp previewDim (what publish writes into the `dim` tag) and re-render
+  // the lossy preview at the new size — the GLB BYTES never change, only the
+  // render size, so there is no re-encode.
+  function applyExportCardLabels(): void {
+    const dim = cardDimFromSettings(exportAspect.valueAsNumber, exportResolution.valueAsNumber)
+    exportAspectLabel.textContent = aspectLabel(exportAspect.valueAsNumber)
+    exportResolutionLabel.textContent = `${dim.width} × ${dim.height}`
+  }
+  function syncExportCardControls(): void {
+    const { aspect, longEdge } = cardSettingsFromDim(previewDim.width, previewDim.height)
+    exportAspect.value = aspect.toFixed(2)
+    exportResolution.value = String(longEdge)
+    applyExportCardLabels()
+  }
+  function applyExportCard(): void {
+    previewDim = cardDimFromSettings(exportAspect.valueAsNumber, exportResolution.valueAsNumber)
+    previewFrame = null // the full-page preview must re-render at the new dim
+    applyExportCardLabels()
+    // Re-render the review's raw + codec shots at the new size (token stays
+    // put: poster renders serialize on the shared chain, so the later call
+    // always paints last). Hidden when no codec is active — nothing to show.
+    rawPreview = null
+    const codecOn = (codecChoice.geometry === 'draco' && dracoOn === true) || (codecChoice.texture === 'webp' && webpOn === true)
+    if (!exportReview.hidden && reviewedExport && codecOn) {
+      const token = exportCodecToken
+      void renderExportPreview(token, reviewedExport.blob, exportPreviewCodecLabel.textContent || '')
+    }
+  }
+  exportAspect.addEventListener('input', applyExportCardLabels)
+  exportAspect.addEventListener('change', applyExportCard)
+  exportResolution.addEventListener('input', applyExportCardLabels)
+  exportResolution.addEventListener('change', applyExportCard)
 
   // Remove every studio addition (text, paint, cameras, mesh moves): the
   // studio reloads the model from its pristine imported bytes, so publishing
@@ -2159,6 +2241,8 @@ async function boot(): Promise<void> {
     // which view is actually on screen (the network panel is an overlay, so
     // the route alone no longer tells you) — scripts/network-panel.mjs
     __mode: () => mode,
+    // export review: the card dials restamp previewDim (= the published `dim`)
+    previewDim: () => ({ ...previewDim }),
     // animation rail: lets tests load a multi-track GLB straight into the
     // viewer and rebuild the HUD without a full openViewer round-trip
     syncAnimRail,

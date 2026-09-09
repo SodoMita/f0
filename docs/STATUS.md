@@ -4,6 +4,33 @@ Claim a task by moving it to **In progress** with your name/date, push, then
 move it to **Done** with a commit reference. One agent per area.
 
 ## Done
+- [x] **Export codec settings = every encoder setting in the encoder's range**
+      (agent arena, 2026-08-22, SPEC AMENDMENT 94, renumbered from 87): the
+      fine-settings section exposes ALL options the local encoders accept,
+      each bounded to its real range — per-attribute draco quantization bits
+      (POSITION/NORMAL/TEX_COORD/COLOR/GENERIC, 1–30; no TANGENT dial,
+      Babylon maps tangents to GENERIC; defaults reproduce the old `balanced`
+      preset byte-for-byte), draco encode/decode speed (0–10), and webp
+      quality now 0–100% (was 50–100). Each dial re-derives independently;
+      the note reports every applied value. Guards: `check:codec` (speeds
+      reach the encoder), `export-card-unit` (ranges/clamping/independence),
+      `check:codec-browser` (dial matrix + per-attribute + speed + webp-0%
+      derives).
+- [x] **Export review: card aspect + size, model name, bits dial** (agent
+      arena, 2026-08-21, SPEC AMENDMENT 93, renumbered from 86): the review
+      owns the published `dim` — aspect slider (0.5–2.0, named presets) +
+      resolution slider (long edge 64–4096) restamp previewDim and re-render
+      the lossy preview; a model-name field (pre-filled, sanitised, ≤140
+      chars) fills the nostr `content`; the draco 14/12/10 preset buttons
+      became one geometry-bits slider (6–16; 12 = old `balanced`; AMENDMENT
+      94 later made them one dial per attribute). Numeric dials with >4
+      values are sliders, not button rows. Guards: new `export-card-unit`
+      (pure helpers in `studio/exportInfo.ts`) + `check:codec` +
+      `check:codec-browser` (dials restamp previewDim, name + dim publish
+      roundtrips). Also documented a PRE-EXISTING SwiftShader quirk: mixed-
+      size poster readbacks render squashed on headless SwiftShader (not on
+      real GPUs); the guard restores the default card before its module-level
+      pixel check.
 - [x] **Merge pass + image-as-plane feature** (agent arena, 2026-08-24,
       SPEC AMENDMENTS 90–92): surveyed all 60 unmerged agent branches;
       most were already absorbed into main. Merged the four still-valuable
