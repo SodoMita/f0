@@ -244,8 +244,18 @@ export async function compressGLB(bytes: Uint8Array, opts: CompressOptions): Pro
   }
 
   // ---- Rebuild the BIN: surviving views in index order + appended payloads
+  // Views referenced OUTSIDE the accessor/image graph must survive too:
+  // MSFT_audio_emitter clips point at bufferViews directly, and dropping
+  // them failed re-validation with "Audio clip references a missing buffer
+  // view" on every audio-bearing model (audit #66 — the draco codec was
+  // blamed, but the codec pass itself was fine).
+  const extViews = new Set<number>()
+  const audioExt = json.extensions?.MSFT_audio_emitter
+  for (const clip of audioExt?.clips ?? []) {
+    if (typeof clip?.bufferView === 'number') extViews.add(clip.bufferView)
+  }
   const dead = new Set([...strippedViews, ...replacedViews])
-  const alive = new Set<number>()
+  const alive = new Set<number>(extViews)
   for (const [i, accessor] of accessors.entries()) if (typeof accessor?.bufferView === 'number' && !dead.has(accessor.bufferView)) alive.add(accessor.bufferView)
   for (const image of images) if (typeof image?.bufferView === 'number' && !dead.has(image.bufferView)) alive.add(image.bufferView)
   const survivors = bufferViews.map((_, i) => i).filter((i) => alive.has(i) && typeof bufferViews[i]?.byteLength === 'number')
@@ -271,6 +281,7 @@ export async function compressGLB(bytes: Uint8Array, opts: CompressOptions): Pro
   for (const [ii, payload] of webpEdits) images[ii].bufferView = writeView(payload)
   for (const accessor of accessors) if (viewRemap.has(accessor?.bufferView)) accessor.bufferView = viewRemap.get(accessor.bufferView)
   for (const image of images) if (viewRemap.has(image?.bufferView)) image.bufferView = viewRemap.get(image.bufferView)
+  for (const clip of audioExt?.clips ?? []) if (viewRemap.has(clip?.bufferView)) clip.bufferView = viewRemap.get(clip.bufferView)
   for (const vi of strippedViews) if (!alive.has(vi)) report.draco.bytesBefore += Number(bufferViews[vi]?.byteLength) || 0
   json.bufferViews = newViews
   json.buffers = [{ byteLength: cursor }]

@@ -649,6 +649,17 @@ body.show-perf #perf-overlay { display: block; }
   fill: none; stroke: currentColor; stroke-width: 1.7;
   stroke-linecap: round; stroke-linejoin: round;
 }
+/* Inline glyph inside legend text (the pause bars). Font glyphs are
+   forbidden in HUD surfaces (AGENTS 9c): U+23F8 ⏸ rendered as tofu □. */
+.legend-inline {
+  height: 10px; width: 10px; vertical-align: 0;
+  fill: currentColor; stroke: none;
+}
+
+/* Babylon's stock unmute overlay would pin a giant speaker icon over the
+   FORM/0 brand whenever an AudioEngine UI shows it; ALL sound chrome in this
+   app is our own HUD (audit #70). */
+.babylonUnmuteIcon, #babylonUnmuteIconBtn { display: none !important; }
 .legend-pill { font-size: 10px; letter-spacing: 0.02em; border-radius: 17px; }
 .legend-dot { width: 8px; height: 8px; margin: 0; }
 .legend-ok {

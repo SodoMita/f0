@@ -26,7 +26,7 @@ import type { Texture as TextureT } from '@babylonjs/core/Materials/Textures/tex
 import type { ShaderMaterial } from '@babylonjs/core/Materials/shaderMaterial'
 import {
   flatCamera, makeBackdropTexture, paintBackdrop, makeContactShadow, makeSpinnerTexture,
-  paintPlayButtons, luminance, shade,
+  paintPlayButtons, luminance, shade, roundRect,
 } from '../core/gfx'
 import { theme, LIMITS } from '../theme'
 import { type CardFade, fadeInit, finishFade, setOpacityNow, crossfadeTo, fadeOpacityTo, tickFade, showPoster } from './cardFade'
@@ -144,6 +144,12 @@ export class Board {
   private playTexOn: DynamicTexture
   private seps: LinesMesh[] = []
   private sepTops: number[] = []
+  // Keyboard selection (spec A11Y: board arrows/Enter). selIdx indexes
+  // this.rows; the ring is one accent-stroke quad over the selected card.
+  private selIdx: number | null = null
+  private selMesh: Mesh
+  private selMat: ShaderMaterial
+  private selTex: DynamicTexture
   private background: string = theme.background
   private isDark = true
   // tap vs drag + inertia
@@ -160,6 +166,12 @@ export class Board {
   private lastSyncScroll = Number.NEGATIVE_INFINITY
   private lastScrollAt = 0
   private pendingSettle = false
+  // Scroll snapping (audit #68): band tops are snap points; after input
+  // stops the feed eases to the nearest one instead of resting mid-row.
+  private bandTops: number[] = []
+  private snapping = false
+  private snapTarget = 0
+  private lastSnapScroll = -1
   /** reply counts survive slot recycling */
   private replyCounts = new Map<string, number>()
   private spinStep = -1
@@ -206,6 +218,16 @@ export class Board {
     const playTex = makePlayTextures(this.scene, 'card-play', this.isDark)
     this.playTexOff = playTex.off
     this.playTexOn = playTex.on
+
+    // Keyboard selection ring: one accent stroke quad in the overlay group
+    // (always on top of the poster/live model, like the badge / ▶ buttons).
+    this.selTex = new DynamicTexture('sel-tex', { width: 520, height: 344 }, this.scene, true)
+    this.selTex.hasAlpha = true
+    const sel = makeQuad(this.scene, 'sel-ring', { z: -0.04, group: OVERLAY_GROUP })
+    this.selMesh = sel.mesh
+    this.selMat = sel.mat
+    bindDyn(this.selMat, this.selTex)
+    this.selMesh.isPickable = false
 
     this.cb = cb
     this.live = new LivePool(
@@ -382,6 +404,7 @@ export class Board {
     // Drop play-intent bookkeeping for posts that left the feed (a slot
     // recycle never clears it — the user's choice should survive scrolling).
     this.intent.prune(new Set(this.rows.map((r) => r.meta.eventId)))
+    if (this.selIdx !== null && this.selIdx >= this.rows.length) this.selIdx = this.rows.length ? this.rows.length - 1 : null
     this.layout()
   }
 
@@ -617,6 +640,8 @@ export class Board {
     // Responsive columns: 1 on phones, up to 3 on wide screens.
     const viewW = 2 * this.halfH * this.aspect
     this.cols = Math.max(1, Math.min(3, Math.floor((viewW - MARGIN * 2) / (CARD_W + GAP_X))))
+    this.bandTops = []
+    this.snapping = false
     let top = 0
     // Posts fill the grid band by band (one band = one row of `cols` cards).
     // Card heights vary with each post's `dim` aspect, so a band is as tall
@@ -629,6 +654,7 @@ export class Board {
         row.col = j
         row.top = top + (bandH - cardSize(row.meta).h) / 2
       })
+      this.bandTops.push(top)
       top += bandH + GAP_Y
     }
     const contentBottom = top - GAP_Y
@@ -638,6 +664,7 @@ export class Board {
 
     this.buildSeparators()
     this.syncSlots(true)
+    this.positionSelection()
     this.invalidate(3)
   }
 
@@ -753,6 +780,7 @@ export class Board {
       if (this.threeD) this.pool3d.place(slot.meta.eventId, this.placeFor(slot))
       this.positionExtras(slot)
     }
+    this.positionSelection()
     // Cards moved: re-anchor playing sounds (2D preview stage, spatial audio).
     this.live.preview.refreshSoundPositions()
   }
@@ -883,6 +911,116 @@ export class Board {
     )
   }
 
+  // -------------------------------------------------------------- keyboard
+  // spec A11Y: "Board arrows/Enter/T/PgUp/PgDn/Escape". PgUp/PgDn scroll via
+  // the scene keyboard observable; the rest moves/opens a selection ring.
+
+  /** The row the selection would land on, starting from the viewport centre. */
+  private nearestVisibleRow(): number {
+    let best = 0
+    let bestD = Infinity
+    for (let i = 0; i < this.rows.length; i++) {
+      const d = Math.abs(this.worldY(this.rows[i]))
+      if (d < bestD) { bestD = d; best = i }
+    }
+    return best
+  }
+
+  /**
+   * Move the selection with the arrow keys. Up/Down jump a whole band
+   * (this.cols rows), Left/Right step within the band. The view follows the
+   * selection so it stays on screen.
+   */
+  moveSelection(dir: 'up' | 'down' | 'left' | 'right'): void {
+    const n = this.rows.length
+    if (!n) return
+    if (this.selIdx === null) {
+      this.selIdx = this.nearestVisibleRow()
+      this.positionSelection()
+      this.invalidate()
+      return
+    }
+    const at = Math.max(0, Math.min(n - 1, this.selIdx))
+    let next = at
+    if (dir === 'up' || dir === 'down') next = at + (dir === 'up' ? -this.cols : this.cols)
+    else if (dir === 'left' && this.rows[at].col > 0) next = at - 1
+    else if (dir === 'right' && this.rows[at].col < this.cols - 1) next = at + 1
+    next = Math.max(0, Math.min(n - 1, next))
+    if (next === at && this.selIdx === next) return
+    this.selIdx = next
+    if (dir === 'up' || dir === 'down') this.scrollSelectionIntoView()
+    this.positionSelection()
+    this.invalidate()
+  }
+
+  /** The selected post, or null when nothing is selected. */
+  selectionMeta(): ThreadMeta | null {
+    if (this.selIdx === null) return null
+    return this.rows[this.selIdx]?.meta ?? null
+  }
+
+  /** Enter with no explicit selection: select the nearest row, then open it. */
+  enterSelection(): ThreadMeta | null {
+    if (this.selIdx === null) {
+      this.selIdx = this.nearestVisibleRow()
+      this.positionSelection()
+      this.invalidate()
+    }
+    return this.selectionMeta()
+  }
+
+  clearSelection(): void {
+    this.selIdx = null
+    this.selMesh.setEnabled(false)
+    this.invalidate()
+  }
+
+  /** Scroll so the selected row sits comfortably inside the viewport. */
+  private scrollSelectionIntoView(): void {
+    const row = this.rows[this.selIdx ?? -1]
+    if (!row) return
+    const cy = this.worldY(row)
+    const h = cardSize(row.meta).h
+    const slack = Math.max(0, this.halfH - MARGIN - h / 2 - 0.5)
+    let target = this.scrollY
+    if (cy > slack) target = this.scrollY + (cy - slack)
+    else if (cy < -slack) target = this.scrollY + (cy + slack)
+    this.setScroll(Math.max(0, Math.min(this.maxScroll, target)))
+  }
+
+  /** Place + repaint the selection ring for the current row/scroll. */
+  private positionSelection(): void {
+    if (this.selIdx === null) { this.selMesh.setEnabled(false); return }
+    const row = this.rows[this.selIdx]
+    if (!row) { this.selIdx = null; this.selMesh.setEnabled(false); return }
+    const size = cardSize(row.meta)
+    const pad = 0.55
+    const w = size.w + pad * 2
+    const h = size.h + pad * 2
+    // Redraw at the card's aspect so the stroke width stays even (texture
+    // pixels map 1:1 onto world units across the quad).
+    const W = 520
+    const H = Math.max(72, Math.round((W * h) / w))
+    const old = this.selTex.getSize()
+    if (old.width !== W || old.height !== H) {
+      this.selTex.dispose()
+      this.selTex = new DynamicTexture('sel-tex', { width: W, height: H }, this.scene, true)
+      this.selTex.hasAlpha = true
+      bindDyn(this.selMat, this.selTex)
+    }
+    const ctx = this.selTex.getContext() as CanvasRenderingContext2D
+    ctx.clearRect(0, 0, W, H)
+    const inset = 5
+    roundRect(ctx, inset, inset, W - inset * 2, H - inset * 2, 26)
+    ctx.lineWidth = 8
+    ctx.strokeStyle = theme.accent
+    ctx.stroke()
+    this.selTex.update()
+    this.selMesh.scaling.set(w / 4, h / 4, 1)
+    this.selMesh.position.set(this.colX(row.col), this.worldY(row), -0.04)
+    this.selMesh.setEnabled(true)
+  }
+
   private positionExtras(slot: CardSlot): void {
     slot.badge.scaling.set(BADGE_W / 4, BADGE_H / 4, 1)
     slot.badge.position.x = slot.mesh.position.x + slot.w / 2 - BADGE_W / 2 - 0.5
@@ -963,6 +1101,7 @@ export class Board {
         case PointerEventTypes.POINTERDOWN: {
           if (!this.interactive) return
           if (ev.button !== 0) return
+          this.snapping = false
           this.activePointers.add(ev.pointerId)
           if (this.activePointers.size > 1) { this.dragging = false; return }
           this.dragging = true
@@ -1001,6 +1140,7 @@ export class Board {
         }
         case PointerEventTypes.POINTERWHEEL: {
           const delta = (info.event as WheelEvent).deltaY || 0
+          this.snapping = false
           this.velocity += (delta / this.pxPerUnit) * 0.35
           this.setScroll(this.scrollY + delta / this.pxPerUnit)
           break
@@ -1011,6 +1151,7 @@ export class Board {
     this.scene.onKeyboardObservable.add((kb) => {
       if (kb.type !== KeyboardEventTypes.KEYDOWN) return
       const step = this.halfH * 1.6
+      this.snapping = false
       switch (kb.event.key) {
         case 'PageDown': this.setScroll(this.scrollY + step); break
         case 'PageUp': this.setScroll(this.scrollY - step); break
@@ -1052,6 +1193,35 @@ export class Board {
       if (Math.abs(this.velocity) < 0.001) this.velocity = 0
     } else if (this.inertia === 0) {
       this.velocity = 0
+    }
+    // Scroll snapping (audit #68): once input stops, ease the feed to the
+    // nearest band edge so it never rests mid-row with cards cut off.
+    if (!this.dragging && this.bandTops.length && this.maxScroll > 0) {
+      const idleFor = performance.now() - this.lastScrollAt
+      if (!this.snapping && idleFor > 240 && Math.abs(this.velocity) < 0.02 && !this.pendingSettle) {
+        let best = this.bandTops[0]
+        for (const t of this.bandTops) {
+          if (Math.abs(t - this.scrollY) < Math.abs(best - this.scrollY)) best = t
+        }
+        const target = Math.max(0, Math.min(this.maxScroll, best))
+        if (Math.abs(target - this.scrollY) > 0.25) {
+          this.snapping = true
+          this.snapTarget = target
+        }
+      }
+      if (this.snapping) {
+        const d = this.snapTarget - this.scrollY
+        if (Math.abs(d) <= 0.08) {
+          this.setScroll(this.snapTarget)
+          this.snapping = false
+        } else {
+          this.setScroll(this.scrollY + d * 0.3)
+          // Clamped at an edge (target outside range) or content changed:
+          // no progress means the snap is done, never loop.
+          if (this.scrollY === this.lastSnapScroll) this.snapping = false
+          this.lastSnapScroll = this.scrollY
+        }
+      }
     }
   }
 

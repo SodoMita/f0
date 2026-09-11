@@ -788,6 +788,24 @@ export class Studio {
   setTextDepth(v: number): void { if (!Number.isFinite(v)) return; this.textDepth = v; this.form?.kick() }
 
   get text(): string { return this.textValue }
+
+  /**
+   * Live text-tool stats for the HUD budget readout. Driven from the ACTUAL
+   * built mesh (`textMesh.triangles`), not a scene-graph name search — the
+   * rebuild is async (font + geometry build), so a synchronous name lookup
+   * raced it and the readout sat at "0 tris" while text rendered (audit #67).
+   */
+  get textStats(): { chars: number; lines: number; triangles: number } {
+    return {
+      chars: this.textValue.length,
+      lines: this.textValue ? this.textValue.split('\n').length : 0,
+      triangles: this.textMesh?.triangles ?? 0,
+    }
+  }
+
+  /** HUD hook: fired when an async text rebuild finished (mesh swapped). */
+  onTextRebuilt: (() => void) | null = null
+
   get textOptions(): { scale: number; letterSpacing: number; lineSpacing: number; depth: number; align: 'left'|'center'|'right'; color: string } {
     return {
       scale: this.textScale,
@@ -833,6 +851,7 @@ export class Studio {
     this.lookAt(Vector3.Zero(), dist)
     this.select(result.mesh)
     this.form.kick(300)
+    this.onTextRebuilt?.()
   }
 
   // ---- camera settings ----

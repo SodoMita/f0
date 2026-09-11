@@ -6,6 +6,13 @@ import { TransformNode } from '@babylonjs/core/Meshes/transformNode'
 import type { Camera } from '@babylonjs/core/Cameras/camera'
 import type { Sound } from '@babylonjs/core/Audio/sound'
 import { AssetContainer } from '@babylonjs/core/assetContainer'
+// Side-effect: registers Node.AddNodeConstructor("FreeCamera") -> UniversalCamera.
+// Camera.clone() resolves the clone's constructor through that registry; without
+// this import it falls through to Camera._CreateDefaultParsedCamera, which
+// throws "UniversalCamera needs to be imported..." — the viewer hand-off then
+// failed on EVERY open (the fast path was dead code and every open re-parsed
+// the GLB; audit #13/65). Same policy as AGENTS rule 8 (pick/screenshot).
+import '@babylonjs/core/Cameras/universalCamera'
 
 /**
  * Take an `AssetContainer` whose meshes live in `sourceScene` and produce a

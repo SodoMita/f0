@@ -87,6 +87,14 @@ export const ERRORS = {
     action: 'back to board',
     onAction: skip,
   }),
+  // Deep link to an id no connected relay knows (audit #57): declared, with
+  // the id in the cause, instead of a silent fall-back to the board.
+  POST_UNKNOWN: (skip: () => void, id = ''): SheetError => ({
+    code: 'E103',
+    cause: `No relay returned this post${id ? ` (${id.slice(0, 12)}…)` : ''}. It may be deleted, on a relay this client does not reach, or the link is wrong.`,
+    action: 'back to board',
+    onAction: skip,
+  }),
   RELAYS_OFFLINE: (openNetwork: () => void): SheetError => ({
     code: 'E201',
     cause: 'No relay connection. The feed cannot load or update until at least one relay is online.',
