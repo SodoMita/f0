@@ -73,10 +73,10 @@ void main() {
   // ONLY for model renders (the raw/rtt texture kinds). App-drawn "dyn"
   // textures (contact shadows, spinners, badges, pills, frames) carry a real
   // alpha ramp whose faint tail sits below 1/64: rescuing it clamps that tail
-  // to OPAQUE and draws a hard edge — the viewer's floor-shadow seam across
-  // the backdrop (audit #75) and the elliptical rim around card shadows
-  // (audit #78). The rescue uniform is keyed to the texture kind in
-  // setCardFlip() below.
+  // to OPAQUE and draws a hard edge where the quad ends — the horizontal seam
+  // the viewer's floor shadow cut across the backdrop (audit #75: 45% dark in
+  // 4 rows, exactly the shadow's own strength). The rescue uniform is keyed to
+  // the texture kind in setCardFlip() below.
   float cover = t.a;
   if (rescue > 0.5 && cover < 0.016) {
     float m = max(t.r, max(t.g, t.b));

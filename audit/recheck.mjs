@@ -197,6 +197,60 @@ async function measureSeam(page, postId) {
   }
 }
 
+/** Pixels that differ between two screenshots, as a fraction of the frame. */
+async function pixelDiff(bufA, bufB, threshold = 24) {
+  const { decode } = await import('./png.mjs')
+  const a = decode(bufA), b = decode(bufB)
+  if (a.w !== b.w || a.h !== b.h) throw new Error(`size mismatch ${a.w}x${a.h} vs ${b.w}x${b.h}`)
+  let changed = 0
+  const rows = new Set()
+  for (let y = 0; y < a.h; y++) {
+    for (let x = 0; x < a.w; x++) {
+      const i = (y * a.w + x) * a.channels
+      if (Math.abs(a.data[i] - b.data[i]) + Math.abs(a.data[i + 1] - b.data[i + 1]) + Math.abs(a.data[i + 2] - b.data[i + 2]) > threshold) { changed++; rows.add(y) }
+    }
+  }
+  return { changed, pct: +((100 * changed) / (a.w * a.h)).toFixed(2), rows: rows.size, w: a.w, h: a.h }
+}
+
+/**
+ * How hard the contact shadows press on the backdrop, as a fraction of the
+ * backdrop's own luminance (audit #78: "~85% black on white"). Shadows are
+ * toggled between the two shots, so everything else cancels out.
+ */
+async function shadowDiff(onBuf, offBuf) {
+  const { decode, lum } = await import('./png.mjs')
+  const on = decode(onBuf), off = decode(offBuf)
+  let sum = 0, n = 0, peak = 0
+  const deltas = []
+  for (let y = 0; y < off.h; y += 2) {
+    for (let x = 0; x < off.w; x += 2) {
+      const o = lum(off, x, y)
+      sum += o; n++
+      const d = o - lum(on, x, y)
+      if (d > peak) peak = d
+      // Relative to the pixel's OWN unshadowed luminance: "how much darker is
+      // the shadow than what is behind it". An absolute threshold cannot work
+      // across themes - the same 0.55-opacity black shadow is a 6-unit delta
+      // on the dark backdrop and a 50-unit one on white.
+      if (d > 3 && o > 8) deltas.push(d / o)
+    }
+  }
+  // Median, not peak: the board keeps loading while the two shots are taken,
+  // and a poster arriving between them is a full-black-to-white delta that has
+  // nothing to do with the shadow. The shadow covers a big contiguous area, so
+  // its typical strength is the median of the darkened pixels.
+  deltas.sort((a, b) => a - b)
+  const backdrop = sum / n
+  const median = deltas.length ? deltas[deltas.length >> 1] : 0
+  return {
+    backdrop: +backdrop.toFixed(1),
+    medianPct: +(100 * median).toFixed(1),
+    peakAbs: +peak.toFixed(1),
+    areaPct: +((100 * deltas.length) / n).toFixed(2),
+  }
+}
+
 // ══════════════════════════════════════════════════════════ A. features
 {
   // ---- #53 board 3D mode renders models
@@ -335,6 +389,51 @@ async function measureSeam(page, postId) {
       if (!inside) { verdict(false, 'badge outside its card box'); break }
     }
     if (!current.detail) verdict(worst <= 1, `every badge inside its card (worst |dy| = ${(worst * 100).toFixed(0)}% of half-height)`)
+  }
+
+  // ---- #78 light-theme contact shadows
+  const c78 = check(78, '[theme] light background: contact shadows are not ink blots')
+  if (c78) {
+    // Pin the framebuffer: adaptive resolution changes the render size
+    // between frames and the two shots must be pixel-comparable.
+    await page.evaluate(() => {
+      window.__form0.settings.set({ adaptiveResolution: false, resolutionMode: 'manual', resolutionWidth: 1280, resolutionHeight: 800, aspectLock: false })
+    })
+    await sleep(1200)
+    const shoot = async () => {
+      await page.evaluate(() => { const s = window.__form0.engine.activeScene; for (let i = 0; i < 4; i++) s.render() })
+      await sleep(400)
+      return page.screenshot()
+    }
+    const measure = async (bg) => {
+      await page.evaluate((hex) => window.__form0.settings.set({ background: hex }), bg)
+      await sleep(2000)
+      await page.evaluate(() => window.__form0.board.setContactShadows(0.55))
+      await sleep(900)
+      const on = await shoot()
+      await page.evaluate(() => window.__form0.board.setContactShadows(0))
+      await sleep(900)
+      const off = await shoot()
+      await page.evaluate(() => window.__form0.board.setContactShadows(0.55))
+      return shadowDiff(on, off)
+    }
+    const light = await measure('#ffffff')
+    const dark = await measure('#0B0B0C')
+    const mats = await page.evaluate(() => {
+      const b = window.__form0.board
+      return { isDark: b['isDark'], strength: b['contactStrength'] }
+    })
+    note(`white background (mean lum ${light.backdrop}): shadow takes ${light.medianPct}% off what is behind it (median over ${light.areaPct}% of the frame)`)
+    note(`dark background (mean lum ${dark.backdrop}): shadow takes ${dark.medianPct}% off (median over ${dark.areaPct}% of the frame)`)
+    note(`board: isDark=${mats.isDark} contactStrength=${mats.strength}`)
+    // The audit measured ~85% black smudges on white. A shadow that tracks the
+    // background stays a soft grey AND is still visible (hiding it is not a
+    // fix), while the dark theme keeps its stronger shadow.
+    verdict(light.medianPct < 45 && light.medianPct > 2 && dark.medianPct > light.medianPct,
+      `on white the shadow takes ${light.medianPct}% off the backdrop, not the ~85% the audit measured (dark theme ${dark.medianPct}%)`)
+    // leave the display policy as we found it for the checks that follow
+    await page.evaluate(() => window.__form0.settings.set({ adaptiveResolution: true, resolutionMode: 'auto' }))
+    await sleep(800)
   }
 
   // ---- #62 board keyboard navigation
@@ -638,6 +737,56 @@ async function measureSeam(page, postId) {
     const z2 = await page.evaluate(() => window.__form0.threadView['zoom'] ?? window.__form0.threadView.zoom?.())
     note(`zoom (ortho half-height): ${z0} -> in -> ${z1} -> out -> ${z2}`)
     verdict(z1 < z0 && z2 > z1, `+ shrinks the half-height (${z0}→${z1}), − grows it (→${z2})`)
+  }
+
+  // ---- #54 thread 3D mode renders models
+  const c54 = check(54, '[thread] 3D thread mode renders real models in the node frames')
+  if (c54) {
+    // Self-sufficient: #63 normally opens the thread, but a filtered run
+    // (CHECKS="54") skips it and the map would still be empty on the board.
+    await page.evaluate((id) => { location.hash = '#/thread/' + id }, rootWithReplies)
+    await page.waitForFunction(() => (window.__form0.threadView['nodes'] ?? new Map()).size > 0, null, { timeout: 40000 })
+    await page.evaluate(() => window.__form0.settings.set({ direct3D: true }))
+    // The models stream in (the 3D pool re-fetches what the poster pipeline
+    // had), so poll instead of sleeping a fixed guess.
+    const readFacts = () => page.evaluate(() => {
+      const tv = window.__form0.threadView
+      const pool = tv.pool3d
+      const nodes = [...(tv['nodes'] ?? new Map()).values()]
+      const slots = (pool['slots'] ?? []).filter((x) => x.postId)
+      return {
+        threeD: tv['threeD'], nodes: nodes.length,
+        live: nodes.filter((n) => pool.isLive(n.meta.eventId)).length,
+        slots: slots.map((x) => ({ post: String(x.postId).slice(0, 6), meshes: x.container?.meshes?.length ?? 0, root: !!x.root && x.root.isEnabled() })),
+      }
+    })
+    let facts = await readFacts()
+    for (let i = 0; i < 24 && !(facts.nodes > 0 && facts.live > 0); i++) { await sleep(2000); facts = await readFacts() }
+    note(`3D=${facts.threeD} nodes=${facts.nodes} with a live model=${facts.live}`)
+    note(`pool slots: ${JSON.stringify(facts.slots)}`)
+    // Pixel proof the frames are not empty: hide the pool's model roots and
+    // count what disappears. Frames, connectors and pills stay enabled, so
+    // the delta is the models themselves.
+    const render = () => page.evaluate(() => { const s = window.__form0.threadView.scene; for (let i = 0; i < 4; i++) s.render() })
+    await render()
+    const A = await page.screenshot()
+    const hidden = await page.evaluate(() => {
+      let k = 0
+      for (const x of window.__form0.threadView.pool3d['slots'] ?? []) if (x.root) { x.root.setEnabled(false); k++ }
+      return k
+    })
+    await render()
+    await sleep(300)
+    const B = await page.screenshot()
+    await page.evaluate(() => { for (const x of window.__form0.threadView.pool3d['slots'] ?? []) x.root?.setEnabled(true) })
+    await render()
+    const d = await pixelDiff(A, B)
+    note(`hiding ${hidden} model root(s) removes ${d.pct}% of the frame's pixels across ${d.rows} rows`)
+    verdict(facts.threeD === true && facts.live > 0 && d.pct > 1,
+      `${facts.live} node(s) carry a live model and those models paint ${d.pct}% of the frame`)
+    // leave the thread in 2D for the checks that follow
+    await page.evaluate(() => window.__form0.settings.set({ direct3D: false }))
+    await sleep(4000)
   }
 
   // ---- #74 node poster clipping
