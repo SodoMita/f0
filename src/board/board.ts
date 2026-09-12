@@ -172,6 +172,8 @@ export class Board {
   private snapping = false
   private snapTarget = 0
   private lastSnapScroll = -1
+  /** scrollY where a snap made no progress (clamped) — do not retry it. */
+  private snapGaveUpAt = Number.NaN
   /** reply counts survive slot recycling */
   private replyCounts = new Map<string, number>()
   private spinStep = -1
@@ -642,6 +644,7 @@ export class Board {
     this.cols = Math.max(1, Math.min(3, Math.floor((viewW - MARGIN * 2) / (CARD_W + GAP_X))))
     this.bandTops = []
     this.snapping = false
+    this.snapGaveUpAt = Number.NaN   // new layout, new band tops: try again
     let top = 0
     // Posts fill the grid band by band (one band = one row of `cols` cards).
     // Card heights vary with each post's `dim` aspect, so a band is as tall
@@ -1197,17 +1200,20 @@ export class Board {
     // Scroll snapping (audit #68): once input stops, ease the feed to the
     // nearest band edge so it never rests mid-row with cards cut off.
     if (!this.dragging && this.bandTops.length && this.maxScroll > 0) {
+      let best = this.bandTops[0]
+      for (const t of this.bandTops) {
+        if (Math.abs(t - this.scrollY) < Math.abs(best - this.scrollY)) best = t
+      }
+      const target = Math.max(0, Math.min(this.maxScroll, best))
+      const owed = Math.abs(target - this.scrollY) > 0.25
       const idleFor = performance.now() - this.lastScrollAt
-      if (!this.snapping && idleFor > 240 && Math.abs(this.velocity) < 0.02 && !this.pendingSettle) {
-        let best = this.bandTops[0]
-        for (const t of this.bandTops) {
-          if (Math.abs(t - this.scrollY) < Math.abs(best - this.scrollY)) best = t
-        }
-        const target = Math.max(0, Math.min(this.maxScroll, best))
-        if (Math.abs(target - this.scrollY) > 0.25) {
-          this.snapping = true
-          this.snapTarget = target
-        }
+      // A snap that could not move (clamped at an edge) must not be retried
+      // every frame: it would hold the render loop open for nothing.
+      const gaveUp = Math.abs(this.scrollY - this.snapGaveUpAt) <= 0.25
+      if (!this.snapping && owed && !gaveUp && idleFor > 240
+        && Math.abs(this.velocity) < 0.02 && !this.pendingSettle) {
+        this.snapping = true
+        this.snapTarget = target
       }
       if (this.snapping) {
         const d = this.snapTarget - this.scrollY
@@ -1218,9 +1224,20 @@ export class Board {
           this.setScroll(this.scrollY + d * 0.3)
           // Clamped at an edge (target outside range) or content changed:
           // no progress means the snap is done, never loop.
-          if (this.scrollY === this.lastSnapScroll) this.snapping = false
+          if (this.scrollY === this.lastSnapScroll) {
+            this.snapping = false
+            this.snapGaveUpAt = this.scrollY
+          }
           this.lastSnapScroll = this.scrollY
         }
+      } else if (owed && !gaveUp && !this.pendingSettle && Math.abs(this.velocity) < 0.02) {
+        // The loop is demand-driven and the arm above needs a frame to run
+        // 240 ms AFTER the last scroll — by which point nothing is left to
+        // invalidate, so on a quiet board the snap simply never happened and
+        // the feed rested mid-row (audit #68, still failing after the first
+        // fix). Hold one frame pending while a snap is owed; it stops the
+        // moment the feed lands on a band.
+        this.invalidate()
       }
     }
   }

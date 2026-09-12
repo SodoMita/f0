@@ -22,6 +22,10 @@ function check(id, title) {
   console.log(`\n── #${id} ${title}`)
   return current
 }
+/** Point the note/verdict sink at a record. A cluster that declares several
+ *  checks up front (they share one page) MUST re-focus before each body, or
+ *  every verdict lands on the last-declared check. */
+const focus = (rec) => { current = rec }
 const note = (text) => { if (current) { current.notes.push(text); console.log(`   · ${text}`) } }
 function verdict(ok, detail) {
   if (!current) return
@@ -223,44 +227,75 @@ async function measureSeam(page, postId) {
     await sleep(1500)
     await page.mouse.move(640, 500)
     await page.mouse.wheel(0, 430)
-    await sleep(2600)
-    const snap = await page.evaluate(() => {
+    // The snap arms only once the feed is IDLE and the deferred loads have
+    // settled (pendingSettle gates it, and rightly: bandTops move while posts
+    // stream in). Measured on the rig that is ~4 s after a wheel, so waiting a
+    // fixed 2.6 s samples mid-glide and reads as a missed snap. Poll for the
+    // settled state instead and report how long it took.
+    const read = () => page.evaluate(() => {
       const b = window.__form0.board
-      const y = b.scrollY ?? b['scrollY']
-      const pitch = b.bandPitch?.() ?? null
-      return { y, pitch }
+      const tops = (b['bandTops'] ?? []).slice()
+      const y = b['scrollY']
+      let nearest = null
+      for (const t of tops) if (nearest === null || Math.abs(t - y) < Math.abs(nearest - y)) nearest = t
+      return {
+        y, off: nearest === null ? null : Math.abs(nearest - y),
+        vel: b['velocity'], snapping: b['snapping'], target: b['snapTarget'],
+        settle: b['pendingSettle'], bands: tops.length,
+        pitch: tops.length > 1 ? tops[1] - tops[0] : null,
+        idleMs: Math.round(performance.now() - b['lastScrollAt']),
+      }
     })
-    note(`scrollY=${snap.y} pitch=${snap.pitch}`)
-    // Without a public pitch, measure the settle: a second wheel of the same
-    // size must land on a different band, and resting y must be near a multiple
-    // of the row pitch derived from the card layout.
-    const geom = await page.evaluate(() => {
-      const b = window.__form0.board
-      const rows = b['rows'] || []
-      const tops = [...new Set(rows.map((r) => r.top))].sort((x, y) => x - y)
-      const pitch = tops.length > 1 ? tops[1] - tops[0] : null
-      return { y: b['scrollY'], pitch, bands: tops.length }
-    })
-    const rest = geom.pitch ? Math.abs(((geom.y % geom.pitch) + geom.pitch) % geom.pitch) : null
-    const off = rest === null ? null : Math.min(rest, geom.pitch - rest)
-    note(`y=${geom.y?.toFixed?.(1)} pitch=${geom.pitch?.toFixed?.(1)} offsetFromBand=${off?.toFixed?.(1)}`)
-    verdict(off !== null && off < geom.pitch * 0.12, `feed rests ${(off ?? -1).toFixed(1)}px from a band edge (pitch ${geom.pitch?.toFixed?.(1)})`)
+    const t0 = Date.now()
+    let snap = await read()
+    for (let i = 0; i < 60; i++) {
+      await sleep(250)
+      snap = await read()
+      if (!snap.settle && !snap.snapping && Math.abs(snap.vel) < 0.02 && snap.idleMs > 300) break
+    }
+    const took = Date.now() - t0
+    note(`settled after ${took}ms: scrollY=${snap.y.toFixed(2)} nearest band top is ${snap.off.toFixed(2)} units away (${snap.bands} bands, pitch ${snap.pitch?.toFixed?.(1)})`)
+    note(`state: pendingSettle=${snap.settle} snapping=${snap.snapping} velocity=${snap.vel.toFixed(4)} snapTarget=${snap.target.toFixed(2)}`)
+    verdict(snap.bands > 1 && snap.off < 0.1,
+      `feed rests ${snap.off.toFixed(3)} units from a band top (pitch ${snap.pitch?.toFixed?.(1)} = ${((100 * snap.off) / (snap.pitch ?? 1)).toFixed(1)}% of a row)`)
   }
 
   // ---- #69 wheel over the top HUD must not scroll the feed
   const c69 = check(69, '[ui] wheel over the topbar does not scroll the scene')
   if (c69) {
-    const y0 = await page.evaluate(() => window.__form0.board['scrollY'])
+    // Settle first: the snap easing from the previous check is still moving
+    // the feed, and sampling through it reads as a leak that is not one.
+    const rest = async () => {
+      let prev = Number.NaN
+      for (let i = 0; i < 20; i++) {
+        await sleep(250)
+        const y = await page.evaluate(() => window.__form0.board['scrollY'])
+        if (Math.abs(y - prev) < 0.01) return y
+        prev = y
+      }
+      return prev
+    }
+    const y0 = await rest()
     const box = await page.evaluate(() => {
       const r = document.getElementById('topbar').getBoundingClientRect()
       return { x: r.left + r.width / 2, y: r.top + r.height / 2 }
     })
     await page.mouse.move(box.x, box.y)
     await page.mouse.wheel(0, 300)
-    await sleep(1800)
-    const y1 = await page.evaluate(() => window.__form0.board['scrollY'])
-    note(`scrollY ${y0?.toFixed?.(1)} -> ${y1?.toFixed?.(1)} over the topbar`)
-    verdict(Math.abs(y1 - y0) < 1, `topbar wheel shielded (Δ=${Math.abs(y1 - y0).toFixed(2)})`)
+    await sleep(600)
+    const y1 = await rest()
+    // Control: the SAME wheel over open canvas must move the feed, otherwise
+    // "nothing moved over the topbar" proves nothing (the wheel could be dead).
+    await page.mouse.move(640, 500)
+    await page.mouse.wheel(0, 300)
+    await sleep(600)
+    const y2 = await rest()
+    const hudDelta = Math.abs(y1 - y0)
+    const canvasDelta = Math.abs(y2 - y1)
+    note(`over the topbar: scrollY ${y0.toFixed(2)} -> ${y1.toFixed(2)} (Δ${hudDelta.toFixed(2)})`)
+    note(`control, over open canvas: -> ${y2.toFixed(2)} (Δ${canvasDelta.toFixed(2)})`)
+    verdict(hudDelta < 0.05 && canvasDelta > 5,
+      `topbar wheel shielded (Δ${hudDelta.toFixed(2)}) while the same wheel over canvas moves the feed Δ${canvasDelta.toFixed(1)}`)
   }
 
   // ---- #70 Babylon's stock unmute icon
@@ -496,6 +531,7 @@ async function measureSeam(page, postId) {
     // the widest bar in the viewer and the one most likely to overflow.
     await openViewer(page, posts.byFlavour.a, 10000)
     if (c76) {
+      focus(c76)
       const bar = await page.evaluate(() => {
         const rails = (sel) => [...document.querySelectorAll(sel)]
         const measure = (rail) => {
@@ -542,6 +578,7 @@ async function measureSeam(page, postId) {
           : `every control on-screen at ${bar.vw}px, no sideways scroll, button targets >= 30px`)
     }
     if (c77) {
+      focus(c77)
       await openViewer(page, posts.byFlavour.b, 10000)   // two saturated cubes, no animation
       const fit = await page.evaluate(() => {
         const f0 = window.__form0
