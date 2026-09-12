@@ -1016,6 +1016,63 @@ async function shadowDiff(onBuf, offBuf) {
     await sleep(1200)
   }
 
+  // ---- #66 draco on a model that carries audio
+  const c66 = check(66, '[studio/export] draco does not lose the audio buffer view')
+  if (c66) {
+    // The rig's flavour `a` is the interesting case: animated AND carrying an
+    // MSFT_audio_emitter clip. The audit saw the draco derive come back with
+    // "Audio clip references a missing buffer view" - the BIN rebuild had
+    // dropped the clip's bufferView, and the copy blamed audio on a model the
+    // reporter believed had none.
+    await page.evaluate(() => { location.hash = '#/studio' })
+    await page.waitForFunction(() => window.__form0.engine.activeScene === window.__form0.studio.scene, null, { timeout: 20000 })
+    await page.evaluate(() => document.querySelector('#btn-studio-import')?.click())
+    await sleep(400)
+    const bytes = await page.evaluate(async () => {
+      const r = await fetch('https://localhost:8443/models/a.glb')
+      return [...new Uint8Array(await r.arrayBuffer())]
+    })
+    await page.setInputFiles('#file-input', { name: 'a.glb', mimeType: 'model/gltf-binary', buffer: Buffer.from(bytes) })
+    await page.waitForFunction(() => window.__form0.studio.currentModel !== null, null, { timeout: 30000 })
+    await page.evaluate(() => document.getElementById('btn-studio-publish')?.click())
+    await page.waitForFunction(() => !document.getElementById('export-review').hidden, null, { timeout: 30000 })
+    // The codec buttons appear only once the availability probes resolve
+    // (refreshCodecOffering), so wait for the section rather than sampling it
+    // the instant the review opens.
+    await page.waitForFunction(() => {
+      const el = document.getElementById('export-codecs')
+      return el && !el.hidden
+    }, null, { timeout: 25000 }).catch(() => { /* no encoder available here */ })
+    const offered = await page.isVisible('#codec-geometry [data-v="draco"]')
+    note(`draco offered in the review: ${offered} (model: ${bytes.length} bytes, animated + one audio clip)`)
+    let state = null, noteText = null, sizes = null
+    if (offered) {
+      await page.click('#codec-geometry [data-v="draco"]')
+      await page.waitForFunction(() => {
+        const t = document.getElementById('export-state')?.textContent ?? ''
+        return t !== 'encoding…' && t !== ''
+      }, null, { timeout: 60000 })
+      const read = await page.evaluate(() => ({
+        state: document.getElementById('export-state')?.textContent ?? '',
+        note: document.getElementById('export-codec-note')?.textContent ?? '',
+        info: document.getElementById('export-info')?.textContent ?? '',
+      }))
+      state = read.state; noteText = read.note; sizes = read.info
+      note(`state="${state}" note="${noteText}"`)
+      note(`export info: ${sizes.slice(0, 140)}`)
+    }
+    // Either draco is not offered (AMENDMENT 84: encoders appear only when
+    // they provably work) or the derive succeeds and re-validates. What must
+    // never happen is a failure whose copy blames audio.
+    const blamedAudio = /audio/i.test(noteText ?? '')
+    verdict(!offered || (state === 'validated · exact bytes' && !blamedAudio),
+      offered
+        ? `draco derive ${state === 'validated · exact bytes' ? 'succeeded and re-validated' : `failed: "${noteText}"`}`
+        : 'draco is not offered on this device (honest availability gate)')
+    await page.evaluate(() => { location.hash = '#/board' })
+    await sleep(1200)
+  }
+
   // ---- #67 text triangle budget
   const c67 = check(67, '[studio/text] triangle budget is not stuck at 0')
   if (c67) {

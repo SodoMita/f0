@@ -1615,3 +1615,75 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     clamping, per-attribute independence, defaults), `check:codec-browser`
     (all dials visible with encoder ranges, per-attribute note changes,
     speed note + valid derive, webp 0% valid).
+
+95. CARD SHADER COVERAGE RESCUE IS KEYED TO THE TEXTURE KIND (2026-09-12):
+    the card fragment shader treats alpha < 1/64 with non-black RGB as full
+    coverage, because an opaque glTF material writes RGB and leaves the
+    framebuffer's alpha at 0 — without the rescue a model render would be
+    invisible on a transparent card. That is right for MODEL RENDERS only
+    (the `raw` poster and `rtt` live-preview kinds). App-drawn
+    DynamicTextures — contact shadows, spinners, badges, pills, frames,
+    backdrops, everything bound through `bindDyn` — carry a real alpha ramp
+    whose faint outer tail sits below 1/64, and rescuing that tail clamped it
+    to OPAQUE, drawing a hard edge exactly where the quad ends. Measured on
+    the viewer's floor shadow: four rows 45% darker than the backdrop across
+    the full width — 45% being the shadow's own strength at full coverage —
+    reading as a seam through the middle of the screen (audit #75). `rescue`
+    is now a uniform that `setCardFlip()` keys to the texture kind: 1 for
+    raw/rtt, 0 for dyn.
+    Guard: `audit/recheck.mjs` #75 — worst single-row step of the backdrop's
+    luminance profile with the glow on, the model hidden and the framebuffer
+    pinned (adaptive resolution changes the render size between frames and
+    alone fakes row-level steps): 5.96 → 0.65, and the glow's darkest row now
+    sits 20% of the screen BELOW its own top edge instead of on it.
+
+96. MODEL AUDIO: THE EMITTER'S LOOP/VOLUME SURVIVE THE LOADER, AND THE SOUND
+    BUTTON TELLS THE TRUTH (2026-09-12): Babylon's glTF loader hardcodes
+    `{loop:false}` on every MSFT_audio_emitter clip Sound and keeps the
+    emitter's real loop flag on a loader-private `WeightedSound` that never
+    reaches the scene graph. FORM/0 plays the clip Sounds directly, so a model
+    that asked to loop played once and fell silent — while the HUD's SOUND
+    button stayed lit, because its state is derived from `isPlaying` and
+    nothing re-read it after a clip ended (audit #82). The emitter facts
+    (name/loop/volume) are now read where the JSON chunk is already parsed
+    (`validateGLB` → `LimitReport.audio`) and filed under the model's sha256
+    (`src/model/audioFacts.ts`), because the viewer's hand-off path adopts an
+    already-parsed container and never sees the bytes. Every claim site
+    (viewer, direct-3D pool, preview pool) re-applies them by emitter name —
+    Babylon names each clip Sound `emitter.name || 'emitter' + index`. The
+    viewer also subscribes to each claimed clip's `onEndedObservable` and
+    re-syncs the HUD; a looping clip never fires onEnded, so a live loop
+    cannot be flicked off.
+    Guard: `audit/recheck.mjs` #82 — silent models hide the control; a glTF
+    `loop:true` reaches the Sound; the clip is still sounding five clip
+    lengths after the tap; a one-shot un-lights the button by itself.
+
+97. SCROLL SNAPPING OWES A FRAME (2026-09-12): the feed eases to the nearest
+    band top once input stops, but the snap armed from inside the per-frame
+    update 240 ms AFTER the last scroll — and the render loop is
+    demand-driven, so by then nothing was left to invalidate. On a quiet board
+    no frame ran and the feed rested mid-row with cards cut off (measured 3.94
+    units off a band top = 29% of a row, with `pendingSettle` false and
+    velocity 0.005); whether it snapped at all depended on unrelated activity
+    happening to keep frames coming (audit #68, still failing after the first
+    fix). The update now holds ONE frame pending while a snap is owed and
+    stops the moment the feed lands on a band. A snap that cannot move
+    (clamped at an edge) is latched by scrollY so it is not retried every
+    frame, and `layout()` clears the latch when the bands change.
+    Guard: `audit/recheck.mjs` #68 — the feed rests 0.000 units from a band
+    top, polling for the settled state (the snap arms only once the deferred
+    loads finish, ~4 s on the rig).
+
+98. THE HUD RAILS WRAP ON PHONES (2026-09-12): the viewer bar carries about
+    ten controls (close/prev/next/position/play/fit/camera dots/sound/thread/
+    reply/save/info) ≈ 460 px of 42 px targets, which no phone row holds. Its
+    sideways scroll put THREAD/REPLY/SAVE/INFO past the right edge where
+    nobody finds them (audit #76: measured at x 390–524 on a 390 px
+    viewport). Below 560 px both HUD rails wrap — centred, 6 px row gap,
+    separators dropped so a wrapped row never ends on a dangling rule — and
+    stop scrolling sideways. `flex-wrap` only breaks a row when the content
+    really does not fit, and the 42 px targets stay 42 px (AGENTS 9k).
+    Guard: `audit/recheck.mjs` #76 — every control on-screen at 390 px, no
+    sideways scroll, button targets ≥ 30 px, measured on the ANIMATED rig
+    flavour because it is the only one that populates the animation rail (the
+    widest bar in the viewer).

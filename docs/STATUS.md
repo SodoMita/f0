@@ -4,6 +4,34 @@ Claim a task by moving it to **In progress** with your name/date, push, then
 move it to **Done** with a commit reference. One agent per area.
 
 ## Done
+- [x] **Agent-browser audit (#53–#82) re-verified in the browser; 4 real
+      fixes** (agent arena, 2026-09-12, SPEC AMENDMENTS 95–98): PR #84
+      claimed the audit fixed but all thirty issues were still open, so every
+      finding was re-measured against the offline rig with the new
+      `audit/recheck.mjs` (`CHECKS="75 76"` runs a subset) plus `audit/png.mjs`
+      (a screenshot decoder — the agent sandbox has no PIL/numpy, and
+      compositor screenshots are the only pixels that are not racy:
+      `gl.readPixels` on the default framebuffer can return a half-drawn
+      frame). Result: 30 findings re-measured, 30 pass.
+      Fixed for real here: **#75** the viewer's backdrop seam (the card
+      shader's alpha-0 coverage rescue was clamping a contact shadow's faint
+      rim to opaque — now keyed to the texture kind), **#76** THREAD/REPLY/
+      SAVE/INFO unreachable at 390 px (the HUD rails wrap), **#82** model
+      audio (the loader drops MSFT_audio_emitter's loop flag; the SOUND button
+      stayed lit after a clip ended), **#68** the feed snap (a demand-driven
+      loop never ran the frame that arms it).
+      Verified already fixed by PR #84: #53 #54 #55 #56 #57 #58 #59 #60 #61
+      #62 #63 #64 #65 #66 #67 #69 #70 #71 #72 #73 #74 #77 #78 #79 #80 #81.
+      Four of those only measured honestly once the PROBE was corrected: #61
+      dispatched `change` on #file-input without clicking #btn-studio-import
+      (which is what registers the listener), #69 sampled scrollY through the
+      snap glide it mistook for a leak, #78 compared themes with an absolute
+      delta (the same shadow is a 6-unit delta on the dark backdrop and a
+      50-unit one on white), #81 demanded >10 chars from mode announcements
+      that are legitimately shorter ('model view', 'thread map', 'studio').
+      #66 needed a real check: the gate's codec suites use a TEXT model, so
+      draco had never been derived from an audio-bearing GLB — it now has
+      (25 KiB → 25 KiB, re-validated, no lost buffer view).
 - [x] **Export codec settings = every encoder setting in the encoder's range**
       (agent arena, 2026-08-22, SPEC AMENDMENT 94, renumbered from 87): the
       fine-settings section exposes ALL options the local encoders accept,
