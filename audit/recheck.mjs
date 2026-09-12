@@ -127,21 +127,33 @@ function meanLum(g) {
 }
 
 /**
- * Isolate the viewer's floor-glow contribution and look for a hard edge.
- * Screenshots (not gl.readPixels): the default framebuffer is not preserved
- * after compositing, so a sync read can return a half-drawn frame.
+ * Look for a hard horizontal seam in the viewer backdrop (audit #75).
+ *
+ * Single-image metric on purpose: differencing two screenshots also picks up
+ * anything that moved between them (an authored camera animation, orbit
+ * inertia), which swamps a 5-unit seam. So: pin the framebuffer (adaptive
+ * resolution changes the render size between frames and that alone fakes
+ * row-level steps), hide the HTML chrome and the model, then ask how hard the
+ * worst single-row step is across the middle band. A smooth spotlight ramp
+ * bands by ~1 at 8 bits; the seam measured 5.96 before the fix and the glow's
+ * darkest row sat ON the plane's far edge instead of at its centre.
  */
-async function measureSeam(page) {
+async function measureSeam(page, postId) {
+  await page.evaluate((id) => { location.hash = '#/viewer/' + id }, postId)
+  await sleep(9000)
   await page.evaluate(() => {
     window.__form0.settings.set({ adaptiveResolution: false, resolutionMode: 'manual', resolutionWidth: 1280, resolutionHeight: 800, aspectLock: false })
   })
   await sleep(1200)
   await page.addStyleTag({ content: '.hud, #topbar { display: none !important }' })
-  await page.evaluate(() => {
+  const hide = (on) => page.evaluate((v) => {
     const c = window.__form0.viewer['container']
-    if (c) for (const m of c.meshes) m.setEnabled(false)
-  })
-  await sleep(700)
+    if (c) for (const m of c.meshes) m.setEnabled(!v)
+    for (let i = 0; i < 4; i++) window.__form0.engine.activeScene.render()
+  }, on)
+  await hide(true)
+  await sleep(600)
+
   const shot = async () => {
     await page.evaluate(() => { for (let i = 0; i < 4; i++) window.__form0.engine.activeScene.render() })
     await sleep(400)
@@ -158,29 +170,26 @@ async function measureSeam(page) {
     const c = window.__form0.viewer['container']
     if (c) for (const m of c.meshes) m.setEnabled(true)
   })
+
   const { decode, rowProfile, seamRows } = await import('./png.mjs')
   const on = rowProfile(decode(onBuf), 384, 896)
   const off = rowProfile(decode(offBuf), 384, 896)
   const H = on.length
+  const worst = seamRows(on, 0.5)[0] ?? { y: -1, step: 0 }
+  const backdropWorst = seamRows(off, 0.5)[0] ?? { y: -1, step: 0 }
+  // where the glow is darkest, and how far that is from its own top edge
   const deltas = on.map((v, y) => off[y] - v)
-  let firstRow = -1, lastRow = -1, peakDelta = 0, peakY = -1
+  let firstRow = -1, peakDelta = 0, peakY = -1
   for (let y = 0; y < H; y++) {
-    if (deltas[y] > 0.4) { if (firstRow < 0) firstRow = y; lastRow = y }
+    if (deltas[y] > 0.4 && firstRow < 0) firstRow = y
     if (deltas[y] > peakDelta) { peakDelta = deltas[y]; peakY = y }
   }
-  const worst = seamRows(on, 0.5)[0] ?? { y: -1, step: 0 }
-  const bw = seamRows(off, 0.5)[0] ?? { y: -1, step: 0 }
-  // how many rows does the glow take to reach half its peak? (a soft ramp is
-  // many rows; the seam was a 4-row spike straight to full opacity)
-  let rampRows = 0
-  if (peakY >= 0) for (let y = peakY; y < H && deltas[y] > peakDelta * 0.5; y++) rampRows++
   return {
-    H, firstRow, lastRow, peakY,
-    firstPct: firstRow < 0 ? 0 : Math.round((100 * firstRow) / H),
-    lastPct: lastRow < 0 ? 0 : Math.round((100 * lastRow) / H),
-    worstStep: +Math.abs(worst.step).toFixed(2), worstY: worst.y, worstPct: worst.y < 0 ? 0 : Math.round((100 * worst.y) / H),
-    peakDelta: +peakDelta.toFixed(2), rampRows,
-    backdropWorst: +Math.abs(bw.step).toFixed(2), backdropSmooth: Math.abs(bw.step) < 1.5,
+    H, worstStep: +Math.abs(worst.step).toFixed(2), worstY: worst.y,
+    worstPct: worst.y < 0 ? 0 : Math.round((100 * worst.y) / H),
+    backdropWorst: +Math.abs(backdropWorst.step).toFixed(2),
+    edgeRow: firstRow, edgePct: firstRow < 0 ? -1 : Math.round((100 * firstRow) / H),
+    peakDelta: +peakDelta.toFixed(2), peakY, peakPct: peakY < 0 ? -1 : Math.round((100 * peakY) / H),
   }
 }
 
@@ -436,17 +445,15 @@ async function measureSeam(page) {
   // ---- #75 viewer backdrop seam
   const c75 = check(75, '[viewer] backdrop has no hard horizontal seam')
   if (c75) {
-    // Compositor-accurate: two screenshots (floor glow on / off) with the
-    // model hidden and the framebuffer PINNED (adaptive resolution changes
-    // the render size between frames and that alone fakes row-level steps).
-    // The difference isolates the glow plane's contribution; a seam shows up
-    // as one or two rows darkened far more than their neighbours.
-    const seam = await measureSeam(page)
-    note(`glow contributes from row ${seam.firstRow} (${seam.firstPct}%) to ${seam.lastRow} (${seam.lastPct}%)`)
-    note(`worst single-row step ${seam.worstStep} at y=${seam.worstY} (${seam.worstPct}%); peak darkening ${seam.peakDelta} at y=${seam.peakY}`)
-    note(`backdrop-only profile is ${seam.backdropSmooth ? 'smooth' : 'NOT smooth'} (worst step ${seam.backdropWorst})`)
-    verdict(seam.worstStep < 3 && seam.backdropSmooth,
-      `no hard seam: worst 1-row step ${seam.worstStep} (peak glow Δ${seam.peakDelta} spread over ${seam.rampRows} rows)`)
+    // flavour b: static, no authored camera — the orbit camera stays put, so
+    // two consecutive frames are comparable at all.
+    const seam = await measureSeam(page, posts.byFlavour.b)
+    note(`worst 1-row step ${seam.worstStep} at y=${seam.worstY} (${seam.worstPct}%); backdrop alone ${seam.backdropWorst}`)
+    note(`glow edge at ${seam.edgePct}%, darkest at ${seam.peakPct}% (Δ${seam.peakDelta})`)
+    // A soft shadow ramps: its darkest row is well inside its own extent, and
+    // no single row jumps more than 8-bit banding on a smooth gradient.
+    verdict(seam.worstStep < 2 && seam.peakY > seam.edgeRow + 8,
+      `no seam (worst 1-row step ${seam.worstStep}; glow darkest at ${seam.peakPct}%, ${seam.peakPct - seam.edgePct} points below its edge)`)
   }
 
   // ---- #77 portrait auto-fit (phone viewport)
