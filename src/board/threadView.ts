@@ -899,13 +899,28 @@ export class ThreadView {
     rootId: string,
     hiddenCount: number,
   ): void {
-    this.disposeNotice()
-    const w = 6.4, h = 2.8
     const rootP = pos.get(rootId)
     let maxX = -Infinity
     for (const p of pos.values()) maxX = Math.max(maxX, p.x)
-    const x = (rootP ? Math.max(rootP.x, maxX) : maxX) + w * 0.5 + 2.4
+    const x = (rootP ? Math.max(rootP.x, maxX) : maxX) + 3.2 + 2.4
     const y = rootP?.y ?? 0
+    this.spawnNotice(`+${hiddenCount} more`, x, y, 6.4, 2.8)
+  }
+
+  /**
+   * A single notice card at the centre of the map — used when the requested
+   * thread id produced no nodes (unknown id, or the relay has not answered
+   * yet): the map must never be a permanent empty void (audit #58).
+   */
+  showNotice(text: string): void {
+    this.spawnNotice(text, this.panX, this.panY, 8, 3.2)
+  }
+
+  /** True when the current tree produced no nodes at all. */
+  isEmpty(): boolean { return this.nodes.size === 0 }
+
+  private spawnNotice(text: string, x: number, y: number, w: number, h: number): void {
+    this.disposeNotice()
     const tex = new DynamicTexture('thread-more-tex', { width: 512, height: 200 }, this.scene, true)
     tex.hasAlpha = true
     const ctx = tex.getContext() as CanvasRenderingContext2D
@@ -920,7 +935,7 @@ export class ThreadView {
     ctx.font = '600 54px system-ui, sans-serif'
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
-    ctx.fillText(`+${hiddenCount} more`, 256, 104)
+    ctx.fillText(text, 256, 104)
     tex.update()
     const mat = makeOverlayMaterial(this.scene)
     setCardTexture(mat, tex)
@@ -935,6 +950,7 @@ export class ThreadView {
     this.noticeMesh = mesh
     this.noticeMat = mat
     this.noticeTex = tex
+    this.form.kick()
   }
 
   /**

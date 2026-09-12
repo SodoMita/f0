@@ -157,25 +157,27 @@ export function placeFrame(frame: ModelFrame, cell: FrameCell): FramePlacement {
 }
 
 /** Four planes that crop a model to its cell (poster edges, for real meshes).
- *  Kept half-space is the interior of the cell: dot(worldPos, normal) + d >= 0
- *  survives, < 0 is discarded. Normals therefore point INWARD and d is chosen
- *  so the plane's interior satisfies the cell bounds (x0 <= x <= x1,
- *  y0 <= y <= y1). The previous implementation had every normal flipped, so
- *  the intersection of the four kept half-spaces was empty and every fragment
- *  inside the card was discarded. */
+ *  Kept half-space is the interior of the cell. Babylon's clip shader
+ *  DISCARDS a fragment where dot(worldPos, (n, d)) > 0 (clipPlaneVertex:
+ *  `fClipDistance = dot(worldPos, vClipPlane)`, clipPlaneFragment:
+ *  `if (fClipDistance > 0.0) discard;`), so a plane K everything satisfying
+ *  dot(p, n) + d <= 0. For "keep x <= x1" that is n = (+1,0,0), d = -x1 —
+ *  an earlier revision inverted every normal, the four kept half-spaces
+ *  intersected to the empty set, and no direct-3D fragment survived
+ *  (board 3D mode and 3D thread nodes rendered nothing at all). */
 export function makeCellClip(): Plane[] {
-  return [new Plane(-1, 0, 0, 0), new Plane(1, 0, 0, 0), new Plane(0, -1, 0, 0), new Plane(0, 1, 0, 0)]
+  return [new Plane(1, 0, 0, 0), new Plane(-1, 0, 0, 0), new Plane(0, 1, 0, 0), new Plane(0, -1, 0, 0)]
 }
 
 export function updateCellClip(planes: Plane[], cell: FrameCell): void {
   const x0 = cell.x - cell.w / 2, x1 = cell.x + cell.w / 2
   const y0 = cell.y - cell.h / 2, y1 = cell.y + cell.h / 2
-  // keep x <= x1
-  planes[0].normal.set(-1, 0, 0); planes[0].d = x1
-  // keep x >= x0
-  planes[1].normal.set(1, 0, 0); planes[1].d = -x0
+  // keep x <= x1  (px - x1 <= 0)
+  planes[0].normal.set(1, 0, 0); planes[0].d = -x1
+  // keep x >= x0  (x0 - px <= 0)
+  planes[1].normal.set(-1, 0, 0); planes[1].d = x0
   // keep y <= y1
-  planes[2].normal.set(0, -1, 0); planes[2].d = y1
+  planes[2].normal.set(0, 1, 0); planes[2].d = -y1
   // keep y >= y0
-  planes[3].normal.set(0, 1, 0); planes[3].d = -y0
+  planes[3].normal.set(0, -1, 0); planes[3].d = y0
 }

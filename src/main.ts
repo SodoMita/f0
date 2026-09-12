@@ -238,6 +238,13 @@ async function boot(): Promise<void> {
   const animSpeed = $('anim-speed') as HTMLInputElement
   const metaText = $('meta-text')
   const toast = $('toast')
+  // Spec A11Y: hidden DOM bridge. Babylon draws the real UI, so the active
+  // scene is mirrored into this visually-hidden region for assistive tech —
+  // it existed but was never populated, leaving AT a blank canvas (audit #81).
+  const a11yBridge = $('a11y-bridge')
+  function announce(text: string): void {
+    if (a11yBridge) a11yBridge.textContent = text
+  }
 
   // ---------- loading ring ----------
   const loading = $('loading')
@@ -1217,10 +1224,11 @@ async function boot(): Promise<void> {
   let alignIdx = 1
   function updateTextBudget(): void {
     if (!textBudget) return
-    const m = studio.scene.meshes.find((x) => x.name === 'studio-text')
-    const tris = m ? m.getTotalIndices() / 2 : 0
-    const lines = studioText.value ? studioText.value.split('\n').length : 0
-    textBudget.textContent = `${studioText.value.length} chars · ${lines} lines · ${tris} tris`
+    // Read from the studio's ACTUAL built text mesh, not a scene-graph name
+    // search: the rebuild is async, so a synchronous lookup raced it and the
+    // readout sat at "0 tris" while text was on screen (audit #67).
+    const s = studio.textStats
+    textBudget.textContent = `${s.chars} chars · ${s.lines} lines · ${s.triangles} tris`
   }
 
   function refreshCameraControls(): void {
@@ -1275,6 +1283,9 @@ async function boot(): Promise<void> {
     btnStudioPublish.disabled = !studio.hasContent()
     scheduleRebuild()
   })
+  // The text rebuild is async — the budget readout must refresh when the
+  // mesh actually lands, not only on the next keystroke (audit #67).
+  studio.onTextRebuilt = () => updateTextBudget()
 
   // Selecting a symbol or the text mesh shows its own color in BOTH pickers
   // (AMENDMENT 68 corrected 2026-08-21 + AMENDMENT 69): each item keeps an
@@ -1743,8 +1754,11 @@ async function boot(): Promise<void> {
   navigator.mediaDevices?.addEventListener?.('devicechange', () => void mixer.refreshDevices())
 
   $('btn-settings').addEventListener('click', () => settingsPanel.toggle())
-  $('btn-tzoom-in').addEventListener('click', () => threadView.zoomBy(1.25))
-  $('btn-tzoom-out').addEventListener('click', () => threadView.zoomBy(1 / 1.25))
+  // zoom is the ortho half-height: BIGGER = more world visible = zoomed OUT.
+  // `+`/in must SHRINK it; `-`/out grows it (audit #63 — they were inverted
+  // against both the wheel and every convention).
+  $('btn-tzoom-in').addEventListener('click', () => threadView.zoomBy(1 / 1.25))
+  $('btn-tzoom-out').addEventListener('click', () => threadView.zoomBy(1.25))
   $('btn-tfit').addEventListener('click', () => threadView.fit())
 
   function syncPlay(): void {
@@ -1833,6 +1847,12 @@ async function boot(): Promise<void> {
     studioEl.hidden = next !== 'studio'
     threadZoom.hidden = next !== 'thread'
     document.body.dataset.mode = next
+    announce(
+      next === 'board' ? 'board — the feed of 3D models'
+        : next === 'viewer' ? 'model view'
+          : next === 'thread' ? 'thread map'
+            : 'studio',
+    )
     board.setInteractive(next === 'board')
     if (next !== 'board') setSearchOpen(false)
     if (next === 'studio' || next === 'viewer') assets.setPaused(true)
@@ -1887,21 +1907,52 @@ async function boot(): Promise<void> {
     for (const s of sounds) if (col.includes(s)) { try { s.dispose() } catch { /* already gone */ } }
   }
 
+  /** Bounded wait for a post id to arrive in the index (deep-link race). */
+  const VIEWER_LOOKUP_MS = 10_000
+  function waitForPost(id: string, timeoutMs: number): Promise<void> {
+    return new Promise((resolve) => {
+      const started = performance.now()
+      const poll = (): void => {
+        if (index.byId.has(id) || performance.now() - started >= timeoutMs) resolve()
+        else window.setTimeout(poll, 250)
+      }
+      window.setTimeout(poll, 250)
+    })
+  }
+
   async function openViewer(id?: string): Promise<void> {
     if (!id) { setMode('board'); return }
-    const meta = index.byId.get(id)
-    if (!meta || meta.hashFailed || assets.isHashFailed(id)) {
-      if (meta?.hashFailed || assets.isHashFailed(id ?? '')) {
-        errorSheet.show(ERRORS.MODEL_DOWNLOAD(() => retryModel(id), assets.failureDetail(id)))
-      }
-      setMode('board')
-      return
-    }
     const nav = ++viewerNav
+    let meta = index.byId.get(id)
+    if (!meta || meta.hashFailed || assets.isHashFailed(id)) {
+      if (meta?.hashFailed || assets.isHashFailed(id)) {
+        errorSheet.show(ERRORS.MODEL_DOWNLOAD(() => retryModel(id), assets.failureDetail(id)))
+        setMode('board')
+        return
+      }
+      // UNKNOWN id so far. Two honest outcomes (audit #56/#57): a reload on
+      // #/viewer/<id> boots before the relays answer — wait a bounded window
+      // for the event to arrive, then declare the post unknown. Never a
+      // silent fall-back to the board with a viewer URL still in the bar.
+      setMode('viewer')
+      setLoading('lookup', true, 'looking up post')
+      await waitForPost(id, VIEWER_LOOKUP_MS)
+      if (nav !== viewerNav) return // superseded by another open/route
+      setLoading('lookup', false)
+      meta = index.byId.get(id)
+      if (!meta || meta.hashFailed || assets.isHashFailed(id)) {
+        if (router.current.name === 'viewer' && router.current.id === id) {
+          errorSheet.show(ERRORS.POST_UNKNOWN(() => router.go({ name: 'board' }), id))
+          setMode('board')
+        }
+        return
+      }
+    }
     currentMeta = meta
     syncDeleteButton()
     setMode('viewer')
     syncViewerPos(meta)
+    if (meta.name) announce(`model view: ${meta.name}`)
     camDots.innerHTML = ''
     animRail.hidden = true
     animTrack.innerHTML = ''
@@ -1939,9 +1990,13 @@ async function boot(): Promise<void> {
           return
         }
         renderCamDots()
-        syncAnimRail()
         syncSoundButton()
         live.commit(new Set(transferred))
+        // The container is in the scene, but its shader effects may still be
+        // compiling — hold the loading ring (and keep the anim rail hidden)
+        // until the model actually draws, so the HUD never plays over an
+        // empty canvas (audit #79).
+        void holdUntilRendered(nav, meta)
         return
       } catch (err) {
         // Hand-off failed (e.g. parse result lost a mesh). Rollback the
@@ -1971,12 +2026,34 @@ async function boot(): Promise<void> {
       await viewer.load(bytes, meta)
       if (nav !== viewerNav) return
       renderCamDots()
-      syncAnimRail()
       syncSoundButton()
+      await viewer.whenRendered()
+      if (nav !== viewerNav) return
+      syncAnimRail()
     } catch {
       if (nav === viewerNav) errorSheet.show(ERRORS.MODEL_PARSE(() => router.go({ name: 'board' })))
     } finally {
       if (nav === viewerNav) setLoading('model', false)
+    }
+  }
+
+  /**
+   * Keep the viewer's loading ring up until the freshly adopted model has
+   * actually drawn (shader effects compiled). Both open paths funnel here;
+   * a superseded load (nav bumped, viewer left) must not touch the ring —
+   * the next open or setMode already owns it.
+   */
+  async function holdUntilRendered(nav: number, meta: ThreadMeta): Promise<void> {
+    if (nav !== viewerNav || mode !== 'viewer') return
+    setLoading('model', true, 'loading model')
+    animRail.hidden = true
+    try {
+      await viewer.whenRendered()
+    } finally {
+      if (nav === viewerNav && currentMeta === meta) {
+        setLoading('model', false)
+        syncAnimRail()
+      }
     }
   }
 
@@ -2014,7 +2091,18 @@ async function boot(): Promise<void> {
     else if (route.name === 'thread') {
       setMode('thread')
       setLoading('thread', true, 'building thread')
-      void threadView.open(route.rootId).finally(() => setLoading('thread', false))
+      void threadView.open(route.rootId).finally(() => {
+        setLoading('thread', false)
+        // Unknown (or not-yet-received) thread id: never a permanent empty
+        // void — a bounded wait for the relay, then a not-found notice card
+        // in the map (audit #58).
+        if (mode !== 'thread' || router.current.name !== 'thread' || router.current.rootId !== route.rootId) return
+        if (!threadView.isEmpty()) return
+        void waitForPost(route.rootId, VIEWER_LOOKUP_MS).then(() => {
+          if (mode !== 'thread' || router.current.name !== 'thread' || router.current.rootId !== route.rootId) return
+          if (threadView.isEmpty()) threadView.showNotice('post not found')
+        })
+      })
     }
     else if (route.name === 'viewer') void openViewer(route.id)
     else if (route.name === 'studio') {
@@ -2145,6 +2233,7 @@ async function boot(): Promise<void> {
     if (e.key === 'Escape' && previewPageEl && !previewPageEl.hidden) { closePreviewPage(); return }
     if (e.key === 'Escape' && errorSheet.isOpen) { errorSheet.hide(); return }
     if (e.key === 'Escape' && networkPanel.isOpen) { networkPanel.close(); return }
+    if (e.key === 'Escape' && settingsPanel.isOpen) { settingsPanel.close(); return }
     if (e.key === 'Escape' && searchOpen) { setSearchOpen(false); return }
     // Typing guard: while focus is in an editable control (settings inputs,
     // the studio textarea, a search box…), game hotkeys must NOT fire —
@@ -2153,15 +2242,42 @@ async function boot(): Promise<void> {
     const target = e.target as HTMLElement | null
     const tag = (target?.tagName ?? '').toUpperCase()
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable === true) return
+    if (mode === 'board') {
+      // spec A11Y: board arrows/Enter/T/Escape (PgUp/PgDn/Home/End live in the
+      // board's own keyboard observable).
+      switch (e.key) {
+        case 'ArrowUp': board.moveSelection('up'); e.preventDefault(); break
+        case 'ArrowDown': board.moveSelection('down'); e.preventDefault(); break
+        case 'ArrowLeft': board.moveSelection('left'); e.preventDefault(); break
+        case 'ArrowRight': board.moveSelection('right'); e.preventDefault(); break
+        case 'Enter': {
+          const m = board.enterSelection()
+          if (m) router.go({ name: 'viewer', id: m.eventId })
+          break
+        }
+        case 't': case 'T': {
+          const m = board.selectionMeta()
+          if (m) router.go({ name: 'thread', rootId: m.refs.rootId ?? m.eventId })
+          break
+        }
+        case 'Escape': board.clearSelection(); break
+      }
+      return
+    }
     if (mode === 'thread') {
       if (e.key === 'Escape') router.go({ name: 'board' })
       if (e.key === '0') threadView.fit()
-      if (e.key === '+' || e.key === '=') threadView.zoomBy(1.25)
-      if (e.key === '-' || e.key === '_') threadView.zoomBy(1 / 1.25)
+      // zoom is the ortho half-height: BIGGER value = more world on screen =
+      // zoomed OUT. `+` must zoom IN, so it shrinks the half-height (audit #63).
+      if (e.key === '+' || e.key === '=') threadView.zoomBy(1 / 1.25)
+      if (e.key === '-' || e.key === '_') threadView.zoomBy(1.25)
       return
     }
     if (mode === 'studio') {
       if (publishing && e.key === 'Escape') { cancelPublish(); return }
+      // Escape with the export review open closes ONLY the review — the
+      // studio (and its imported model) must survive (audit #61).
+      if (e.key === 'Escape' && !exportReview.hidden) { closeExportReview(); return }
       // Global typing guard already returned for INPUT/TEXTAREA (AMEND 53).
       if (studio.isFrozen) {
         if (e.key === 'Escape') router.go({ name: 'board' })
@@ -2195,7 +2311,12 @@ async function boot(): Promise<void> {
     }
     if (mode !== 'viewer') return
     switch (e.key) {
-      case 'Escape': router.go({ name: 'board' }); break
+      case 'Escape':
+        // The metadata drawer sits ON the viewer: Escape closes it first and
+        // a second Escape leaves the view (audit #60).
+        if (!drawer.hidden) { toggleDrawer(); break }
+        router.go({ name: 'board' })
+        break
       case 'ArrowLeft': void stepViewer(-1); break
       case 'ArrowRight': void stepViewer(1); break
       case 'c': case 'C': viewer.cycleCamera(); renderCamDots(); break
@@ -2220,6 +2341,25 @@ async function boot(): Promise<void> {
   // a page zoom, a DPI change with no resize event, and a resolution-policy
   // change all take the SAME path — a view can no longer be left behind
   // holding a frustum for a buffer that no longer exists. (AMENDMENT 79)
+  // Chrome wins the wheel over its own strips: hovering the topbar (brand /
+  // buttons) or the viewer rails must not scroll the feed or zoom the model
+  // behind the HUD (audit #69). The HUD containers are pointer-events:none
+  // in their gaps, so those wheel events land on the canvas directly — a
+  // capture-phase listener + a box test is the only reliable interception.
+  const hudWheelBoxes = [topbar, viewerBar, threadZoom]
+  window.addEventListener('wheel', (e) => {
+    for (const el of hudWheelBoxes) {
+      if (el.hidden) continue
+      const r = el.getBoundingClientRect()
+      if (r.width <= 0 || r.height <= 0) continue
+      if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) {
+        e.stopPropagation()
+        e.preventDefault()
+        return
+      }
+    }
+  }, { capture: true, passive: false })
+
   engine.onViewportChange(() => {
     board.resize()
     threadView.resize()

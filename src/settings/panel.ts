@@ -185,7 +185,13 @@ export class SettingsPanel {
           opt.textContent = o.label
           select.appendChild(opt)
         }
-        select.addEventListener('change', () => commit(select.value))
+        select.addEventListener('change', () => {
+          // The Preset dropdown is an ACTION, not a stored value: picking
+          // Low/Medium/High/Ultra must apply the whole preset profile
+          // (audit #64 — it only stored the label, every value stayed).
+          if (def.id === 'preset') this.store.applyPreset(select.value)
+          else commit(select.value)
+        })
         control.append(select)
         break
       }

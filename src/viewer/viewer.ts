@@ -332,7 +332,15 @@ export class Viewer {
     // starts playing on open — but through the manual driver, and only when
     // the board's "cards start animating in view" setting says so (the
     // viewer obeys the same preference, AMENDMENT 87).
-    this.animator.setGroups(container.animationGroups, meta.previewAnimation ?? 0, this.autoplay)
+    // Empty groups (zero targetedAnimations — glTF files can carry them)
+    // are NOT tracks: counting them showed the full animation rail with a
+    // "1/1" counter over a static model (audit #72). The board's direct-3D
+    // pool applies the same filter.
+    this.animator.setGroups(
+      container.animationGroups.filter((g) => g.targetedAnimations.length > 0),
+      meta.previewAnimation ?? 0,
+      this.autoplay,
+    )
   }
 
   /** Board setting: "everything opens paused" applies to the viewer too. */
@@ -394,6 +402,35 @@ export class Viewer {
 
   /** True while a model is being fetched/parsed for this view. */
   get busy(): boolean { return this.pending }
+
+  /**
+   * Resolves once the CURRENT model's shader effects are compiled and ready
+   * (i.e. the next frame actually shows it), or after `timeoutMs`. Between
+   * `load()` resolving and the first compiled draw the canvas is empty —
+   * sometimes seconds on a cold GPU / SwiftShader — and the HUD must not
+   * announce playback over a blank view (audit #79). Kicks the engine so the
+   * compile is driven to completion even while nothing else animates.
+   */
+  async whenRendered(timeoutMs = 20_000): Promise<void> {
+    const deadline = performance.now() + timeoutMs
+    for (;;) {
+      this.form.kick()
+      await new Promise<void>((r) => window.setTimeout(r, 60))
+      const container = this.container
+      if (!container) return // cleared / superseded
+      if (performance.now() > deadline) return
+      let ready = true
+      for (const m of container.meshes) {
+        if (m.getTotalVertices() <= 0 || !m.subMeshes) continue
+        for (const s of m.subMeshes) {
+          const eff = (s as unknown as { effect?: { isReady(): boolean } }).effect
+          if (!eff || !eff.isReady()) { ready = false; break }
+        }
+        if (!ready) break
+      }
+      if (ready) return
+    }
+  }
 
   /**
    * Render-on-demand probe (see core/engine.ts): the viewer needs frames
@@ -509,6 +546,15 @@ export class Viewer {
   private seedFromAuthored(cam: Camera): void {
     this.stopOrbitInertia()
     const box = this.modelBox!
+    // An imported camera sits in the scene graph but is never the active
+    // camera, so nothing renders through it and its cached world matrix can
+    // still be IDENTITY here (freshly adopted container, or the camera node's
+    // parents moved since the last evalution) — seeding from identity parked
+    // the orbit at the world origin inside the model: the authored-camera
+    // switch "did not change the view" and prev/next could leave the model
+    // hard-cropped (audit #55). The poster pipeline pays the same respect
+    // (see framing.ts frameModel).
+    ;(cam as unknown as { computeWorldMatrix: (force?: boolean) => unknown }).computeWorldMatrix(true)
     const wm = cam.getWorldMatrix()
     const pos = new Vector3(wm.m[12], wm.m[13], wm.m[14])
     // Babylon cameras look down local +Z (left-handed system).
