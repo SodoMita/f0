@@ -180,7 +180,7 @@ export function setCardBlend(mat: ShaderMaterial, v: number): void {
 /** Sampling orientation for a texture kind (deterministic; see header).
  *  Also selects the coverage policy: model renders (`raw` posters, `rtt`
  *  live previews) get the alpha-0 rescue, app-drawn `dyn` textures keep
- *  their real alpha ramp (see the FRAG comment — audit #75/#78). */
+ *  their real alpha ramp — see the FRAG comment (audit #75). */
 export function setCardFlip(mat: ShaderMaterial, kind: CardTextureKind): void {
   const [x, y] = FLIPS[kind]
   mat.setVector2('flip', new Vector2(x, y))
