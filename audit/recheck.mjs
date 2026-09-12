@@ -783,12 +783,25 @@ async function measureSeam(page, postId) {
   }
   const c81 = check(81, '[a11y] #a11y-bridge is populated')
   if (c81) {
-    const b = await page.evaluate(() => {
-      const el = document.getElementById('a11y-bridge')
-      return { len: (el?.textContent || '').trim().length, sample: (el?.textContent || '').trim().slice(0, 90) }
-    })
-    note(JSON.stringify(b))
-    verdict(b.len > 10, `bridge has ${b.len} chars: "${b.sample}"`)
+    // The bridge mirrors the CURRENT mode, and three of the four announcements
+    // are legitimately short ('model view', 'thread map', 'studio'), so a
+    // length threshold measures the wrong thing. What assistive tech needs is
+    // that it says where you are and that it follows you between modes.
+    const read = () => page.evaluate(() => ({
+      mode: window.__form0.__mode(),
+      text: (document.getElementById('a11y-bridge')?.textContent || '').trim(),
+    }))
+    await page.evaluate(() => { location.hash = '#/board' })
+    await sleep(1500)
+    const onBoard = await read()
+    await openViewer(page, posts.byFlavour.b, 9000)
+    const inViewer = await read()
+    note(`board: mode=${onBoard.mode} bridge="${onBoard.text}"`)
+    note(`viewer: mode=${inViewer.mode} bridge="${inViewer.text}"`)
+    const okBoard = onBoard.mode === 'board' && /board/i.test(onBoard.text)
+    const okViewer = inViewer.mode === 'viewer' && /model view/i.test(inViewer.text)
+    verdict(okBoard && okViewer && onBoard.text !== inViewer.text,
+      `bridge follows the mode: "${onBoard.text}" -> "${inViewer.text}"`)
   }
 
   // ---- #73 legend glyph
@@ -814,27 +827,30 @@ async function measureSeam(page, postId) {
   const c61 = check(61, '[studio] Escape closes the export review, keeps the studio')
   if (c61) {
     await page.evaluate(() => { location.hash = '#/studio' })
-    await sleep(2500)
-    // import the rig's animated GLB through the real file chooser path
-    const imported = await page.evaluate(async () => {
-      const url = 'https://localhost:8443/models/a.glb'
-      const res = await fetch(url)
-      const buf = new Uint8Array(await res.arrayBuffer())
-      const file = new File([buf], 'a.glb', { type: 'model/gltf-binary' })
-      const dt = new DataTransfer()
-      dt.items.add(file)
-      const input = document.getElementById('file-input')
-      input.files = dt.files
-      input.dispatchEvent(new Event('change', { bubbles: true }))
-      return buf.length
+    await page.waitForFunction(() => window.__form0.engine.activeScene === window.__form0.studio.scene, null, { timeout: 20000 })
+    // The studio's change listener is registered BY the import button (main.ts
+    // pickStudioFile), so dispatching 'change' on #file-input without clicking
+    // it feeds nothing to the studio — the review then never opens because
+    // hasContent() is false. This is the repo's own path (verify-publish.mjs).
+    await page.evaluate(() => document.querySelector('#btn-studio-import')?.click())
+    await sleep(400)
+    const bytes = await page.evaluate(async () => {
+      const r = await fetch('https://localhost:8443/models/a.glb')
+      return [...new Uint8Array(await r.arrayBuffer())]
     })
-    note(`imported ${imported} bytes into the studio`)
-    await sleep(6000)
+    await page.setInputFiles('#file-input', { name: 'a.glb', mimeType: 'model/gltf-binary', buffer: Buffer.from(bytes) })
+    await page.waitForFunction(() => window.__form0.studio.currentModel !== null, null, { timeout: 30000 })
+    note(`imported ${bytes.length} bytes; studio.hasContent=${await page.evaluate(() => window.__form0.studio.hasContent())}`)
+
     await page.evaluate(() => document.getElementById('btn-studio-publish')?.click())
-    await sleep(6000)
+    await page.waitForFunction(() => !document.getElementById('export-review').hidden, null, { timeout: 30000 })
+      .catch(() => { /* reported below */ })
     const openState = await page.evaluate(() => ({
       review: getComputedStyle(document.getElementById('export-review')).display,
+      hidden: document.getElementById('export-review').hidden,
       mode: window.__form0.__mode(),
+      sheet: !document.getElementById('error-sheet')?.hidden,
+      status: document.getElementById('studio-status')?.textContent ?? '',
     }))
     note(`publish -> ${JSON.stringify(openState)}`)
     await page.keyboard.press('Escape')
@@ -842,10 +858,13 @@ async function measureSeam(page, postId) {
     const after = await page.evaluate(() => ({
       review: getComputedStyle(document.getElementById('export-review')).display,
       mode: window.__form0.__mode(),
+      model: window.__form0.studio.currentModel !== null,
     }))
     note(`Escape -> ${JSON.stringify(after)}`)
-    verdict(openState.review !== 'none' && after.review === 'none' && after.mode === 'studio',
-      'the review closes and the studio survives')
+    verdict(!openState.hidden && after.review === 'none' && after.mode === 'studio' && after.model,
+      `first Escape closes the review (display ${openState.review} -> ${after.review}) and keeps the studio with its model`)
+    await page.evaluate(() => { location.hash = '#/board' })
+    await sleep(1200)
   }
 
   // ---- #67 text triangle budget
