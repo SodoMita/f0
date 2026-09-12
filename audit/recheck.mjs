@@ -300,15 +300,19 @@ async function shadowDiff(onBuf, offBuf) {
         idleMs: Math.round(performance.now() - b['lastScrollAt']),
       }
     })
+    // Wait for the feed to LAND on a band, not merely to look idle: breaking
+    // on the first idle sample is exactly how the original bug hid (the snap
+    // was still owed, nothing had scheduled the frame that would arm it).
+    // Polling from here does not wake the render loop, so a quiet board stays
+    // quiet and the check cannot be masked by unrelated activity.
     const t0 = Date.now()
     let snap = await read()
-    for (let i = 0; i < 60; i++) {
-      await sleep(250)
+    for (let i = 0; i < 40 && !(snap.off !== null && snap.off < 0.1); i++) {
+      await sleep(500)
       snap = await read()
-      if (!snap.settle && !snap.snapping && Math.abs(snap.vel) < 0.02 && snap.idleMs > 300) break
     }
     const took = Date.now() - t0
-    note(`settled after ${took}ms: scrollY=${snap.y.toFixed(2)} nearest band top is ${snap.off.toFixed(2)} units away (${snap.bands} bands, pitch ${snap.pitch?.toFixed?.(1)})`)
+    note(`landed after ${took}ms: scrollY=${snap.y.toFixed(2)} nearest band top is ${snap.off.toFixed(2)} units away (${snap.bands} bands, pitch ${snap.pitch?.toFixed?.(1)})`)
     note(`state: pendingSettle=${snap.settle} snapping=${snap.snapping} velocity=${snap.vel.toFixed(4)} snapTarget=${snap.target.toFixed(2)}`)
     verdict(snap.bands > 1 && snap.off < 0.1,
       `feed rests ${snap.off.toFixed(3)} units from a band top (pitch ${snap.pitch?.toFixed?.(1)} = ${((100 * snap.off) / (snap.pitch ?? 1)).toFixed(1)}% of a row)`)

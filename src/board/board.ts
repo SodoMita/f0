@@ -174,6 +174,8 @@ export class Board {
   private lastSnapScroll = -1
   /** scrollY where a snap made no progress (clamped) — do not retry it. */
   private snapGaveUpAt = Number.NaN
+  /** Deferred frame that wakes the snap once the feed has been idle 240 ms. */
+  private snapKick: number | null = null
   /** reply counts survive slot recycling */
   private replyCounts = new Map<string, number>()
   private spinStep = -1
@@ -1232,12 +1234,19 @@ export class Board {
         }
       } else if (owed && !gaveUp && !this.pendingSettle && Math.abs(this.velocity) < 0.02) {
         // The loop is demand-driven and the arm above needs a frame to run
-        // 240 ms AFTER the last scroll — by which point nothing is left to
-        // invalidate, so on a quiet board the snap simply never happened and
-        // the feed rested mid-row (audit #68, still failing after the first
-        // fix). Hold one frame pending while a snap is owed; it stops the
-        // moment the feed lands on a band.
+        // 240 ms AFTER the last scroll — by which point the glide has stopped
+        // invalidating, so on a quiet board no frame ever came and the feed
+        // rested mid-row (audit #68). Invalidating from here is not enough:
+        // this branch only runs if a frame ALREADY arrived, and it was the
+        // absence of one that broke it. Schedule the wake-up instead — exactly
+        // one deferred frame per owed snap, cancelled the moment it lands.
         this.invalidate()
+        if (this.snapKick === null) {
+          this.snapKick = window.setTimeout(() => {
+            this.snapKick = null
+            this.invalidate()
+          }, 260)
+        }
       }
     }
   }
@@ -1467,6 +1476,7 @@ export class Board {
   }
 
   dispose(): void {
+    if (this.snapKick !== null) { clearTimeout(this.snapKick); this.snapKick = null }
     for (const c of this.cards) this.release(c)
     for (const l of this.seps) l.dispose()
     this.seps = []

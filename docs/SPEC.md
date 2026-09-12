@@ -1666,13 +1666,20 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     units off a band top = 29% of a row, with `pendingSettle` false and
     velocity 0.005); whether it snapped at all depended on unrelated activity
     happening to keep frames coming (audit #68, still failing after the first
-    fix). The update now holds ONE frame pending while a snap is owed and
-    stops the moment the feed lands on a band. A snap that cannot move
+    fix). Invalidating from inside the update is NOT enough either: that code
+    only runs if a frame already arrived, and the missing frame was the whole
+    problem — the first attempt passed when run alone and failed the full
+    suite, where a hovering pointer happened to wake the loop. So an owed snap
+    now schedules its own wake-up: one deferred frame ~260 ms out, cancelled
+    the moment the feed lands, cleared on dispose. A snap that cannot move
     (clamped at an edge) is latched by scrollY so it is not retried every
     frame, and `layout()` clears the latch when the bands change.
-    Guard: `audit/recheck.mjs` #68 — the feed rests 0.000 units from a band
-    top, polling for the settled state (the snap arms only once the deferred
-    loads finish, ~4 s on the rig).
+    General rule: in a demand-driven loop, any time-gated behaviour must
+    schedule the frame that will evaluate its own gate.
+    Guard: `audit/recheck.mjs` #68 — the feed LANDS 0.00 units from a band top,
+    polled until it lands rather than until it merely looks idle (breaking on
+    the first idle sample is exactly how this bug hid); ~7.5 s after the wheel,
+    because the snap still waits for the deferred loads to settle first.
 
 98. THE HUD RAILS WRAP ON PHONES (2026-09-12): the viewer bar carries about
     ten controls (close/prev/next/position/play/fit/camera dots/sound/thread/
