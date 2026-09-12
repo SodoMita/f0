@@ -368,31 +368,55 @@ async function measureSeam(page, postId) {
     const state = await page.evaluate(() => {
       const v = window.__form0.viewer
       const btn = document.getElementById('btn-sound')
-      return { soundCount: v.soundCount, hidden: btn?.hidden ?? null, metaHasAudio: v.meta?.hasAudio ?? null }
+      return { soundCount: v.soundCount, hidden: btn?.hidden ?? null, display: btn ? getComputedStyle(btn).display : null }
     })
     note(`flavour e (no audio in the GLB): ${JSON.stringify(state)}`)
-    const okSilent = state.soundCount === 0 && state.hidden === true
-    // now the audio-bearing flavour
+    const okSilent = state.soundCount === 0 && state.hidden === true && state.display === 'none'
+
     await openViewer(page, posts.byFlavour.a, 9000)
     const s2 = await page.evaluate(() => {
       const v = window.__form0.viewer
       const btn = document.getElementById('btn-sound')
-      return { soundCount: v.soundCount, hidden: btn?.hidden ?? null, metaHasAudio: v.meta?.hasAudio ?? null }
+      const s = v['soundOwner'].sounds[0]
+      return {
+        soundCount: v.soundCount, hidden: btn?.hidden ?? null,
+        loop: s?.loop ?? null, clip: +(s?._audioBuffer?.duration ?? -1).toFixed(2), observers: s?.onEndedObservable.observers.length ?? null,
+      }
     })
-    note(`flavour a (embeds a 440 Hz beep): ${JSON.stringify(s2)}`)
-    let plays = null
-    if (s2.soundCount > 0) {
+    note(`flavour a (embeds a beep, glTF says loop:true): ${JSON.stringify(s2)}`)
+
+    let looping = null, oneShot = null
+    if (s2.soundCount > 0 && s2.clip > 0) {
+      // 1. A clip the glTF asked to loop must still be sounding several clip
+      //    lengths after the tap (Babylon hardcodes loop:false on clip Sounds
+      //    and parks the real flag on a loader-private WeightedSound).
       await page.click('#btn-sound')
-      await sleep(1800)
-      plays = await page.evaluate(() => {
-        const v = window.__form0.viewer
-        return { soundOn: v.soundOn, classOn: document.getElementById('btn-sound')?.classList.contains('on') ?? null }
-      })
-      note(`after clicking SOUND: ${JSON.stringify(plays)}`)
+      await sleep(Math.round(s2.clip * 1000 * 5) + 300)
+      looping = await page.evaluate(() => ({
+        soundOn: window.__form0.viewer.soundOn,
+        lit: document.getElementById('btn-sound')?.classList.contains('on') ?? null,
+      }))
+      note(`5x the clip length after the tap: ${JSON.stringify(looping)}`)
+
+      // 2. A ONE-SHOT clip ending on its own must un-light the button; before
+      //    the end hook it stayed lit over silence.
+      await page.click('#btn-sound')            // pause
+      await page.evaluate(() => { for (const s of window.__form0.viewer['soundOwner'].sounds) s.loop = false })
+      await page.click('#btn-sound')            // play the one-shot
+      const litEarly = await page.evaluate(() => document.getElementById('btn-sound')?.classList.contains('on') ?? null)
+      await sleep(Math.round(s2.clip * 1000 * 3) + 200)
+      oneShot = await page.evaluate(() => ({
+        soundOn: window.__form0.viewer.soundOn,
+        lit: document.getElementById('btn-sound')?.classList.contains('on') ?? null,
+      }))
+      note(`one-shot: lit right after the tap=${litEarly}, ${JSON.stringify(oneShot)} once it has ended`)
+      await page.evaluate(() => { for (const s of window.__form0.viewer['soundOwner'].sounds) s.loop = true })
     }
-    // The button must be hidden for a silent model and, when shown, actually play.
-    verdict(okSilent && (s2.soundCount === 0 || (plays && plays.soundOn === true)),
-      `silent model hides the control (${JSON.stringify(state)}), audio model plays (${JSON.stringify(plays)})`)
+
+    const okLoop = !!looping && looping.soundOn === true && looping.lit === true
+    const okEnded = !!oneShot && oneShot.soundOn === false && oneShot.lit === false
+    verdict(okSilent && s2.loop === true && okLoop && okEnded,
+      `silent model hides the control; glTF loop:true survives (loop=${s2.loop}, still sounding 5 clip lengths in); a one-shot un-lights itself (lit=${oneShot?.lit})`)
   }
 
   // ---- #79 loading indicator + rail hidden until the model draws
@@ -467,25 +491,58 @@ async function measureSeam(page, postId) {
   if (c76 || c77) {
     const page = await boot({ viewport: { width: 390, height: 780 }, isMobile: true, deviceScaleFactor: 2 })
     const posts = await rigPosts(page)
-    await openViewer(page, posts.byFlavour.b, 10000)
+    // #76 measures the ANIMATED flavour: it is the only one that populates the
+    // animation rail (clip dropdown + timeline + speed + play/stop), which is
+    // the widest bar in the viewer and the one most likely to overflow.
+    await openViewer(page, posts.byFlavour.a, 10000)
     if (c76) {
       const bar = await page.evaluate(() => {
-        const b = document.getElementById('viewer-bar')
-        const rail = b?.querySelector('.rail:not(.anim-rail)')
-        const btns = [...(rail?.querySelectorAll('button') ?? [])].filter((x) => x.offsetWidth || x.offsetHeight)
+        const rails = (sel) => [...document.querySelectorAll(sel)]
+        const measure = (rail) => {
+          const btns = [...rail.querySelectorAll('button, select, input')].filter((x) => x.offsetWidth || x.offsetHeight)
+          const cs = getComputedStyle(rail)
+          return {
+            cls: rail.className,
+            l: +rail.getBoundingClientRect().left.toFixed(0),
+            r: +rail.getBoundingClientRect().right.toFixed(0),
+            h: +rail.getBoundingClientRect().height.toFixed(0),
+            wrap: cs.flexWrap,
+            scrollable: rail.scrollWidth > rail.clientWidth + 1,
+            items: btns.map((x) => {
+              const b = x.getBoundingClientRect()
+              return { id: x.id || x.className.split(' ')[0], tag: x.tagName, l: +b.left.toFixed(0), r: +b.right.toFixed(0), w: +b.width.toFixed(0), h: +b.height.toFixed(0) }
+            }),
+          }
+        }
         return {
-          vw: window.innerWidth,
-          railRect: rail ? { l: +rail.getBoundingClientRect().left.toFixed(0), r: +rail.getBoundingClientRect().right.toFixed(0), w: +rail.getBoundingClientRect().width.toFixed(0) } : null,
-          scrollable: rail ? rail.scrollWidth > rail.clientWidth + 1 : null,
-          buttons: btns.map((x) => ({ id: x.id, l: +x.getBoundingClientRect().left.toFixed(0), r: +x.getBoundingClientRect().right.toFixed(0), vis: x.getBoundingClientRect().right <= window.innerWidth + 1 && x.getBoundingClientRect().left >= -1 })),
+          vw: window.innerWidth, vh: window.innerHeight,
+          rails: [...rails('#topbar'), ...rails('#viewer-bar .rail')].map(measure),
         }
       })
-      note(`viewport ${bar.vw}px rail ${JSON.stringify(bar.railRect)} scrollable=${bar.scrollable}`)
-      note(`buttons: ${bar.buttons.map((b) => `${b.id}[${b.l}-${b.r}]${b.vis ? '' : 'OFF'}`).join(' ')}`)
-      const off = bar.buttons.filter((b) => !b.vis)
-      verdict(off.length === 0, off.length ? `${off.length} button(s) off-screen: ${off.map((b) => b.id).join(', ')}` : 'every viewer-bar button is on-screen')
+      const off = []
+      const tiny = []
+      const short = []
+      for (const r of bar.rails) {
+        note(`${r.cls || '#topbar'} wrap=${r.wrap} scrollable=${r.scrollable} x ${r.l}..${r.r} h ${r.h} @${bar.vw}x${bar.vh}`)
+        note(`  ${r.items.map((i) => `${i.id}[${i.l}-${i.r}]`).join(' ')}`)
+        for (const i of r.items) {
+          if (i.r > bar.vw + 1 || i.l < -1) off.push(`${i.id}@${i.l}-${i.r}`)
+          // AGENTS 9k: HUD *buttons* stay >= 30px on phones (they are 42px).
+          // The anim rail's select / speed input keep their desktop heights and
+          // are reported, not failed — they are not what 9k constrains.
+          if (i.h < 30 && i.tag === 'BUTTON') tiny.push(`${i.id} ${i.w}x${i.h}`)
+          else if (i.h < 30) short.push(`${i.id} ${i.w}x${i.h}`)
+        }
+        if (r.scrollable) off.push(`${r.cls || 'topbar'} scrolls sideways`)
+      }
+      if (short.length) note(`non-button controls under 30px (desktop sizing, not AGENTS 9k): ${short.join(', ')}`)
+      verdict(off.length === 0 && tiny.length === 0,
+        off.length || tiny.length
+          ? `unreachable: ${[...off, ...tiny].join(', ')}`
+          : `every control on-screen at ${bar.vw}px, no sideways scroll, button targets >= 30px`)
     }
     if (c77) {
+      await openViewer(page, posts.byFlavour.b, 10000)   // two saturated cubes, no animation
       const fit = await page.evaluate(() => {
         const f0 = window.__form0
         const engine = f0.engine.engine

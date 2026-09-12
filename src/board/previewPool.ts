@@ -691,7 +691,7 @@ export class PreviewPool {
       // Claim the model's sounds even for STATIC posts so clearSlotModel can
       // dispose them — otherwise they stay registered (and silent) in the
       // stage scene's mainSoundTrack for the whole session.
-      slot.sounds = claimModelSounds(this.stage, container, soundBaseline, this.claimedSounds)
+      slot.sounds = claimModelSounds(this.stage, container, soundBaseline, this.claimedSounds, model.sha256)
       // Spatial audio (2D mode): the stage layout is a fake strip (index *
       // 800), so drop the loader's node attachment and anchor at the REAL
       // card position via the soundPosition provider (spatial.ts). The

@@ -1487,6 +1487,8 @@ async function boot(): Promise<void> {
   btnPlay.addEventListener('click', () => { viewer.toggleAnimation(); syncPlay() })
   btnFit.addEventListener('click', () => viewer.refit())
   btnSound.addEventListener('click', () => { viewer.toggleSound(); syncSoundButton() })
+  // A one-shot clip ending on its own must un-light the button (audit #82).
+  viewer.onSoundStateChange = () => syncSoundButton()
 
   /** Model sound button: visible only when the model carries audio, lit
    *  while it plays (spec: sound always needs an explicit tap, never
