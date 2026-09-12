@@ -103,6 +103,34 @@ export function handoffContainer(
     }
   }
 
+  // ----- source→clone node pairing (name-based FIFO) -----
+  // Built ONCE, used twice: camera clones re-parent to the clone of their
+  // source parent (below), and MSFT_audio_emitter sounds re-attach to the
+  // clone of their emitter node (below). The clone tree mirrors the source
+  // tree in order and clone names are `${nameHint}-<source name>`, so a
+  // per-name FIFO lines up i-th with i-th.
+  const srcByName = new Map<string, Node[]>()
+  const collectSrc = (n: Node): void => {
+    const arr = srcByName.get(n.name)
+    if (arr) arr.push(n)
+    else srcByName.set(n.name, [n])
+  }
+  for (const r of source.rootNodes) {
+    collectSrc(r)
+    for (const c of r.getDescendants(false)) collectSrc(c)
+  }
+  const cloneOfSrc = new Map<Node, Node>()
+  const pairClone = (c: Node): void => {
+    const srcName = c.name.startsWith(nameHint + '-') ? c.name.slice(nameHint.length + 1) : c.name
+    const arr = srcByName.get(srcName)
+    const s = arr ? arr.shift() : undefined
+    if (s) cloneOfSrc.set(s, c)
+  }
+  for (const root of entries.rootNodes) {
+    pairClone(root)
+    for (const child of root.getDescendants(false)) pairClone(child)
+  }
+
   // ----- authored cameras -----
   // instantiateModelsToScene clones meshes / materials / skeletons /
   // animationGroups but NOT cameras — the GLB's authored cameras must be
@@ -111,12 +139,27 @@ export function handoffContainer(
   // other node.
   const cameraClones: Camera[] = []
   for (const cam of source.cameras) {
+    // Hand off only cameras that belong to the MODEL's node tree. The
+    // preview pool keeps its own parentless staging cameras ("slot-cam-N")
+    // in the same scene; cloning those produced ghost camera dots that
+    // seeded the orbit from the world origin — the view ended up INSIDE the
+    // model ("authored-camera switch does not change the view", audit #55).
+    // A glTF camera is always a node's camera, so a model camera's parent is
+    // always in cloneOfSrc.
+    const srcParent = (cam as Node).parent
+    if (!srcParent || !cloneOfSrc.has(srcParent)) continue
+    // Camera.clone() copies the LOCAL transform but NOT the parent: an
+    // imported camera hangs under its node (all its pose lives in that
+    // parent), so re-parent the clone to the parent's clone or it collapses
+    // to the origin.
     const clone = cam.clone(`${nameHint}-cam-${cam.name}`)
     if (!clone) continue
+    clone.parent = cloneOfSrc.get(srcParent) ?? null
     sourceScene.removeCamera(clone)
     ;(clone as unknown as { _scene: Scene })._scene = targetScene
     targetScene.addCamera(clone)
     cameraClones.push(clone)
+    ;(clone as unknown as { computeWorldMatrix: (force?: boolean) => unknown }).computeWorldMatrix(true)
   }
   // Lights: instantiateModelsToScene does not clone lights either; the
   // byte-loading path (LoadAssetContainerAsync -> addAllToScene) keeps
@@ -147,30 +190,7 @@ export function handoffContainer(
   // instantiateModelsToScene does not clone sounds, and a Sound is not a
   // Node — it follows its `_connectedTransformNode` for positioning. Without
   // re-attaching, the hand-off would leave the viewer silent (commit()
-  // disposes the stage scene's sounds). Pairing is by name: the clone tree
-  // mirrors the source tree in order, and clone names are
-  // `${nameHint}-<source name>`, so a per-name FIFO lines up i-th with i-th.
-  const srcByName = new Map<string, Node[]>()
-  const collectSrc = (n: Node): void => {
-    const arr = srcByName.get(n.name)
-    if (arr) arr.push(n)
-    else srcByName.set(n.name, [n])
-  }
-  for (const r of source.rootNodes) {
-    collectSrc(r)
-    for (const c of r.getDescendants(false)) collectSrc(c)
-  }
-  const cloneOfSrc = new Map<Node, Node>()
-  const pairClone = (c: Node): void => {
-    const srcName = c.name.startsWith(nameHint + '-') ? c.name.slice(nameHint.length + 1) : c.name
-    const arr = srcByName.get(srcName)
-    const s = arr ? arr.shift() : undefined
-    if (s) cloneOfSrc.set(s, c)
-  }
-  for (const root of entries.rootNodes) {
-    pairClone(root)
-    for (const child of root.getDescendants(false)) pairClone(child)
-  }
+  // disposes the stage scene's sounds).
   const transferred: Sound[] = []
   for (const s of [...sourceScene.mainSoundTrack.soundCollection]) {
     const node = (s as unknown as { _connectedTransformNode?: Node })._connectedTransformNode ?? null

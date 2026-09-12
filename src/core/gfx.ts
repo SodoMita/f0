@@ -161,7 +161,9 @@ export function makeContactShadow(scene: Scene, name: string): DynamicTexture {
   ctx.scale(1, 0.5)
   const g = ctx.createRadialGradient(0, 0, 0, 0, 0, S / 2)
   g.addColorStop(0, 'rgba(255,255,255,0.85)')
-  g.addColorStop(0.45, 'rgba(255,255,255,0.28)')
+  g.addColorStop(0.4, 'rgba(255,255,255,0.40)')
+  g.addColorStop(0.68, 'rgba(255,255,255,0.14)')
+  g.addColorStop(0.86, 'rgba(255,255,255,0.035)')
   g.addColorStop(1, 'rgba(255,255,255,0)')
   ctx.fillStyle = g
   ctx.beginPath()
