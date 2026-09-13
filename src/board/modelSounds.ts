@@ -3,18 +3,26 @@ import type { Sound } from '@babylonjs/core/Audio/sound'
 import type { TransformNode } from '@babylonjs/core/Meshes/transformNode'
 import type { Scene } from '@babylonjs/core/scene'
 import '@babylonjs/core/Audio/audioSceneComponent'
+import { applyAudioFacts, audioFacts } from '../model/audioFacts'
 
 export interface SoundOwner {
   sounds: Sound[]
   soundTimer: number | null
 }
 
-/** Assign newly loaded MSFT_audio_emitter sounds to exactly one model slot. */
+/**
+ * Assign newly loaded MSFT_audio_emitter sounds to exactly one model slot,
+ * and restore what the extension asked for (`loop`, `volume`) — the loader
+ * hardcodes `loop: false` on clip Sounds and keeps the real flag on a
+ * loader-private WeightedSound, so nothing loops without this (audit #82).
+ * `sha256` is the model's hash: the facts were filed under it at validation.
+ */
 export function claimModelSounds(
   scene: Scene,
   container: AssetContainer,
   baseline: number,
   claimed: Set<Sound>,
+  sha256?: string,
 ): Sound[] {
   const all = scene.mainSoundTrack.soundCollection
   const meshes = new Set<unknown>(container.meshes)
@@ -30,6 +38,7 @@ export function claimModelSounds(
     if (claimed.has(sound) || attached(sound)) continue
     claimed.add(sound); owned.push(sound)
   }
+  applyAudioFacts(owned, audioFacts(sha256))
   return owned
 }
 

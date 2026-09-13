@@ -56,6 +56,7 @@ uniform vec3 tint2;
 uniform vec2 flip;
 uniform float opacity;
 uniform float blend;
+uniform float rescue;
 void main() {
   vec2 uv = vec2(flip.x > 0.5 ? 1.0 - vUV.x : vUV.x, flip.y > 0.5 ? 1.0 - vUV.y : vUV.y);
   // Two-texture crossfade (SPEC CARD "Crossfade 120ms"): blend ramps 0..1
@@ -68,8 +69,16 @@ void main() {
   // Some opaque glTF materials write RGB but leave alpha at 0 (the
   // framebuffer clear). Treat any non-black RGB as coverage so those
   // models still show on a transparent card.
+  //
+  // ONLY for model renders (the raw/rtt texture kinds). App-drawn "dyn"
+  // textures (contact shadows, spinners, badges, pills, frames) carry a real
+  // alpha ramp whose faint tail sits below 1/64: rescuing it clamps that tail
+  // to OPAQUE and draws a hard edge where the quad ends — the horizontal seam
+  // the viewer's floor shadow cut across the backdrop (audit #75: 45% dark in
+  // 4 rows, exactly the shadow's own strength). The rescue uniform is keyed to
+  // the texture kind in setCardFlip() below.
   float cover = t.a;
-  if (cover < 0.016) {
+  if (rescue > 0.5 && cover < 0.016) {
     float m = max(t.r, max(t.g, t.b));
     if (m > 0.016) cover = 1.0;
   }
@@ -101,7 +110,7 @@ export function makeCardMaterial(scene: Scene, blend = true): ShaderMaterial {
   }
   const mat = new ShaderMaterial(blend ? 'card-shader' : 'card-shader-opaque', scene, 'card', {
     attributes: ['position', 'uv'],
-    uniforms: ['worldViewProjection', 'tint', 'tint2', 'flip', 'opacity', 'blend'],
+    uniforms: ['worldViewProjection', 'tint', 'tint2', 'flip', 'opacity', 'blend', 'rescue'],
     samplers: ['tex', 'tex2'],
     // NOTE: `needAlphaBlending` must be passed as an OPTION. Calling
     // `mat.needAlphaBlending()` (as the old code did) is a *getter*, not a
@@ -122,6 +131,7 @@ export function makeCardMaterial(scene: Scene, blend = true): ShaderMaterial {
   mat.setVector2('flip', new Vector2(0, 0))
   mat.setFloat('opacity', 1)
   mat.setFloat('blend', 0)
+  mat.setFloat('rescue', 1)
   return mat
 }
 
@@ -167,10 +177,14 @@ export function setCardBlend(mat: ShaderMaterial, v: number): void {
   mat.setFloat('blend', Math.max(0, Math.min(1, v)))
 }
 
-/** Sampling orientation for a texture kind (deterministic; see header). */
+/** Sampling orientation for a texture kind (deterministic; see header).
+ *  Also selects the coverage policy: model renders (`raw` posters, `rtt`
+ *  live previews) get the alpha-0 rescue, app-drawn `dyn` textures keep
+ *  their real alpha ramp — see the FRAG comment (audit #75). */
 export function setCardFlip(mat: ShaderMaterial, kind: CardTextureKind): void {
   const [x, y] = FLIPS[kind]
   mat.setVector2('flip', new Vector2(x, y))
+  mat.setFloat('rescue', kind === 'dyn' ? 0 : 1)
 }
 
 

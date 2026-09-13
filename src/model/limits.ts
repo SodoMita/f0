@@ -1,4 +1,5 @@
 import { LIMITS } from '../theme'
+import { noteAudioFacts, type AudioEmitterFact } from './audioFacts'
 
 export interface LimitReport {
   ok: boolean
@@ -9,6 +10,11 @@ export interface LimitReport {
     lights: number; skins: number; animations: number; channels: number
     keyframes: number; decodedPixels: number; depth: number
   }
+  /** MSFT_audio_emitter emitters, when the model carries audio. Babylon's
+   *  loader drops their `loop` flag on the floor (see audioFacts.ts), so the
+   *  facts are read here — where the JSON is already parsed — and re-applied
+   *  to the claimed Sounds at play time. */
+  audio?: AudioEmitterFact[]
 }
 
 /** Width/height from a supported image header (up to the first 64 KiB). */
@@ -106,11 +112,15 @@ export function dataUriImageHead(uri: string, maxBytes = 64 * 1024): Uint8Array 
 let cacheEpoch = 0
 const reportByBytes = new WeakMap<Uint8Array, { epoch: number; report: LimitReport }>()
 
-export function validateGLBCached(bytes: Uint8Array, _sha256?: string): LimitReport {
+export function validateGLBCached(bytes: Uint8Array, sha256?: string): LimitReport {
   const hit = reportByBytes.get(bytes)
-  if (hit && hit.epoch === cacheEpoch) return hit.report
+  if (hit && hit.epoch === cacheEpoch) { noteAudioFacts(sha256, hit.report.audio); return hit.report }
   const report = validateGLB(bytes)
   reportByBytes.set(bytes, { epoch: cacheEpoch, report })
+  // The viewer's hand-off path adopts an already-parsed container and never
+  // sees these bytes, so the emitter facts are filed under the model's hash
+  // for it to pick up (audit #82).
+  noteAudioFacts(sha256, report.audio)
   return report
 }
 
@@ -403,6 +413,7 @@ export function validateGLB(bytes: Uint8Array): LimitReport {
     return fail(`decoded texture memory ${(stats.decodedPixels / 1048576).toFixed(0)} MiB > ${(limitDecodedPixels() / 1048576).toFixed(0)} MiB`)
   }
 
+  let audio: AudioEmitterFact[] | undefined
   // SECURITY (hostile-rig audit): embedded audio (MSFT_audio_emitter) is
   // hostile input too. A clip bufferView may be a WAV whose header CLAIMS
   // gigabytes of data while the buffer is ~1 KiB — Babylon's decode fails
@@ -414,6 +425,15 @@ export function validateGLB(bytes: Uint8Array): LimitReport {
     const ext = gltf.extensions?.MSFT_audio_emitter
     if (ext) {
       const clips = Array.isArray(ext.clips) ? ext.clips : []
+      // Same pass, no extra parsing: what each emitter asked for. Babylon
+      // names every clip Sound `emitter.name || 'emitter' + index`, so that
+      // is the key applyAudioFacts() matches on.
+      const emitters = (Array.isArray(ext.emitters) ? ext.emitters : []) as any[]
+      audio = emitters.map((e, i) => ({
+        name: String(e?.name || `emitter${i}`),
+        loop: e?.loop === true,
+        volume: typeof e?.volume === 'number' && e.volume >= 0 ? e.volume : 1,
+      }))
       let audioTotal = 0
       const AUDIO_MIMES = /^audio\/(wav|mpeg|mp3|ogg|mp4|x-wav|x-mpeg)$/i
       for (const clip of clips) {
@@ -463,5 +483,5 @@ export function validateGLB(bytes: Uint8Array): LimitReport {
   for (let i = 0; i < nodes.length; i++) stats.depth = Math.max(stats.depth, depthOf(i, new Set()))
   if (stats.depth > LIMITS.sceneDepth) return fail(`scene graph depth ${stats.depth} > ${LIMITS.sceneDepth}`)
 
-  return { ok: true, stats }
+  return { ok: true, stats, audio }
 }

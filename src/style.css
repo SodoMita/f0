@@ -611,6 +611,19 @@ body.show-perf #perf-overlay { display: block; }
   .brand { display: none; }
   .vbtn .vlabel { display: none; }
   .rail { gap: 4px; padding: 8px; }
+  /* The viewer rail carries ~10 buttons (close/prev/next/play/fit/dots/sound/
+     thread/reply/save/info) = ~460px of 42px targets, which no phone row
+     holds. The rail's sideways scroll hid THREAD/REPLY/SAVE/INFO past the
+     right edge where nobody finds them (audit #76: measured at x 390-524 on a
+     390px viewport). Wrap instead — `wrap` only breaks the row when the
+     content really does not fit, and the 42px targets stay 42px (AGENTS 9k).
+     Separators are dropped: a wrapped row must not end on a dangling rule. */
+  .rail { flex-wrap: wrap; justify-content: center; row-gap: 6px; overflow-x: visible; }
+  .rail-sep { display: none; }
+  #viewer-bar { padding: 0 8px 12px; }
+  /* The animation rail wraps too: its clip dropdown + timeline + speed would
+     otherwise scroll sideways the same way. */
+  .anim-rail #anim-timeline { flex: 1 1 120px; }
 }
 
 /* ---------- first-run legend (kestrel) ---------- */

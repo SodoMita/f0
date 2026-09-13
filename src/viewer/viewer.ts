@@ -17,6 +17,7 @@ import '../model/gltf'
 import type { FormEngine } from '../core/engine'
 import type { ThreadMeta } from '../protocol/thread-index'
 import { validateGLBCached } from '../model/limits'
+import { applyAudioFacts, audioFacts } from '../model/audioFacts'
 import { worldBox, frameDistance, dominantFacing } from '../model/facing'
 import { playModelSounds } from '../board/modelSounds'
 import { attachSound, spatializeSound } from '../audio/spatial'
@@ -315,7 +316,7 @@ export class Viewer {
     graphics.setShadowCasters(this.scene, container.meshes.filter((m) => m.getTotalVertices() > 0))
     this.syncHighlight()
     this.imported = container.cameras.slice()
-    this.claimSounds(container)
+    this.claimSounds(container, meta.sha256)
 
     let verts = 0
     for (const m of container.meshes) verts += m.getTotalVertices() || 0
@@ -352,23 +353,38 @@ export class Viewer {
    * stay PAUSED: like the board, sound only starts on an explicit tap
    * (AMENDMENT 87 — the viewer's S key / sound button).
    */
-  private claimSounds(container: AssetContainer): void {
+  private claimSounds(container: AssetContainer, sha256?: string): void {
     const nodes = new Set<unknown>(container.meshes)
     for (const t of container.transformNodes) nodes.add(t)
     for (const r of container.rootNodes) nodes.add(r)
+    const mine: Sound[] = []
     for (const s of this.scene.mainSoundTrack.soundCollection) {
       if (this.claimedSounds.has(s)) continue
       const attached = (s as unknown as { _connectedTransformNode?: TransformNode })._connectedTransformNode ?? null
       if (attached && nodes.has(attached)) {
         this.claimedSounds.add(s)
         this.soundOwner.sounds.push(s)
+        mine.push(s)
         // Spatial post audio: the viewer orbits the real model, so sounds
         // follow their emitter (the scene's active camera is the listener).
         spatializeSound(s)
         attachSound(s, attached)
+        // The HUD's SOUND button reads `soundOn`, which is derived from
+        // isPlaying — so it stayed lit after a one-shot clip ran out and
+        // claimed the model was still sounding (audit #82). A looping clip
+        // never fires onEnded, so this cannot flicker a live loop off.
+        s.onEndedObservable.add(() => { this.form.kick(); this.onSoundStateChange?.() })
       }
     }
+    // Restore what MSFT_audio_emitter asked for: Babylon hardcodes
+    // `loop: false` on clip Sounds and parks the real flag on a
+    // loader-private WeightedSound, so a `loop: true` glTF played once.
+    applyAudioFacts(mine, audioFacts(sha256))
   }
+
+  /** Set by the HUD: called when a claimed clip finishes on its own, so the
+   *  SOUND button can stop claiming a finished clip is still playing. */
+  onSoundStateChange: (() => void) | null = null
 
   get soundCount(): number { return this.soundOwner.sounds.length }
   get soundOn(): boolean { return this.soundOwner.sounds.some((s) => s.isPlaying) }

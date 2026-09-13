@@ -433,7 +433,7 @@ export class Direct3DPool {
       if (!alive()) { container.dispose(); throw new Error('slot recycled') }
       container.addAllToScene()
       slot.container = container // clearSlot() owns the cleanup from here on
-      const sounds = claimModelSounds(this.scene, container, soundBaseline, this.claimedSounds)
+      const sounds = claimModelSounds(this.scene, container, soundBaseline, this.claimedSounds, model.sha256)
       this.install(slot, postId, container, model.cameraIndex, sounds)
     } catch {
       // One cleanup path: clearSlot() disposes the container, the transform
