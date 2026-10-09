@@ -19,6 +19,7 @@ import '../model/gltf'
 import { configureDraco } from '../model/draco'
 import { dominantFacing, worldBox, frameDistance } from '../model/facing'
 import { validateGLBCached } from '../model/limits'
+import { cameraFramesBox } from '../model/poster'
 import { graphics } from '../render/graphics'
 import { claimModelSounds, playModelSounds } from './modelSounds'
 import { attachSound, bindSceneListener, detachSound, moveSound, spatializeSounds } from '../audio/spatial'
@@ -645,8 +646,16 @@ export class PreviewPool {
 
       // Camera policy matches the poster: the model's own camera when it has
       // one (v3 preview-camera index → first imported), auto-fit as fallback.
+      // AMENDMENT 6 fallback: an authored camera that frames nothing (its
+      // frustum misses the model's box at this slot's offset) falls back to
+      // auto-fit, exactly as the poster does — never a blank live preview.
       const cameraIndex = model.cameraIndex ?? 0
-      const authored = cameraIndex >= 0 && cameraIndex < container.cameras.length ? container.cameras[cameraIndex] : null
+      const candidate = cameraIndex >= 0 && cameraIndex < container.cameras.length ? container.cameras[cameraIndex] : null
+      let authored: Camera | null = null
+      if (candidate) {
+        ;(candidate as unknown as { computeWorldMatrix: (force?: boolean) => unknown }).computeWorldMatrix(true)
+        if (cameraFramesBox(candidate, min.add(offset), max.add(offset))) authored = candidate
+      }
       // Runtime note: Camera.rotationQuaternion is null until assigned (the
       // .d.ts declares a non-null Quaternion — that is wrong, so any
       // `.copyFrom()` on it throws for models WITH cameras).
@@ -655,7 +664,6 @@ export class PreviewPool {
         // Camera.computeWorldMatrix() takes no arguments (it just reads
         // getWorldMatrix()); to FORCE the recompute after the reparent,
         // call the Node-level method through a cast.
-        ;(authored as unknown as { computeWorldMatrix: (force?: boolean) => unknown }).computeWorldMatrix(true)
         const quat = new Quaternion()
         authored.getWorldMatrix().decompose(undefined, quat, slot.camera.position)
         camQuat.rotationQuaternion = quat
