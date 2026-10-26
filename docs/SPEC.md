@@ -1718,3 +1718,28 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     x ∈ [0,1]) through the app's exact encoder/decoder assets. It is wired
     into `check:unit` through `scripts/check-units.mjs` and is also available
     as `bun run check:draco`.
+
+100. DEPLOY + BUILDS ARE REPRODUCIBLE AND FORWARD-COMPATIBLE
+     (2026-10-26): the standalone HTML is the deployed site, so a build
+     warning is a production risk, not cosmetic. Three issues were fixed
+     together:
+     - `.github/workflows/deploy-pages.yml` installed `bun-version: latest`
+       while `ci.yml` and `.bun-version` were pinned to 1.4.0. The same
+       commit could therefore pass CI with one bundler and deploy with
+       another. The deploy job now uses `bun-version-file: .bun-version`
+       and both jobs have bounded `timeout-minutes`.
+     - `vite.config.ts` and `vite.standalone.config.ts` imported `./csp` and
+       `./vite.config` without extensions. Vite 8's upcoming native config
+       loader rejects that form; they now import `./csp.ts` and
+       `./vite.config.ts`.
+     - `build.rollupOptions.output.inlineDynamicImports: true` is deprecated
+       in Rolldown. The standalone config now sets
+       `build.rolldownOptions.output.codeSplitting: false`, which has the
+       same single-chunk contract that `make-standalone.py` asserts.
+     Guard: `scripts/workflow-unit.mjs` (registered in `check-units.mjs`)
+     asserts the shared Bun pin, frozen installs, Pages artifact contract,
+     job timeouts, explicit config extensions and the non-deprecated
+     single-chunk option. Measured: `bun run check:static` prints zero
+     native-loader/deprecation warnings, emits exactly one standalone JS
+     chunk (5.20 MB HTML), and that HTML boots from `file://` with a canvas
+     and no page errors.

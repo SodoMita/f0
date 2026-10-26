@@ -1,5 +1,5 @@
 import { defineConfig } from 'vite'
-import { WEB_CSP } from './csp'
+import { WEB_CSP } from './csp.ts'
 
 export default defineConfig({
   base: './',

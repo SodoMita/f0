@@ -4,6 +4,21 @@ Claim a task by moving it to **In progress** with your name/date, push, then
 move it to **Done** with a commit reference. One agent per area.
 
 ## Done
+- [x] **Branch integration + deploy/build reliability** (agent arena,
+      2026-10-26, SPEC AMENDMENTS 99–100): all 16 branches ahead of `main`
+      were merged into this branch; five added content, eight were recorded
+      as already-integrated, and the two unrelated-root snapshot branches
+      (`site`, `salvage/dev-rewrite`) were deliberately excluded. See
+      `docs/BRANCH-INTEGRATION.md`. Real fixes landed: live previews now
+      auto-fit when an authored camera frames nothing; `WEB_CSP.connect-src
+      'self'` unblocks the local Draco decoder on plain-HTTP hosts (with a
+      Node round-trip guard in `check:unit`); the Pages deploy now uses the
+      same pinned Bun as CI, both Vite configs use explicit `.ts` imports,
+      and the standalone build uses Rolldown's `codeSplitting: false`.
+      New guard `scripts/workflow-unit.mjs` covers the deploy/config
+      contract. Verified: `bun run check` (all 5 browser suites),
+      `node audit/recheck.mjs` (30/30), nine area-specific browser probes,
+      and a `file://` standalone boot check (canvas present, no page errors).
 - [x] **Agent-browser audit (#53–#82) re-verified in the browser; 4 real
       fixes** (agent arena, 2026-09-12, SPEC AMENDMENTS 95–98): PR #84
       claimed the audit fixed but all thirty issues were still open, so every

@@ -47,6 +47,7 @@ const MANIFEST = {
   'spatial-unit.mjs':     { run: ['bun'],            tier: 'unit' },
   'studio-unit.mjs':      { run: ['bun'],            tier: 'unit' },
   'thread-open-unit.mjs': { run: ['bun'],            tier: 'unit' },
+  'workflow-unit.mjs':    { run: ['node'],           tier: 'unit' },
 }
 
 const TIER = process.env.TIER || 'unit'
