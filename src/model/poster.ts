@@ -274,7 +274,7 @@ function preparePosterMaterials(container: AssetContainer): void {
 }
 
 /** True when the authored camera's frustum overlaps the model's AABB. */
-function cameraFramesBox(cam: Camera, min: Vector3, max: Vector3): boolean {
+export function cameraFramesBox(cam: Camera, min: Vector3, max: Vector3): boolean {
   cam.computeWorldMatrix()
   // getTransformationMatrix() just multiplies the CACHED view and projection
   // matrices, which are still identity for a freshly-loaded glTF camera that
