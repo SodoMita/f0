@@ -1,7 +1,10 @@
 # FORM/0 — UI direction mockups
 
 A static, front-end-only exploration of a more editorial, object-first FORM/0.
-The production Babylon client is intentionally untouched.
+The current HTML screens directly reconstruct the composition of the generated
+concept boards: dashboard gallery, oversized numbered viewer, glowing lateral
+branch map, and instrument-like studio. The production Babylon client is
+intentionally untouched.
 
 ## Pages
 

@@ -3,114 +3,61 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#171714" />
-  <meta name="description" content="FORM/0 interface mockup — the shared world of 3D creations." />
-  <title>FORM/0 — World UI mockup</title>
+  <meta name="theme-color" content="#f1eee4" />
+  <meta name="description" content="FORM/0 world — a wordless multiplayer game of 3D shapes." />
+  <title>FORM/0 — World</title>
   <link rel="stylesheet" href="./mockup.css" />
+  <link rel="stylesheet" href="./ui-v2.css" />
 </head>
 <body>
   <div class="app-shell">
     <aside class="app-rail" aria-label="Primary navigation">
-      <a class="logo" href="./index.html" aria-label="FORM/0 home">F<i>/</i>0</a>
+      <a class="logo icon-only" href="./index.html" data-icon="cube" aria-label="FORM/0 home"></a>
       <nav class="rail-nav">
         <a class="rail-link active icon-only" href="./index.html" data-icon="world" aria-label="world" aria-current="page"></a>
+        <a class="rail-link icon-only" href="./viewer.html" data-icon="orbit" aria-label="viewer"></a>
         <a class="rail-link icon-only" href="./thread.html" data-icon="thread" aria-label="threads"></a>
-        <a class="rail-link create icon-only" href="./studio.html" data-icon="plus" aria-label="create"></a>
-        <a class="rail-link icon-only" href="./viewer.html" data-icon="cube" aria-label="viewer"></a>
-        <button class="rail-link icon-only" type="button" data-icon="sliders" aria-label="settings"></button>
+        <a class="rail-link icon-only" href="./studio.html" data-icon="shapes" aria-label="create"></a>
       </nav>
-      <div class="rail-foot">
-        <span class="signal" title="relays connected"></span>
-        <span class="player-mark">0x</span>
-      </div>
+      <div class="rail-foot"><a class="rail-link icon-only" href="./generated.html" data-icon="sliders" aria-label="concept boards"></a><span class="signal"></span></div>
     </aside>
 
-    <main class="page world-page">
+    <main class="world-page v2-world">
       <header class="world-topbar">
-        <div class="live-kicker"><span class="signal"></span><span>world / live</span></div>
-        <div class="topbar-spacer"></div>
-        <span class="world-count micro-label">028 creations</span>
-        <div class="world-actions">
-          <button class="icon-button icon-only" type="button" data-icon="shuffle" aria-label="shuffle creations"></button>
-          <a class="icon-button icon-only" href="./generated.html" data-icon="spark" aria-label="view generated concept boards"></a>
-        </div>
+        <span class="brand-word">FORM<b>/0</b></span><span class="live-sup">live</span>
+        <span class="topbar-spacer"></span>
+        <div class="world-session micro-label"><span>WORLD 01</span><span><b>28</b> FORMS</span><span class="signal"></span></div>
       </header>
 
-      <section class="world-intro" aria-labelledby="world-title">
-        <h1 class="intro-title" id="world-title">FORM<span class="slash">/</span><br><span class="outlined">WORLD</span></h1>
-        <div class="intro-note">
-          <div class="intro-note-row">
-            <strong>Objects<br>in motion.</strong>
-            <span class="orbit-mark" aria-hidden="true"></span>
-          </div>
-          <p>A shared field of playable 3D creations. Open one, move around it, follow its branches, or add a form of your own.</p>
+      <section class="gallery-board" aria-label="Live world gallery">
+        <div class="gallery-watermark" aria-hidden="true">FORM/<br>WORLD</div>
+        <div class="gallery-grid">
+          <article class="gallery-tile hero" data-tilt>
+            <a class="tile-link" href="./viewer.html" aria-label="Open ORBIT BLOOM"></a>
+            <img src="./assets/orbit-bloom.jpg" alt="Coral loop sculpture floating over a warm studio floor" />
+            <span class="tile-wire" aria-hidden="true"></span>
+            <footer class="tile-meta"><strong>F1.1</strong><span>COMPLEXITY-VAL:<br><i>24</i></span><span>GENESIS-D: 18-08-26<br>AUTHOR-SIG: F/0_ALPHA</span></footer>
+          </article>
+
+          <article class="gallery-tile blue" data-tilt>
+            <a class="tile-link" href="./viewer.html" aria-label="Open STACK BLUE"></a>
+            <img src="./assets/blue-stack.jpg" alt="Blue modular geometric sculpture" />
+            <footer class="tile-meta"><strong>F1.2</strong><span>COMPLEXITY<br><i>31</i></span><span>LIVE</span></footer>
+          </article>
+
+          <article class="gallery-tile glass" data-tilt>
+            <a class="tile-link" href="./viewer.html" aria-label="Open SIGNAL GLASS"></a>
+            <img src="./assets/glass-signal.jpg" alt="Transparent glass infinity sculpture on black" />
+            <footer class="tile-meta"><strong>F1.3</strong><span>COMPLEXITY-VAL:<br><i>57</i></span><span>GENESIS-D: 18-08-26<br>AUTHOR-SIG: F/0_GAMMA</span></footer>
+          </article>
+
+          <article class="gallery-tile mini-a"><a class="tile-link" href="./thread.html" aria-label="Open red orbit branch"></a><div class="synthetic-art"></div><footer class="tile-meta"><strong>V-15</strong><span>↩</span></footer></article>
+          <article class="gallery-tile mini-b"><a class="tile-link" href="./studio.html" aria-label="Open shape studio"></a><div class="wire-art"></div><footer class="tile-meta"><strong>V-21</strong><span>↩</span></footer></article>
+          <article class="gallery-tile mini-c"><a class="tile-link" href="./viewer.html" aria-label="Open blue form"></a><img src="./assets/blue-stack.jpg" alt="Blue form detail" /><footer class="tile-meta"><strong>F2.4</strong><span>08</span></footer></article>
+          <article class="gallery-tile mini-d"><a class="tile-link" href="./viewer.html" aria-label="Open coral form"></a><img src="./assets/orbit-bloom.jpg" alt="Coral form detail" /><footer class="tile-meta"><strong>F2.8</strong><span>11</span></footer></article>
         </div>
+        <div class="gallery-status">SESSION: LIVE&nbsp;&nbsp;|&nbsp;&nbsp;LATENCY: 12ms&nbsp;&nbsp;|&nbsp;&nbsp;CONNECTIONS: 104</div>
       </section>
-
-      <div class="world-toolbar" aria-label="Creation filters">
-        <button class="filter-button active" type="button" data-filter="new">new</button>
-        <button class="filter-button" type="button" data-filter="alive">moving</button>
-        <button class="filter-button" type="button" data-filter="branching">branching</button>
-        <span class="toolbar-rule"></span>
-        <button class="icon-button icon-only" type="button" data-icon="grid" data-density aria-label="toggle gallery density" aria-pressed="false"></button>
-      </div>
-
-      <section class="world-grid" aria-label="3D creations">
-        <article class="form-card wide" data-tilt>
-          <a class="card-link" href="./viewer.html" aria-label="Open ORBIT/BLOOM"></a>
-          <img class="card-visual" src="./assets/orbit-bloom.jpg" alt="Coral ceramic loop sculpture surrounding a lime sphere" />
-          <div class="card-corner"><span class="card-index">07 / 28</span><span class="live-wave" aria-label="animated"><i></i><i></i><i></i><i></i></span></div>
-          <div class="card-foot">
-            <div class="card-code"><strong>ORBIT/BLOOM</strong><span>GLB · 3.8 MB</span></div>
-            <a class="reply-chip" href="./thread.html" data-icon="reply" aria-label="12 branches"><span>12</span></a>
-          </div>
-        </article>
-
-        <article class="form-card tall dark" data-tilt>
-          <a class="card-link" href="./viewer.html" aria-label="Open SIGNAL/GLASS"></a>
-          <img class="card-visual" src="./assets/glass-signal.jpg" alt="Transparent glass infinity sculpture on black" />
-          <div class="card-corner"><span class="card-index">09 / 28</span></div>
-          <div class="card-foot">
-            <div class="card-code"><strong>SIGNAL/GLASS</strong><span>GLB · 7.2 MB</span></div>
-            <a class="reply-chip" href="./thread.html" data-icon="reply" aria-label="8 branches"><span>08</span></a>
-          </div>
-        </article>
-
-        <article class="form-card third blue" data-tilt>
-          <a class="card-link" href="./viewer.html" aria-label="Open STACK/BLUE"></a>
-          <img class="card-visual" src="./assets/blue-stack.jpg" alt="Cobalt modular architectural sculpture" />
-          <div class="card-corner"><span class="card-index">08 / 28</span></div>
-          <div class="card-foot">
-            <div class="card-code"><strong>STACK/BLUE</strong><span>GLB · 4.1 MB</span></div>
-            <a class="reply-chip" href="./thread.html" data-icon="reply" aria-label="3 branches"><span>03</span></a>
-          </div>
-        </article>
-
-        <article class="form-card third coral" data-tilt>
-          <a class="card-link" href="./viewer.html" aria-label="Open HARD/ORBIT"></a>
-          <div class="synthetic-art" aria-hidden="true"></div>
-          <div class="card-corner"><span class="card-index">10 / 28</span><span class="live-wave" aria-label="animated"><i></i><i></i><i></i><i></i></span></div>
-          <div class="card-foot">
-            <div class="card-code"><strong>HARD/ORBIT</strong><span>GLB · 2.3 MB</span></div>
-            <a class="reply-chip" href="./thread.html" data-icon="reply" aria-label="21 branches"><span>21</span></a>
-          </div>
-        </article>
-
-        <article class="form-card third blue" data-tilt>
-          <a class="card-link" href="./viewer.html" aria-label="Open FIELD/88"></a>
-          <div class="wire-art" aria-hidden="true"></div>
-          <div class="card-corner"><span class="card-index">11 / 28</span></div>
-          <div class="card-foot">
-            <div class="card-code"><strong>FIELD/88</strong><span>GLB · 1.7 MB</span></div>
-            <a class="reply-chip" href="./thread.html" data-icon="reply" aria-label="5 branches"><span>05</span></a>
-          </div>
-        </article>
-      </section>
-
-      <footer class="world-end">
-        <span class="micro-label">direct / open / shared</span>
-        <span class="orbit-mark" aria-hidden="true"></span>
-      </footer>
     </main>
   </div>
   <script type="module" src="./mockup.js"></script>
