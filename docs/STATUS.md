@@ -437,6 +437,22 @@ move it to **Done** with a commit reference. One agent per area.
       need live relays (verify-publish etc.) are noted but not runnable in
       this sandbox.
 
+- [x] **Draco glTF extension works end-to-end on plain-HTTP hosts** (merged
+      from `arena/01a01dfa-f0`, 2026-10-26, SPEC AMENDMENT 99): the original
+      branch claimed AMENDMENT 67, but main had already used that number for
+      the symbol library — the fix is recorded as 99 to keep the amendment
+      numbering stable. `WEB_CSP.connect-src` lacked `'self'`: Babylon's
+      DracoCodec XHRs `draco_decoder_gltf.wasm` from the page's own origin,
+      so every Draco-compressed model failed to decode on a plain-HTTP host
+      that was not literally localhost/127.0.0.1. `'self'` now covers the
+      app's own assets and replaces the two loopback wildcard exceptions.
+      The decoder imports were renamed to match Babylon's mapping while
+      main's normalized-attribute polyfill was kept. Added
+      `scripts/verify-draco.mjs` (Node-only encode→decode round-trip through
+      the app's exact decoder assets + a `connect-src 'self'` assertion),
+      `bun run check:draco`, and a `check-units.mjs` manifest entry so CI
+      runs it. Verified: 4 points / 2 faces / x ∈ [0,1] round-trip.
+
 - [x] **Studio model info + nostr `content` carries the model name + removable
       studio additions** (agent arena, 2026-08-20, SPEC AMENDMENT 66):
       - The studio upload tab shows an info card for the imported model
