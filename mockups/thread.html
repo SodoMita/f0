@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#11110f" />
+  <meta name="description" content="FORM/0 creation branch-map interface mockup." />
+  <title>FORM/0 — Thread map UI mockup</title>
+  <link rel="stylesheet" href="./mockup.css" />
+</head>
+<body class="thread-page">
+  <div class="app-shell thread-shell">
+    <aside class="app-rail" aria-label="Primary navigation">
+      <a class="logo" href="./index.html" aria-label="FORM/0 home">F<i>/</i>0</a>
+      <nav class="rail-nav">
+        <a class="rail-link icon-only" href="./index.html" data-icon="world" aria-label="world"></a>
+        <a class="rail-link active icon-only" href="./thread.html" data-icon="thread" aria-label="threads" aria-current="page"></a>
+        <a class="rail-link create icon-only" href="./studio.html" data-icon="plus" aria-label="create"></a>
+        <a class="rail-link icon-only" href="./viewer.html" data-icon="cube" aria-label="viewer"></a>
+        <button class="rail-link icon-only" type="button" data-icon="sliders" aria-label="settings"></button>
+      </nav>
+      <div class="rail-foot"><span class="signal" title="relays connected"></span><span class="player-mark">0x</span></div>
+    </aside>
+
+    <main class="thread-main">
+      <header class="thread-topbar">
+        <a class="icon-button icon-only" href="./viewer.html" data-icon="back" aria-label="Back to creation"></a>
+        <div class="thread-title"><strong>ORBIT/BLOOM</strong><span class="micro-label">12 branches / live</span></div>
+        <div class="thread-controls">
+          <button class="icon-button icon-only" type="button" data-icon="zoomout" data-zoom-out aria-label="Zoom out"></button>
+          <span class="zoom-output micro-label" data-zoom-output>85%</span>
+          <button class="icon-button icon-only" type="button" data-icon="zoomin" data-zoom-in aria-label="Zoom in"></button>
+          <button class="icon-button icon-only" type="button" data-icon="fit" data-zoom-fit aria-label="Fit map"></button>
+        </div>
+      </header>
+
+      <section class="thread-workspace" aria-label="Creation branch map">
+        <div class="thread-graph" data-thread-graph>
+          <svg class="thread-lines" viewBox="0 0 1120 760" aria-hidden="true">
+            <path d="M566 174 C566 222 194 206 194 265" />
+            <path class="active" d="M566 174 C566 220 560 218 560 265" />
+            <path d="M566 174 C566 222 926 206 926 265" />
+            <path d="M194 427 C194 474 93 474 93 540" />
+            <path d="M194 427 C194 474 280 474 280 540" />
+            <path class="active" d="M560 427 V540" />
+            <path d="M926 427 C926 474 838 474 838 540" />
+            <path d="M926 427 C926 474 1025 474 1025 540" />
+          </svg>
+
+          <article class="thread-node root">
+            <a class="node-link" href="./viewer.html" aria-label="Open root creation">
+              <img class="node-image" src="./assets/orbit-bloom.jpg" alt="Coral loop root creation" />
+              <div class="node-meta"><span>ROOT</span><span>ORBIT/07</span><span>12</span></div>
+            </a>
+            <a class="node-reply icon-only" href="./studio.html" data-icon="reply" aria-label="Respond to root"></a>
+          </article>
+
+          <article class="thread-node n1">
+            <a class="node-link" href="./viewer.html" aria-label="Open branch one">
+              <img class="node-image" src="./assets/blue-stack.jpg" alt="Blue modular branch creation" />
+              <div class="node-meta"><span>A.1</span><span>STACK</span><span>02</span></div>
+            </a>
+            <a class="node-reply icon-only" href="./studio.html" data-icon="reply" aria-label="Respond to branch A.1"></a>
+          </article>
+
+          <article class="thread-node n2">
+            <a class="node-link" href="./viewer.html" aria-label="Open active branch">
+              <img class="node-image" src="./assets/glass-signal.jpg" alt="Glass loop branch creation" />
+              <div class="node-meta"><span>B.1</span><span>SIGNAL</span><span>03</span></div>
+            </a>
+            <a class="node-reply icon-only" href="./studio.html" data-icon="reply" aria-label="Respond to branch B.1"></a>
+          </article>
+
+          <article class="thread-node n3">
+            <a class="node-link" href="./viewer.html" aria-label="Open branch three">
+              <img class="node-image" src="./assets/orbit-bloom.jpg" alt="Coral branch creation" />
+              <div class="node-meta"><span>C.1</span><span>BLOOM</span><span>02</span></div>
+            </a>
+            <a class="node-reply icon-only" href="./studio.html" data-icon="reply" aria-label="Respond to branch C.1"></a>
+          </article>
+
+          <article class="thread-node n4">
+            <a class="node-link" href="./viewer.html" aria-label="Open branch A.1.1">
+              <img class="node-image" src="./assets/glass-signal.jpg" alt="Dark glass branch creation" />
+              <div class="node-meta"><span>A.1.1</span><span>11</span></div>
+            </a>
+            <a class="node-reply icon-only" href="./studio.html" data-icon="reply" aria-label="Respond to branch A.1.1"></a>
+          </article>
+
+          <article class="thread-node n5">
+            <a class="node-link" href="./viewer.html" aria-label="Open branch A.1.2">
+              <img class="node-image" src="./assets/blue-stack.jpg" alt="Blue branch creation" />
+              <div class="node-meta"><span>A.1.2</span><span>12</span></div>
+            </a>
+            <a class="node-reply icon-only" href="./studio.html" data-icon="reply" aria-label="Respond to branch A.1.2"></a>
+          </article>
+
+          <article class="thread-node n6">
+            <a class="node-link" href="./viewer.html" aria-label="Open branch B.1.1">
+              <img class="node-image" src="./assets/orbit-bloom.jpg" alt="Coral branch creation" />
+              <div class="node-meta"><span>B.1.1</span><span>ACTIVE</span></div>
+            </a>
+            <a class="node-reply icon-only" href="./studio.html" data-icon="reply" aria-label="Respond to branch B.1.1"></a>
+          </article>
+
+          <article class="thread-node n7">
+            <a class="node-link" href="./viewer.html" aria-label="Open branch C.1.1">
+              <img class="node-image" src="./assets/blue-stack.jpg" alt="Blue branch creation" />
+              <div class="node-meta"><span>C.1.1</span><span>14</span></div>
+            </a>
+            <a class="node-reply icon-only" href="./studio.html" data-icon="reply" aria-label="Respond to branch C.1.1"></a>
+          </article>
+
+          <article class="thread-node n8">
+            <a class="node-link" href="./viewer.html" aria-label="Open branch C.1.2">
+              <img class="node-image" src="./assets/glass-signal.jpg" alt="Glass branch creation" />
+              <div class="node-meta"><span>C.1.2</span><span>15</span></div>
+            </a>
+            <a class="node-reply icon-only" href="./studio.html" data-icon="reply" aria-label="Respond to branch C.1.2"></a>
+          </article>
+        </div>
+      </section>
+
+      <div class="thread-minimap" aria-hidden="true"></div>
+      <div class="thread-legend micro-label" aria-label="Connection legend"><span><i></i>branch</span><span><i></i>active path</span></div>
+    </main>
+  </div>
+  <script type="module" src="./mockup.js"></script>
+</body>
+</html>

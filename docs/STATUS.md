@@ -775,6 +775,22 @@ move it to **Done** with a commit reference. One agent per area.
       images) and OBJ/MTL import re-exported to a single GLB. Both agent
       branches deleted after merge.
 
+- [x] **Object-first UI concept mockups** (Arena, 2026-08-18). Four standalone,
+      responsive HTML explorations in `mockups/`: world, viewer, thread map,
+      and studio. The direction combines warm museum-catalogue surfaces with
+      an ink navigation rail, coral/acid action signals, generated 3D artwork,
+      shared SVG iconography, mobile layouts, and small interactive states.
+      Image-generation studies are collected in `generated.html`. The latest
+      Aero Wire pass first generated a dedicated style reference, then supplied
+      it with the primary-page edit: one uninterrupted vertical thread of
+      different-sized, frameless 3D models with minimal transparent controls.
+      Round 05 extends Aero Wire to viewer, branch map, and studio, with
+      purpose-built portrait concepts for all four views. Round 06 removes all
+      visible language from the desktop/mobile application concepts and their
+      gallery, using consistent wire icons for every state and action
+      (`mockups/generated/round-06/`). Production Babylon scenes are
+      intentionally untouched. `npm run build` remains green.
+
 - [x] **Security audit fixes — external-URI GLB fetch, kind-5 author
       check, Blossom redirect/URL hardening, standalone CSP** (agent arena).
       See docs/SPEC.md AMENDMENTS 37–40. (1) validateGLB now rejects ANY
