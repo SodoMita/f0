@@ -65,6 +65,10 @@ newer code.
 - Nine area-specific browser probes also passed: `settings`, `transfer`,
   `network-panel`, `interact`, `orient`, `overflow-scan`, `zoom`, `shaders`,
   `perf`.
+- `node scripts/hostile-audit.mjs` against the malicious relay rig: 22 attacks
+  measured — 19 benign, 3 show the expected E201 "no relay connection" sheet
+  after a deliberate relay drop; zero crashes, zero XSS markers, zero
+  uncaught page errors.
 - `form-zero-standalone.html` boots from `file://` with a canvas and no page
   errors; Pages itself is correctly configured as `build_type: workflow`
   (`gh api repos/SodoMita/f0/pages`).
