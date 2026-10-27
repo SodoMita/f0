@@ -582,15 +582,22 @@ const fetchModel = (name) => page.evaluate(async (u) => {
   await page.waitForTimeout(400)
   const target = await page.evaluate(() => {
     const b = window.__form0.board
-    const row = b.rows.findIndex((r) => r.meta.filename === 'a.glb' && Math.abs(b.screenPosOf(b.rows.indexOf(r))?.y ?? 1e9) < 400)
-    if (row < 0) return null
-    const idx = b.rows.findIndex((r) => r.meta.filename === 'a.glb')
-    return b.screenPosOf(idx)
+    // Pick the VISIBLE a.glb row itself. The old code found a visible row but
+    // then returned the FIRST a.glb row's position (48 roots cycle the
+    // flavours), so a slow CI runner could tap a different card — e.g. the
+    // two-camera `d` model — and fail the camera assertion below.
+    const idx = b.rows.findIndex((r, i) =>
+      r.meta.filename === 'a.glb' && Math.abs(b.screenPosOf(i)?.y ?? 1e9) < 400)
+    if (idx < 0) return null
+    const pos = b.screenPosOf(idx)
+    return pos ? { ...pos, id: b.rows[idx].meta.eventId } : null
   })
   if (target) {
     await page.mouse.move(target.x, target.y)
     await page.mouse.down(); await page.waitForTimeout(80); await page.mouse.up()
-    await page.waitForFunction(() => location.hash.startsWith('#/viewer/'), null, { timeout: 10000 })
+    // Wait for THIS post, not just any viewer route, so a mis-tap cannot be
+    // reported as a camera regression.
+    await page.waitForFunction((id) => location.hash === '#/viewer/' + id, target.id, { timeout: 10000 })
     await page.waitForFunction(() => window.__form0.viewer.cameraCount > 0, null, { timeout: 30000 })
     const v = await page.evaluate(() => ({
       cameras: window.__form0.viewer.cameraCount,

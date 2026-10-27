@@ -4,6 +4,15 @@ Claim a task by moving it to **In progress** with your name/date, push, then
 move it to **Done** with a commit reference. One agent per area.
 
 ## Done
+- [x] **CI flake: viewer card-tap check could open the wrong post** (agent
+      arena, 2026-10-26): `scripts/offline-verify.mjs` looked for a VISIBLE
+      `a.glb` row but then tapped the FIRST `a.glb` row's coordinates. The
+      offline rig cycles 48 roots through seven model flavours, so on a slow
+      GitHub runner that first row was off-screen and the tap landed on a
+      two-camera `d.glb` card (`{"cameras":2,"dots":3}`) — reported as an
+      authored-camera regression. The check now uses the visible row's own
+      index, waits for that exact `#/viewer/<eventId>` route, and then asserts
+      the one-camera view. Full `bun run check` passes (all 5 suites).
 - [x] **Branch integration + deploy/build reliability** (agent arena,
       2026-10-26, SPEC AMENDMENTS 99–100): all 16 branches ahead of `main`
       were merged into this branch; five added content, eight were recorded
