@@ -36,6 +36,7 @@ const MANIFEST = {
   'error-copy-unit.mjs':  { run: ['node'],           tier: 'browser' },
   'export-card-unit.mjs': { run: ['bun'],            tier: 'unit' },
   'hash-unit.mjs':        { run: ['bun'],            tier: 'unit' },
+  'handoff-unit.mjs':     { run: ['bun'],            tier: 'unit' },
   'image-unit.mjs':       { run: ['bun'],            tier: 'unit' },
   'library-unit.mjs':     { run: ['node'],           tier: 'unit' },
   'load-unit.mjs':        { run: ['bun'],            tier: 'unit' },

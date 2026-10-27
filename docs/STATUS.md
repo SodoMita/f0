@@ -4,6 +4,20 @@ Claim a task by moving it to **In progress** with your name/date, push, then
 move it to **Done** with a commit reference. One agent per area.
 
 ## Done
+- [x] **Viewer hand-off duplicated authored cameras; CI browser job failed**
+      (agent arena, 2026-10-26, SPEC AMENDMENT 101): PR #86's `browser` job
+      failed twice on `offline-verify` with `{"cameras":2,"dots":3}` for a
+      one-camera `a.glb` post. The first fix made the card-tap test select
+      the visible row's own index and wait for that exact event id; CI still
+      failed, and added diagnostics reproduced it locally:
+      `imported: ["viewer-cam-cam-red","viewer-cam-red"]`. Root cause:
+      Babylon 8.10's `instantiateModelsToScene` already clones glTF cameras,
+      but `src/core/sceneTransfer.ts` cloned them a second time. The hand-off
+      now moves the existing clones into the viewer scene and only uses the
+      explicit clone loop as a fallback. Added `scripts/handoff-unit.mjs`
+      (19 unit files total) and made `offline-verify.mjs` force the hand-off
+      path by requesting the tapped post into the live-preview pool first.
+      Full `bun run check` green; PR #86 checks must be re-run before merge.
 - [x] **CI flake: viewer card-tap check could open the wrong post** (agent
       arena, 2026-10-26): `scripts/offline-verify.mjs` looked for a VISIBLE
       `a.glb` row but then tapped the FIRST `a.glb` row's coordinates. The

@@ -58,8 +58,10 @@ newer code.
 
 - `bun run check` (static + unit + all 5 browser suites) passed on the
   `main` baseline **and on the fully merged tree**.
-- `bun run check:unit` passes with `verify-draco.mjs` and
-  `workflow-unit.mjs` registered (18 unit files).
+- `bun run check:unit` passes with `verify-draco.mjs`,
+  `workflow-unit.mjs` and `handoff-unit.mjs` registered (19 unit files).
+  The last one guards the duplicate authored-camera hand-off bug that only
+  surfaced on slow CI runners (SPEC AMENDMENT 101).
 - `node audit/recheck.mjs` re-measured all 30 findings from issue #83 against
   the offline rig after the merges: **30 pass, 0 fail, 0 skipped**.
 - Nine area-specific browser probes also passed: `settings`, `transfer`,

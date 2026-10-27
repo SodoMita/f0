@@ -590,23 +590,53 @@ const fetchModel = (name) => page.evaluate(async (u) => {
       r.meta.filename === 'a.glb' && Math.abs(b.screenPosOf(i)?.y ?? 1e9) < 400)
     if (idx < 0) return null
     const pos = b.screenPosOf(idx)
-    return pos ? { ...pos, id: b.rows[idx].meta.eventId } : null
+    const meta = b.rows[idx].meta
+    return pos ? {
+      ...pos,
+      id: meta.eventId,
+      filename: meta.filename,
+      cameraCount: meta.cameraCount,
+      previewCamera: meta.previewCamera,
+      sha: meta.sha256?.slice(0, 8),
+    } : null
   })
   if (target) {
+    // Exercise the live-preview HAND-OFF path deliberately. The duplicate
+    // authored-camera bug only appeared when the tapped post already had a
+    // parsed container in the preview pool; on a fast runner the bytes path
+    // was taken instead and the regression slipped through. Request this
+    // exact post and wait until it is live before tapping.
+    await page.evaluate((id) => {
+      const pool = window.__form0.board.previewPool
+      if (!pool.byPost.has(id)) pool.request(id, new Set([id]))
+    }, target.id)
+    await page.waitForFunction((id) => window.__form0.board.previewPool.byPost.has(id),
+      target.id, { timeout: 30000 })
     await page.mouse.move(target.x, target.y)
     await page.mouse.down(); await page.waitForTimeout(80); await page.mouse.up()
     // Wait for THIS post, not just any viewer route, so a mis-tap cannot be
     // reported as a camera regression.
     await page.waitForFunction((id) => location.hash === '#/viewer/' + id, target.id, { timeout: 10000 })
     await page.waitForFunction(() => window.__form0.viewer.cameraCount > 0, null, { timeout: 30000 })
-    const v = await page.evaluate(() => ({
-      cameras: window.__form0.viewer.cameraCount,
-      camIndex: window.__form0.viewer.camIndex,
-      meshes: window.__form0.viewer.sceneModelMeshCount(),
-      dots: document.querySelectorAll('.cam-dot').length,
-    }))
-    check('card tap opens viewer with authored camera', v.cameras === 1 && v.camIndex === 0 && v.dots === 2,
-      JSON.stringify(v))
+    const v = await page.evaluate((id) => {
+      const f = window.__form0
+      const m = f.index.byId.get(id)
+      const viewer = f.viewer
+      return {
+        cameras: viewer.cameraCount,
+        camIndex: viewer.camIndex,
+        meshes: viewer.sceneModelMeshCount(),
+        dots: document.querySelectorAll('.cam-dot').length,
+        meta: m ? {
+          filename: m.filename, cameraCount: m.cameraCount,
+          previewCamera: m.previewCamera, sha: m.sha256?.slice(0, 8),
+        } : null,
+        imported: viewer.container?.cameras?.map((c) => c.name) ?? [],
+      }
+    }, target.id)
+    check('card tap opens viewer with authored camera',
+      v.cameras === 1 && v.meta?.cameraCount === 1 && v.camIndex === 0 && v.dots === 2,
+      JSON.stringify({ target: { id: target.id, filename: target.filename, cameraCount: target.cameraCount, sha: target.sha }, ...v }))
     check('viewer shows the model', v.meshes >= 2, `meshes=${v.meshes}`)
     await page.screenshot({ path: 'shots/verify-viewer.png' })
   } else {

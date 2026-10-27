@@ -1743,3 +1743,27 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
      native-loader/deprecation warnings, emits exactly one standalone JS
      chunk (5.20 MB HTML), and that HTML boots from `file://` with a canvas
      and no page errors.
+
+101. LIVE-PREVIEW HAND-OFF MUST NOT DUPLICATE AUTHORED CAMERAS
+     (2026-10-26): `handoffContainer` assumed Babylon's
+     `AssetContainer.instantiateModelsToScene` did not clone cameras, so it
+     also called `Camera.clone()` for every authored glTF camera. Babylon
+     8.10 DOES clone them (as `UniversalCamera`s parented to the cloned glTF
+     camera node). Opening a post that was already live-previewing therefore
+     handed the viewer TWO copies of each authored camera — measured as
+     `["viewer-cam-red","viewer-cam-cam-red"]` for a one-camera model, i.e.
+     an extra camera dot and a wrong authored-camera list. The stale
+     assumption was only visible on slow CI runners, where the tapped post
+     happened to be in the preview pool; locally the bytes path usually won.
+     Fix: detect cameras whose parent is one of the cloned nodes produced by
+     `instantiateModelsToScene`, move those clones into the target scene, and
+     keep the explicit `Camera.clone()` loop ONLY as a compatibility fallback
+     for runtimes that produce none. Preview-pool staging cameras stay
+     excluded (audit #55).
+     Guards: `scripts/handoff-unit.mjs` (NullEngine hand-off of a one-camera
+     GLB asserts exactly one camera, bound to the target scene, with none
+     left in the source) registered in `check-units.mjs`, and
+     `scripts/offline-verify.mjs` now deliberately requests the tapped post
+     into the live-preview pool before the tap so the hand-off path is always
+     exercised. Full `bun run check` passes with 19 unit files and all 5
+     browser suites.
