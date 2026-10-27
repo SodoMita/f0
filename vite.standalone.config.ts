@@ -1,6 +1,6 @@
 import { defineConfig } from 'vite'
-import base from './vite.config'
-import { STANDALONE_CSP } from './csp'
+import base from './vite.config.ts'
+import { STANDALONE_CSP } from './csp.ts'
 
 // Standalone: ONE chunk, all assets as data: URIs.
 //
@@ -36,6 +36,9 @@ export default defineConfig({
     target: 'es2022',
     cssCodeSplit: false,
     assetsInlineLimit: 100 * 1024 * 1024,
-    rollupOptions: { output: { inlineDynamicImports: true } },
+    // Rolldown (Vite 8) replaced `output.inlineDynamicImports: true` with
+    // `output.codeSplitting: false`. They mean the same thing here: exactly
+    // ONE JS chunk, which make-standalone.py asserts before inlining it.
+    rolldownOptions: { output: { codeSplitting: false } },
   },
 })

@@ -9,9 +9,12 @@
 // load. `data:` in connect-src is for the library GLBs, which the bundle
 // inlines as data: URIs in both builds. `ws:` is required by Vite's HMR
 // websocket in dev; the app itself only ever dials `wss:` relays
-// (normalizeRelay). `http://localhost:*` + `http://127.0.0.1:*` are for
-// local dev/preview only — the dev server serves the Draco wasm over plain
-// http, which `https:` alone would block.
+// (normalizeRelay). `connect-src 'self'` is required by the local Draco
+// decoder: Babylon XHRs draco_decoder_gltf.wasm from the SAME ORIGIN, so a
+// plain-HTTP deployment (dev server, LAN host, http reverse proxy) must be
+// allowed to fetch it. `'self'` also covers localhost/127.0.0.1 dev and is
+// narrower than the old `http://localhost:* http://127.0.0.1:*` exceptions:
+// it permits only the page's own origin, not every port on loopback.
 //
 // STANDALONE_CSP — the single-file build (form-zero-standalone.html, which
 // is what GitHub Pages / githack / jsDelivr mirrors serve). This file opens
@@ -27,7 +30,7 @@ export const WEB_CSP = [
   "default-src 'none'",
   "script-src 'self' 'wasm-unsafe-eval'",
   "style-src 'self' 'unsafe-inline'",
-  "connect-src https: wss: ws: blob: data: http://localhost:* http://127.0.0.1:*",
+  "connect-src 'self' https: wss: ws: blob: data:",
   "img-src 'self' blob: data: https:",
   "media-src blob: https:",
   "worker-src 'self' blob:",

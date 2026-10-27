@@ -47,7 +47,8 @@
     "check:vcolor": "node scripts/vcolor-check.mjs && node scripts/vcolor-poster.mjs && node scripts/vcolor-paint.mjs",
     "check:codec": "bun scripts/codec-unit.mjs",
     "check:codec-browser": "node scripts/codec-browser.mjs",
-    "check:overlay-order": "node scripts/overlay-order.mjs"
+    "check:overlay-order": "node scripts/overlay-order.mjs",
+    "check:draco": "node scripts/verify-draco.mjs"
   },
   "dependencies": {
     "@babylonjs/core": "8.10.1",

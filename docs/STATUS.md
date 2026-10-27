@@ -4,6 +4,44 @@ Claim a task by moving it to **In progress** with your name/date, push, then
 move it to **Done** with a commit reference. One agent per area.
 
 ## Done
+- [x] **Viewer hand-off duplicated authored cameras; CI browser job failed**
+      (agent arena, 2026-10-26, SPEC AMENDMENT 101): PR #86's `browser` job
+      failed twice on `offline-verify` with `{"cameras":2,"dots":3}` for a
+      one-camera `a.glb` post. The first fix made the card-tap test select
+      the visible row's own index and wait for that exact event id; CI still
+      failed, and added diagnostics reproduced it locally:
+      `imported: ["viewer-cam-cam-red","viewer-cam-red"]`. Root cause:
+      Babylon 8.10's `instantiateModelsToScene` already clones glTF cameras,
+      but `src/core/sceneTransfer.ts` cloned them a second time. The hand-off
+      now moves the existing clones into the viewer scene and only uses the
+      explicit clone loop as a fallback. Added `scripts/handoff-unit.mjs`
+      (19 unit files total) and made `offline-verify.mjs` force the hand-off
+      path by requesting the tapped post into the live-preview pool first.
+      Full `bun run check` green; PR #86 checks must be re-run before merge.
+- [x] **CI flake: viewer card-tap check could open the wrong post** (agent
+      arena, 2026-10-26): `scripts/offline-verify.mjs` looked for a VISIBLE
+      `a.glb` row but then tapped the FIRST `a.glb` row's coordinates. The
+      offline rig cycles 48 roots through seven model flavours, so on a slow
+      GitHub runner that first row was off-screen and the tap landed on a
+      two-camera `d.glb` card (`{"cameras":2,"dots":3}`) — reported as an
+      authored-camera regression. The check now uses the visible row's own
+      index, waits for that exact `#/viewer/<eventId>` route, and then asserts
+      the one-camera view. Full `bun run check` passes (all 5 suites).
+- [x] **Branch integration + deploy/build reliability** (agent arena,
+      2026-10-26, SPEC AMENDMENTS 99–100): all 16 branches ahead of `main`
+      were merged into this branch; five added content, eight were recorded
+      as already-integrated, and the two unrelated-root snapshot branches
+      (`site`, `salvage/dev-rewrite`) were deliberately excluded. See
+      `docs/BRANCH-INTEGRATION.md`. Real fixes landed: live previews now
+      auto-fit when an authored camera frames nothing; `WEB_CSP.connect-src
+      'self'` unblocks the local Draco decoder on plain-HTTP hosts (with a
+      Node round-trip guard in `check:unit`); the Pages deploy now uses the
+      same pinned Bun as CI, both Vite configs use explicit `.ts` imports,
+      and the standalone build uses Rolldown's `codeSplitting: false`.
+      New guard `scripts/workflow-unit.mjs` covers the deploy/config
+      contract. Verified: `bun run check` (all 5 browser suites),
+      `node audit/recheck.mjs` (30/30), nine area-specific browser probes,
+      and a `file://` standalone boot check (canvas present, no page errors).
 - [x] **Agent-browser audit (#53–#82) re-verified in the browser; 4 real
       fixes** (agent arena, 2026-09-12, SPEC AMENDMENTS 95–98): PR #84
       claimed the audit fixed but all thirty issues were still open, so every
@@ -437,6 +475,22 @@ move it to **Done** with a commit reference. One agent per area.
       need live relays (verify-publish etc.) are noted but not runnable in
       this sandbox.
 
+- [x] **Draco glTF extension works end-to-end on plain-HTTP hosts** (merged
+      from `arena/01a01dfa-f0`, 2026-10-26, SPEC AMENDMENT 99): the original
+      branch claimed AMENDMENT 67, but main had already used that number for
+      the symbol library — the fix is recorded as 99 to keep the amendment
+      numbering stable. `WEB_CSP.connect-src` lacked `'self'`: Babylon's
+      DracoCodec XHRs `draco_decoder_gltf.wasm` from the page's own origin,
+      so every Draco-compressed model failed to decode on a plain-HTTP host
+      that was not literally localhost/127.0.0.1. `'self'` now covers the
+      app's own assets and replaces the two loopback wildcard exceptions.
+      The decoder imports were renamed to match Babylon's mapping while
+      main's normalized-attribute polyfill was kept. Added
+      `scripts/verify-draco.mjs` (Node-only encode→decode round-trip through
+      the app's exact decoder assets + a `connect-src 'self'` assertion),
+      `bun run check:draco`, and a `check-units.mjs` manifest entry so CI
+      runs it. Verified: 4 points / 2 faces / x ∈ [0,1] round-trip.
+
 - [x] **Studio model info + nostr `content` carries the model name + removable
       studio additions** (agent arena, 2026-08-20, SPEC AMENDMENT 66):
       - The studio upload tab shows an info card for the imported model
@@ -758,6 +812,22 @@ move it to **Done** with a commit reference. One agent per area.
       rail (side landscape / bottom portrait), glTF sidecar (.gltf+.bin+
       images) and OBJ/MTL import re-exported to a single GLB. Both agent
       branches deleted after merge.
+
+- [x] **Object-first UI concept mockups** (Arena, 2026-08-18). Four standalone,
+      responsive HTML explorations in `mockups/`: world, viewer, thread map,
+      and studio. The direction combines warm museum-catalogue surfaces with
+      an ink navigation rail, coral/acid action signals, generated 3D artwork,
+      shared SVG iconography, mobile layouts, and small interactive states.
+      Image-generation studies are collected in `generated.html`. The latest
+      Aero Wire pass first generated a dedicated style reference, then supplied
+      it with the primary-page edit: one uninterrupted vertical thread of
+      different-sized, frameless 3D models with minimal transparent controls.
+      Round 05 extends Aero Wire to viewer, branch map, and studio, with
+      purpose-built portrait concepts for all four views. Round 06 removes all
+      visible language from the desktop/mobile application concepts and their
+      gallery, using consistent wire icons for every state and action
+      (`mockups/generated/round-06/`). Production Babylon scenes are
+      intentionally untouched. `npm run build` remains green.
 
 - [x] **Security audit fixes — external-URI GLB fetch, kind-5 author
       check, Blossom redirect/URL hardening, standalone CSP** (agent arena).

@@ -17,11 +17,15 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          # Same pin as CI and the local toolchain. `latest` can change the
+          # lockfile format or the standalone bundler between two deploys of
+          # the SAME commit — the Pages build must be reproducible.
+          bun-version-file: .bun-version
       - run: bun install --frozen-lockfile
       # Single self-contained HTML (fetches only user content at runtime).
       - run: bun run build:standalone
@@ -54,6 +58,7 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: build
     steps:
       - id: deployment

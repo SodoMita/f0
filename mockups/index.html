@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#f1eee4" />
+  <meta name="description" content="FORM/0 world — a wordless multiplayer game of 3D shapes." />
+  <title>FORM/0 — World</title>
+  <link rel="stylesheet" href="./mockup.css" />
+  <link rel="stylesheet" href="./ui-v2.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="app-rail" aria-label="Primary navigation">
+      <a class="logo icon-only" href="./index.html" data-icon="cube" aria-label="FORM/0 home"></a>
+      <nav class="rail-nav">
+        <a class="rail-link active icon-only" href="./index.html" data-icon="world" aria-label="world" aria-current="page"></a>
+        <a class="rail-link icon-only" href="./viewer.html" data-icon="orbit" aria-label="viewer"></a>
+        <a class="rail-link icon-only" href="./thread.html" data-icon="thread" aria-label="threads"></a>
+        <a class="rail-link icon-only" href="./studio.html" data-icon="shapes" aria-label="create"></a>
+      </nav>
+      <div class="rail-foot"><a class="rail-link icon-only" href="./generated.html" data-icon="sliders" aria-label="concept boards"></a><span class="signal"></span></div>
+    </aside>
+
+    <main class="world-page v2-world">
+      <header class="world-topbar">
+        <span class="brand-word">FORM<b>/0</b></span><span class="live-sup">live</span>
+        <span class="topbar-spacer"></span>
+        <div class="world-session micro-label"><span>WORLD 01</span><span><b>28</b> FORMS</span><span class="signal"></span></div>
+      </header>
+
+      <section class="gallery-board" aria-label="Live world gallery">
+        <div class="gallery-watermark" aria-hidden="true">FORM/<br>WORLD</div>
+        <div class="gallery-grid">
+          <article class="gallery-tile hero" data-tilt>
+            <a class="tile-link" href="./viewer.html" aria-label="Open ORBIT BLOOM"></a>
+            <img src="./assets/orbit-bloom.jpg" alt="Coral loop sculpture floating over a warm studio floor" />
+            <span class="tile-wire" aria-hidden="true"></span>
+            <footer class="tile-meta"><strong>F1.1</strong><span>COMPLEXITY-VAL:<br><i>24</i></span><span>GENESIS-D: 18-08-26<br>AUTHOR-SIG: F/0_ALPHA</span></footer>
+          </article>
+
+          <article class="gallery-tile blue" data-tilt>
+            <a class="tile-link" href="./viewer.html" aria-label="Open STACK BLUE"></a>
+            <img src="./assets/blue-stack.jpg" alt="Blue modular geometric sculpture" />
+            <footer class="tile-meta"><strong>F1.2</strong><span>COMPLEXITY<br><i>31</i></span><span>LIVE</span></footer>
+          </article>
+
+          <article class="gallery-tile glass" data-tilt>
+            <a class="tile-link" href="./viewer.html" aria-label="Open SIGNAL GLASS"></a>
+            <img src="./assets/glass-signal.jpg" alt="Transparent glass infinity sculpture on black" />
+            <footer class="tile-meta"><strong>F1.3</strong><span>COMPLEXITY-VAL:<br><i>57</i></span><span>GENESIS-D: 18-08-26<br>AUTHOR-SIG: F/0_GAMMA</span></footer>
+          </article>
+
+          <article class="gallery-tile mini-a"><a class="tile-link" href="./thread.html" aria-label="Open red orbit branch"></a><div class="synthetic-art"></div><footer class="tile-meta"><strong>V-15</strong><span>↩</span></footer></article>
+          <article class="gallery-tile mini-b"><a class="tile-link" href="./studio.html" aria-label="Open shape studio"></a><div class="wire-art"></div><footer class="tile-meta"><strong>V-21</strong><span>↩</span></footer></article>
+          <article class="gallery-tile mini-c"><a class="tile-link" href="./viewer.html" aria-label="Open blue form"></a><img src="./assets/blue-stack.jpg" alt="Blue form detail" /><footer class="tile-meta"><strong>F2.4</strong><span>08</span></footer></article>
+          <article class="gallery-tile mini-d"><a class="tile-link" href="./viewer.html" aria-label="Open coral form"></a><img src="./assets/orbit-bloom.jpg" alt="Coral form detail" /><footer class="tile-meta"><strong>F2.8</strong><span>11</span></footer></article>
+        </div>
+        <div class="gallery-status">SESSION: LIVE&nbsp;&nbsp;|&nbsp;&nbsp;LATENCY: 12ms&nbsp;&nbsp;|&nbsp;&nbsp;CONNECTIONS: 104</div>
+      </section>
+    </main>
+  </div>
+  <script type="module" src="./mockup.js"></script>
+</body>
+</html>

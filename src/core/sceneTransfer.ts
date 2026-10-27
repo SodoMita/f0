@@ -132,34 +132,53 @@ export function handoffContainer(
   }
 
   // ----- authored cameras -----
-  // instantiateModelsToScene clones meshes / materials / skeletons /
-  // animationGroups but NOT cameras — the GLB's authored cameras must be
-  // recreated for the viewer (camera dots + authored framing, SPEC 04 §5).
-  // Camera.clone() materialises in the source scene; move it over like any
-  // other node.
+  // Babylon 8.10's instantiateModelsToScene DOES clone authored cameras
+  // (as UniversalCameras parented to the cloned glTF camera node), even
+  // though older versions did not. Detect those clones and MOVE them into
+  // the target scene. Explicitly cloning them as well used to ship TWO
+  // copies of every authored camera on the hand-off path — e.g.
+  // "viewer-cam-red" + "viewer-cam-cam-red" — so the viewer showed an extra
+  // camera dot and a wrong authored-camera list for a one-camera model.
+  const clonedNodes = new Set<Node>()
+  for (const root of entries.rootNodes) {
+    clonedNodes.add(root)
+    for (const child of root.getDescendants(false)) clonedNodes.add(child)
+  }
   const cameraClones: Camera[] = []
-  for (const cam of source.cameras) {
-    // Hand off only cameras that belong to the MODEL's node tree. The
-    // preview pool keeps its own parentless staging cameras ("slot-cam-N")
-    // in the same scene; cloning those produced ghost camera dots that
-    // seeded the orbit from the world origin — the view ended up INSIDE the
-    // model ("authored-camera switch does not change the view", audit #55).
-    // A glTF camera is always a node's camera, so a model camera's parent is
-    // always in cloneOfSrc.
-    const srcParent = (cam as Node).parent
-    if (!srcParent || !cloneOfSrc.has(srcParent)) continue
-    // Camera.clone() copies the LOCAL transform but NOT the parent: an
-    // imported camera hangs under its node (all its pose lives in that
-    // parent), so re-parent the clone to the parent's clone or it collapses
-    // to the origin.
-    const clone = cam.clone(`${nameHint}-cam-${cam.name}`)
-    if (!clone) continue
-    clone.parent = cloneOfSrc.get(srcParent) ?? null
-    sourceScene.removeCamera(clone)
-    ;(clone as unknown as { _scene: Scene })._scene = targetScene
-    targetScene.addCamera(clone)
-    cameraClones.push(clone)
-    ;(clone as unknown as { computeWorldMatrix: (force?: boolean) => unknown }).computeWorldMatrix(true)
+  for (const cam of [...sourceScene.cameras]) {
+    // Only a camera produced by instantiateModelsToScene is parented to a
+    // CLONED node. The source model's own cameras are parented to source
+    // nodes (not in clonedNodes), and the preview pool's staging cameras
+    // ("slot-cam-N") are parentless — cloning those produced ghost camera
+    // dots that seeded the orbit from the world origin (audit #55).
+    const parent = (cam as Node).parent
+    if (!parent || !clonedNodes.has(parent)) continue
+    sourceScene.removeCamera(cam)
+    ;(cam as unknown as { _scene: Scene })._scene = targetScene
+    targetScene.addCamera(cam)
+    cameraClones.push(cam)
+    ;(cam as unknown as { computeWorldMatrix: (force?: boolean) => unknown }).computeWorldMatrix(true)
+  }
+  if (cameraClones.length === 0) {
+    // Compatibility fallback for a Babylon that does NOT clone cameras in
+    // instantiateModelsToScene. Camera.clone() materialises in the source
+    // scene; move it over like any other node.
+    for (const cam of source.cameras) {
+      const srcParent = (cam as Node).parent
+      if (!srcParent || !cloneOfSrc.has(srcParent)) continue
+      // Camera.clone() copies the LOCAL transform but NOT the parent: an
+      // imported camera hangs under its node (all its pose lives in that
+      // parent), so re-parent the clone to the parent's clone or it
+      // collapses to the origin.
+      const clone = cam.clone(`${nameHint}-cam-${cam.name}`)
+      if (!clone) continue
+      clone.parent = cloneOfSrc.get(srcParent) ?? null
+      sourceScene.removeCamera(clone)
+      ;(clone as unknown as { _scene: Scene })._scene = targetScene
+      targetScene.addCamera(clone)
+      cameraClones.push(clone)
+      ;(clone as unknown as { computeWorldMatrix: (force?: boolean) => unknown }).computeWorldMatrix(true)
+    }
   }
   // Lights: instantiateModelsToScene does not clone lights either; the
   // byte-loading path (LoadAssetContainerAsync -> addAllToScene) keeps

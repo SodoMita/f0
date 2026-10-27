@@ -1694,3 +1694,76 @@ AMENDMENTS (2026-08-16, decided during implementation — override earlier wordi
     sideways scroll, button targets ≥ 30 px, measured on the ANIMATED rig
     flavour because it is the only one that populates the animation rail (the
     widest bar in the viewer).
+
+99. SAME-ORIGIN DRACO DECODER FETCHES ARE ALLOWED ON PLAIN HTTP
+    (2026-10-26, merged from `arena/01a01dfa-f0`): AMENDMENT 68 fixed the
+    `wasm-unsafe-eval` half of Draco loading, but `WEB_CSP.connect-src` still
+    listed only `https: wss: ws: blob: data:` plus explicit
+    `http://localhost:* http://127.0.0.1:*` exceptions. Babylon's DracoCodec
+    XHRs `draco_decoder_gltf.wasm` from the page's OWN origin, so the web
+    build failed to decode every Draco-compressed model on a plain-HTTP host
+    that was not literally localhost/127.0.0.1 (LAN preview, http reverse
+    proxy, embedded device). `connect-src 'self'` now covers the app's own
+    wasm/js assets on both http and https; it also replaces the two loopback
+    wildcard exceptions (`'self'` is narrower — the page's exact origin, not
+    every port on loopback). `data:` stays for the inlined library GLBs; the
+    standalone CSP is unchanged because its assets are data: URIs at an
+    opaque file:// origin.
+    The three decoder imports in `src/model/draco.ts` were also renamed to
+    match Babylon's configuration (`wasmUrl` = the JS wrapper,
+    `wasmBinaryUrl` = the wasm binary, `fallbackUrl` = the JS decoder), while
+    keeping main's normalized-attribute polyfill (AMENDMENT 74).
+    Guards: `scripts/verify-draco.mjs` now asserts `connect-src 'self'` is
+    present in WEB_CSP AND round-trips a real quad (4 points / 2 faces,
+    x ∈ [0,1]) through the app's exact encoder/decoder assets. It is wired
+    into `check:unit` through `scripts/check-units.mjs` and is also available
+    as `bun run check:draco`.
+
+100. DEPLOY + BUILDS ARE REPRODUCIBLE AND FORWARD-COMPATIBLE
+     (2026-10-26): the standalone HTML is the deployed site, so a build
+     warning is a production risk, not cosmetic. Three issues were fixed
+     together:
+     - `.github/workflows/deploy-pages.yml` installed `bun-version: latest`
+       while `ci.yml` and `.bun-version` were pinned to 1.4.0. The same
+       commit could therefore pass CI with one bundler and deploy with
+       another. The deploy job now uses `bun-version-file: .bun-version`
+       and both jobs have bounded `timeout-minutes`.
+     - `vite.config.ts` and `vite.standalone.config.ts` imported `./csp` and
+       `./vite.config` without extensions. Vite 8's upcoming native config
+       loader rejects that form; they now import `./csp.ts` and
+       `./vite.config.ts`.
+     - `build.rollupOptions.output.inlineDynamicImports: true` is deprecated
+       in Rolldown. The standalone config now sets
+       `build.rolldownOptions.output.codeSplitting: false`, which has the
+       same single-chunk contract that `make-standalone.py` asserts.
+     Guard: `scripts/workflow-unit.mjs` (registered in `check-units.mjs`)
+     asserts the shared Bun pin, frozen installs, Pages artifact contract,
+     job timeouts, explicit config extensions and the non-deprecated
+     single-chunk option. Measured: `bun run check:static` prints zero
+     native-loader/deprecation warnings, emits exactly one standalone JS
+     chunk (5.20 MB HTML), and that HTML boots from `file://` with a canvas
+     and no page errors.
+
+101. LIVE-PREVIEW HAND-OFF MUST NOT DUPLICATE AUTHORED CAMERAS
+     (2026-10-26): `handoffContainer` assumed Babylon's
+     `AssetContainer.instantiateModelsToScene` did not clone cameras, so it
+     also called `Camera.clone()` for every authored glTF camera. Babylon
+     8.10 DOES clone them (as `UniversalCamera`s parented to the cloned glTF
+     camera node). Opening a post that was already live-previewing therefore
+     handed the viewer TWO copies of each authored camera — measured as
+     `["viewer-cam-red","viewer-cam-cam-red"]` for a one-camera model, i.e.
+     an extra camera dot and a wrong authored-camera list. The stale
+     assumption was only visible on slow CI runners, where the tapped post
+     happened to be in the preview pool; locally the bytes path usually won.
+     Fix: detect cameras whose parent is one of the cloned nodes produced by
+     `instantiateModelsToScene`, move those clones into the target scene, and
+     keep the explicit `Camera.clone()` loop ONLY as a compatibility fallback
+     for runtimes that produce none. Preview-pool staging cameras stay
+     excluded (audit #55).
+     Guards: `scripts/handoff-unit.mjs` (NullEngine hand-off of a one-camera
+     GLB asserts exactly one camera, bound to the target scene, with none
+     left in the source) registered in `check-units.mjs`, and
+     `scripts/offline-verify.mjs` now deliberately requests the tapped post
+     into the live-preview pool before the tap so the hand-off path is always
+     exercised. Full `bun run check` passes with 19 unit files and all 5
+     browser suites.

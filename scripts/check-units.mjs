@@ -30,9 +30,13 @@ const MANIFEST = {
   'anim-unit.mjs':        { run: ['bun'],            tier: 'unit' },
   'codec-unit.mjs':       { run: ['bun'],            tier: 'unit' },
   'direct3d-unit.mjs':    { run: ['bun'],            tier: 'unit' },
+  // Node-only Draco asset round-trip + CSP guard (no *-unit.mjs suffix for
+  // historical reasons; still part of the unit tier and therefore CI).
+  'verify-draco.mjs':     { run: ['node'],           tier: 'unit' },
   'error-copy-unit.mjs':  { run: ['node'],           tier: 'browser' },
   'export-card-unit.mjs': { run: ['bun'],            tier: 'unit' },
   'hash-unit.mjs':        { run: ['bun'],            tier: 'unit' },
+  'handoff-unit.mjs':     { run: ['bun'],            tier: 'unit' },
   'image-unit.mjs':       { run: ['bun'],            tier: 'unit' },
   'library-unit.mjs':     { run: ['node'],           tier: 'unit' },
   'load-unit.mjs':        { run: ['bun'],            tier: 'unit' },
@@ -44,6 +48,7 @@ const MANIFEST = {
   'spatial-unit.mjs':     { run: ['bun'],            tier: 'unit' },
   'studio-unit.mjs':      { run: ['bun'],            tier: 'unit' },
   'thread-open-unit.mjs': { run: ['bun'],            tier: 'unit' },
+  'workflow-unit.mjs':    { run: ['node'],           tier: 'unit' },
 }
 
 const TIER = process.env.TIER || 'unit'
